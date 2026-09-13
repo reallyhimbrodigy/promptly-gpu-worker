@@ -40,6 +40,17 @@ fail = 0
 type_keys = None
 emitted = set()
 for n in ast.walk(tree):
+    # READ THE ONE DECLARATION, NOT THE USE SITE. `_TYPE` was a dict literal
+    # inside execute_plan and is now `dict(BUILT_FAMILIES)` — hoisted so the
+    # grader and the builder cannot hold different ideas of what gets built.
+    # Matching only the literal made this smoke exit "table not found" the
+    # moment the duplication it exists to prevent was actually removed: a
+    # check that fails when its subject IMPROVES is calibrated on a spelling.
+    if (isinstance(n, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "BUILT_FAMILIES"
+            for t in n.targets) and isinstance(n.value, ast.Dict)):
+        type_keys = {k.value for k in n.value.keys
+                     if isinstance(k, ast.Constant)}
     if (isinstance(n, ast.Assign) and any(
             isinstance(t, ast.Name) and t.id == "_TYPE" for t in n.targets)
             and isinstance(n.value, ast.Dict)):
@@ -58,7 +69,8 @@ for n in ast.walk(tree):
                 emitted.add(v.value)
 
 if type_keys is None:
-    print("  *** the placement _TYPE table was not found — nothing can be checked")
+    print("  *** neither BUILT_FAMILIES nor a placement _TYPE table was found "
+          "— nothing can be checked, which is ABSENT, not passing")
     sys.exit(1)
 if not emitted:
     print("  *** no steps.append({'step': <literal>}) found — the emitter moved")

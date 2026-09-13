@@ -35,24 +35,25 @@ def check(label, cond, detail=""):
           + (f"\n         {detail}" if not cond and detail else ""))
 
 
-_ns = {"json": json, "os": os, "prefix_material_enabled": lambda n: True,
-       "_REFERENCE_INDEX_PATH": os.path.abspath("reference_index.json")}
-for _n in tree.body:
-    if isinstance(_n, ast.Assign):
-        if "_REFERENCE_INDEX_PATH" in [getattr(_x, "id", "")
-                                       for _t in _n.targets
-                                       for _x in ast.walk(_t)]:
-            continue
-        try:
-            exec(compile(ast.Module([_n], []), "<c>", "exec"), _ns)
-        except Exception:                                     # noqa: BLE001
-            pass
-for _n in tree.body:
-    if isinstance(_n, ast.FunctionDef):
-        try:
-            exec(compile(ast.Module([_n], []), "<c>", "exec"), _ns)
-        except Exception:                                     # noqa: BLE001
-            pass
+# ── DRIVE THE REAL MODULE, NOT AN AST REPLICA ───────────────────────────────
+# This used to rebuild the module by exec'ing its top-level nodes into a bare
+# namespace, one at a time, swallowing every failure. That is a SECOND LOADER
+# with no relationship to the one the container uses: a literal that calls a
+# helper defined further down (KNOWLEDGE_TOOLS needs FAMILY_CORPUS_CRAFT, which
+# is a call) raised on the one pass it got, was swallowed, and the function
+# under test then died with `NameError: KNOWLEDGE_TOOLS` from INSIDE the
+# subject — a missing fixture reported as a defect in the code being tested.
+# Iterating the replica to a fixpoint patches the symptom and keeps the second
+# loader. Importing removes it, and is what "exercise the shipped path" means.
+import modal_stub                                                # noqa: E402
+modal_stub.install()
+import agentic_editor_app as _APP                                 # noqa: E402
+_ns = vars(_APP)
+check("the tool schemas are bound — without them `_rulable_treatments` dies "
+      "with a NameError inside the subject and a missing FIXTURE reads as a "
+      "defect in the code under test",
+      bool(_ns.get("KNOWLEDGE_TOOLS")) and bool(_ns.get("TOOLS")))
+
 check("the block function is drivable", "_reference_block" in _ns)
 if "_reference_block" not in _ns:
     print("\nPURPOSE-JOIN: FAIL"); sys.exit(1)

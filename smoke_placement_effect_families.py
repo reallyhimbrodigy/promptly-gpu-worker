@@ -85,13 +85,28 @@ if _ep:
 # The families execute_plan can DECLARE into the manifest. Read from the app's
 # own _TYPE map rather than restated here, so a family added later is covered
 # without anyone remembering to update this list.
-_type_map = {}
-for n in ast.walk(_ep) if _ep else []:
+# A SET, NOT A DICT. When the `_TYPE` dict literal stopped existing (it is now
+# `dict(BUILT_FAMILIES)`), this stayed `{}` — an empty DICT — and the loop 15
+# lines below died with `unsupported operand type(s) for -: 'dict' and 'set'`.
+# The check that was supposed to catch the unparsed map sat right there and
+# reported the failure AFTER the crash. An initial value of the wrong type
+# turns a clean "could not read it" into a traceback about something else.
+_type_map = set()
+# WALK THE MODULE, NOT execute_plan. BUILT_FAMILIES is module-level — the
+# whole point of hoisting it — so a walk scoped to the function that USES it
+# finds nothing and reports "parsed set()", which is an ABSENT subject wearing
+# a parse failure's clothes. The subject moved out of the scope this looked in.
+for n in ast.walk(tree):
+    # THE ONE DECLARATION. `_TYPE` inside execute_plan is now
+    # `dict(BUILT_FAMILIES)`, hoisted so the builder and the grader cannot hold
+    # different ideas of what gets built — so read BUILT_FAMILIES, and keep the
+    # literal form working for anything that still spells it out.
     if isinstance(n, ast.Assign) and any(
-            isinstance(t, ast.Name) and t.id == "_TYPE" for t in n.targets):
+            isinstance(t, ast.Name) and t.id in ("_TYPE", "BUILT_FAMILIES")
+            for t in n.targets):
         if isinstance(n.value, ast.Dict):
             _type_map = {k.value for k in n.value.keys
-                         if isinstance(k, ast.Constant)}
+                         if isinstance(k, ast.Constant)} or _type_map
 check("the declaring families were read from the app's own _TYPE map",
       bool(_type_map), f"parsed {_type_map!r}")
 

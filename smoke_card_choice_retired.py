@@ -41,10 +41,20 @@ def check(label, cond, detail=""):
 _schema = json.dumps(list(A.TOOLS) + list(A.KNOWLEDGE_TOOLS))
 check("the 29-name enum has NOT come back", '"card_type"' not in _schema,
       "offering 29 bare names produced 1 distinct of 29 for five rounds")
-check("the prop table the agent read has NOT come back",
-      '"card_props"' not in _schema,
-      "the agent cannot supply a component's props when it does not pick the "
-      "component")
+# REVERSED BY THE MERGE RULING (2026-09-12). This asserted card_props stayed
+# gone. Builder-2 measured the other half — the BUILDER reads card_props at two
+# sites and no schema offered it, so the prop table had never once been
+# exercised, and the catalogue was reachable two components wide until props and
+# card_condition widened it to ten. Zac took the five-argument derive_card_type.
+# WHAT WAS ACTUALLY RETIRED IS THE CHOICE, not the content: the agent describes
+# what the card is ABOUT (hero, props, condition) and the component is still
+# derived. card_type — the 29-name enum — is the thing that must never return,
+# and that leg is directly above this one.
+check("card_props is offered again, and this is the ruling, not drift",
+      '"card_props"' in _schema,
+      "a consumer with no producer: the builder reads it and nothing can send it")
+check("but the agent still does not NAME the component — props may only "
+      "identify one they uniquely own", '"card_type"' not in _schema)
 check("the agent still names the PHRASE worth stamping", '"card_hero"' in _schema,
       "that judgement cannot be derived — it is the zoom_arc half")
 check("the derivation exists", callable(getattr(A, "derive_card_type", None))
@@ -76,5 +86,6 @@ if fails:
     for f in fails:
         print("  - " + f)
     sys.exit(1)
-print("CARD-CHOICE-RETIRED: PASS — the enum and the agent-facing prop table are "
-      "gone; the catalogue, claims and prop shapes remain for the harness")
+print("CARD-CHOICE-RETIRED: PASS — the 29-name enum is gone and stays gone; "
+      "card_hero/card_props/card_condition describe the card and the component "
+      "is still DERIVED")

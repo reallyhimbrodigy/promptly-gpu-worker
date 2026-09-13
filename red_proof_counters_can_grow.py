@@ -40,6 +40,22 @@ MUTATIONS = [
     ("a whole class stops being used by any row", CENSUSNAME,
      "| **NO WIRE — FIXED 2026-09-11** |", "| UNREACHED |",
      "class is actually used by a row"),
+    # THE READER DENOMINATOR. Both reader zeros had ONE cause: every run was
+    # Haiku and the judgment-only filter strips them, so the counters were
+    # offered in 0 of 37 runs. A zero without its chances is not a measurement.
+    ("the reader denominator stops being recorded", APPNAME,
+     '    led["readers_offered"] = sorted(',
+     '    _dropped_offered = sorted(',
+     "readers_offered"),
+    ("the denominator is ledgered but never printed", APPNAME,
+     '    print("  READERS         : offered %s   withheld %s%s"',
+     '    print("  readers_renamed : offered %s   withheld %s%s"',
+     "PRINTED"),
+    ("the denominator is restated from the model name instead of read off the "
+     "tool list the agent actually got", APPNAME,
+     '        {t.get("name") for t in tools} & _READERS)',
+     '        (set() if _judgment_only else _READERS))',
+     "read off the tool list itself"),
 ]
 
 

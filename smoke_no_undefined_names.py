@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
-"""pyflakes over the lane's run-breaking classes.
+"""No undefined name, no BRANCH-BOUND read, no duplicate dict key.
+
+THE DOCSTRING USED TO SAY "no use-before-assignment" AND PYFLAKES DOES NOT
+DELIVER THAT. Verified by running it on the exact shape that collected 5/5
+ok=False on round 66 — a name assigned only inside the `else:` arm of a
+conditional, read unconditionally below it. `python3 -m pyflakes` exits 0.
+It sees a name never assigned; it does not see one assigned on only some
+paths. This lane lost a whole round to it with 108 green smokes and four
+import-time certs, because nothing in the lane calls `edit()` — and I then
+failed four attempts at a static check of my own (79, 34, 1326 and "many"
+false positives) and dropped it rather than ship a checker that cries wolf.
+Builder-2's `branch_bound_reads` is the one that discriminates, RED-proven
+below on the shape it exists for AND on the two correct idioms it must not
+flag.
+
+So this gate runs `branch_bound_reads` from the app beside pyflakes, and the
+docstring says what the gate actually does.
 
 CLAUDE.md HAS RECORDED SINCE 2026-08-27 that a cert reasons about text and
 only pyflakes sees scope — and nothing was ever wired to run it. `_k6_total`
@@ -68,4 +84,49 @@ print(f"smoke_no_undefined_names: {len(FILES)} file(s), {fail} FATAL, "
 if tol_n > BASELINE_TOLERATED:
     print(f"  NOTE: tolerated findings grew {BASELINE_TOLERATED} -> {tol_n}. "
           f"Not fatal, not invisible.")
-sys.exit(1 if fail else 0)
+
+# ── THE CLASS PYFLAKES CANNOT SEE ─────────────────────────────────────────
+# Driven from the app so the check exercises the SHIPPED rule, not a copy of
+# it. Merged in from lane/duration-producer 2026-09-12; the `check`/`fails`
+# scaffolding it was written against does not exist in this file, so it is
+# wired to this file's own `fail` counter rather than pasted in hopefully.
+import pathlib                                                  # noqa: E402
+import modal_stub                                               # noqa: E402
+modal_stub.install()
+import agentic_editor_app as _AA_BB                             # noqa: E402
+
+
+def check(what, passed, detail=""):
+    global fail
+    if not passed:
+        print(f"  *** {what}" + (f"  [{detail}]" if detail else ""))
+        fail += 1
+
+
+_bb = _AA_BB.branch_bound_reads(pathlib.Path("agentic_editor_app.py").read_text())
+check("no local is assigned in ONE arm of a conditional and read below it — "
+      "the shape that collected 5/5 ok=False on round 66 and that pyflakes "
+      "exits 0 on",
+      not _bb,
+      "; ".join("%s(): %s stored line %d, read line %d" % _r for _r in _bb))
+
+# AND THE RULE ITSELF MUST STILL DISCRIMINATE. A checker that flags nothing
+# is indistinguishable from one that is switched off, so drive it on the
+# shape it exists for and on the correct idioms it must not flag.
+_DANGER = "def f(x):\n    if x:\n        y = 1\n    return y\n"
+_GUARD  = "def f(x):\n    if x:\n        y = 1\n    else:\n        return 0\n    return y\n"
+_BOTH   = "def f(x):\n    if x:\n        y = 1\n    else:\n        y = 2\n    return y\n"
+check("it fires on a name bound in only one arm and read below",
+      bool(_AA_BB.branch_bound_reads(_DANGER)))
+check("it does NOT fire on the early-return guard — a checker that cries "
+      "wolf on a correct idiom gets switched off, and then the class returns",
+      not _AA_BB.branch_bound_reads(_GUARD))
+check("and not when both arms assign, which is always bound",
+      not _AA_BB.branch_bound_reads(_BOTH))
+
+if fail:
+    print("NO-UNDEFINED-NAMES: FAIL")
+    sys.exit(1)
+print("NO-UNDEFINED-NAMES: PASS — %d file(s), zero run-breaking warnings, "
+      "every remaining class named, and the branch-bound rule RED-proven"
+      % len(FILES))

@@ -23,6 +23,8 @@ surface and the code, or the next person to add a convenience helper quietly
 restores a family with a per-second bill behind it.
 """
 import ast
+import json
+import pathlib
 import sys
 
 SRC = open("agentic_editor_app.py", encoding="utf-8").read()
@@ -44,11 +46,20 @@ ok(fams is not None, "_TREATMENT_FAMILIES is gone")
 # SIX now: `transition` joined when the seam-dressing family was wired. The
 # count is asserted so a family cannot quietly leave, and the MEMBERS are
 # asserted so it cannot quietly change identity either.
+# RULED 2026-09-12 (merge of lane/duration-producer into lane/agentic-editor):
+# cutaway STAYS LIVE. It is 47% of Zac's reference beats and the mechanism
+# behind the shot-change gap, and the 0-built each lane cited as evidence for
+# retiring it was measured on the OTHER lane — where cutaway was rulable and
+# the BUILDER was broken (an unsubstituted {IN} read by ffmpeg as a second
+# scale input). Each lane read the other's zero as evidence for its own state.
+# The merged tree carries SEVEN, and this asserts seven exactly: "six or seven"
+# was the right leg while the merge was in flight and is a loosened check now
+# that it has landed.
 ok(set(fams or []) == {"card", "text", "sfx", "zoom", "cutaway",
                        "transition", "none"},
-   f"the treatment families are {sorted(fams or [])}, not the seven expected — "
-   f"a family that leaves this list stops being rulable while every other "
-   f"surface still mentions it")
+   f"the treatment families are {sorted(fams or [])}, not the seven the merged "
+   f"tree carries — a family that leaves this list stops being rulable while "
+   f"every other surface still mentions it")
 
 
 # GRADED, because the family builds. The 09-06 removal took the rate out on the
@@ -213,7 +224,7 @@ classes = _top.get("UNSUPPORTED_CLASSES") or ()
 ok(set(classes) == {"generate_footage", "change_in_frame"},
    f"UNSUPPORTED_CLASSES changed: {classes}")
 
-_ns = {}
+_ns = {"re": __import__("re")}
 for _n in TREE.body:
     if isinstance(_n, ast.Assign) and getattr(_n.targets[0], "id", "") in (
             "SPEC_MODES", "SPEC_FAMILIES", "UNSUPPORTED_CLASSES",
@@ -224,7 +235,7 @@ for _n in TREE.body:
 for _n in TREE.body:
     if isinstance(_n, ast.Assign) and getattr(_n.targets[0], "id", "").startswith(
             ("ROUTE_", "ROUTES_", "_ADDITIVE_MARKERS", "_ROUTE_COST",
-             "_PLAN_KIND_INSERT")):
+             "_PLAN_KIND_INSERT", "_CARD_FIGURE")):
         exec(compile(ast.Module([_n], []), "<s>", "exec"), _ns)
 for _fname in ("normalize_spec", "capability_route", "route_cost"):
     _f = next((n for n in TREE.body
@@ -251,6 +262,162 @@ ok("cutaway" in _ns["SPEC_FAMILIES"],
    "cutaway is not in SPEC_FAMILIES — 'redo the cutaway on beat 4' could not "
    "be scoped, and a re-edit that cannot name the family it is changing "
    "re-runs the whole edit")
+
+# ── A COPY FAULT IS NOT A CATALOGUE GAP ─────────────────────────────────────
+# derive_card_type returns None for two reasons and only one is a catalogue
+# gap. A hero of six words is the agent writing a sentence into a card field;
+# offering author_component for it spends a render round-trip on a copy edit.
+_dct = next((n for n in TREE.body
+             if isinstance(n, ast.FunctionDef) and n.name == "derive_card_type"), None)
+if _dct is not None:
+    exec(compile(ast.Module([_dct], []), "<s>", "exec"), _ns)
+_d = _ns.get("derive_card_type")
+ok(callable(_d), "derive_card_type is not importable")
+if callable(_d):
+    ok(_d("10")[0] == "StatCard", "a figure does not derive StatCard")
+    ok(_d("HOURS TO EDIT")[0] == "PullQuote", "a short phrase does not derive PullQuote")
+    _long = _d("TEN TIMES A DAY TAKES HOURS")
+    ok(_long[0] is None, "a six-word hero is given a component")
+    ok(_long[1].startswith("HERO_TOO_LONG"),
+       "a too-long hero is not MARKED as a copy fault, so the caller cannot "
+       "tell it from a catalogue gap and offers authoring for both")
+    ok("Shorten it" in _long[1] or "shorten" in _long[1].lower(),
+       "the too-long refusal does not say what to do instead")
+    # EVERY OBSERVED HERO IS ONE WORD; the trigger needs six. If the boundary
+    # ever moves, this is the leg that notices.
+    ok(_d("a b c d e")[0] == "PullQuote" and _d("a b c d e f")[0] is None,
+       "the five-word boundary moved — AUTHORING_VERDICT.md's reachability "
+       "argument is measured against it")
+# THE BRANCH, not the word: "hero_too_long" appears in the skip, the tally and
+# the code field, so its presence says nothing about whether the distinction is
+# actually made. Read the assignment that makes it.
+_tl = [n for n in ast.walk(TREE) if isinstance(n, ast.Assign)
+       and any(getattr(t, "id", "") == "_too_long" for t in n.targets)
+       and "HERO_TOO_LONG" in ast.unparse(n.value)]
+ok(bool(_tl),
+   "nothing derives _too_long from the HERO_TOO_LONG marker, so the skip "
+   "cannot distinguish a copy fault from a catalogue gap and offers authoring "
+   "for both")
+# ── THE CATALOGUE'S OWN CONDITIONS, DERIVED NOT TYPED ───────────────────────
+_mgc = next((n for n in TREE.body
+             if isinstance(n, ast.FunctionDef) and n.name == "mg_conditions"), None)
+ok(_mgc is not None, "mg_conditions does not exist")
+if _mgc is not None:
+    import subprocess as _sp
+    _r = _sp.run([sys.executable, "-c",
+                  "import modal_stub;modal_stub.install();"
+                  "import agentic_editor_app as A;"
+                  "st,d,w=A.mg_conditions();"
+                  "print(st);print(len(d));"
+                  "print(sum(len(v) for v in d.values()));"
+                  "print(sorted(A.VALID_MG_TYPES-{c for v in d.values() for c in v}))"],
+                 capture_output=True, text=True)
+    _out = (_r.stdout or "").splitlines()
+    ok(len(_out) >= 4 and _out[0] == "MEASURED",
+       "mg_conditions does not read the catalogue: %r" % (_r.stdout + _r.stderr)[:200])
+    if len(_out) >= 4:
+        ok(int(_out[1]) == 8,
+           "the catalogue's condition headings changed count (%s, expected 8) — "
+           "CARD_CATALOGUE_REACH.md's group-A argument is measured against them"
+           % _out[1])
+        ok(int(_out[2]) >= 26,
+           "fewer components are documented under a condition than the 26 the "
+           "reach census was taken over (%s)" % _out[2])
+        ok("DeviceMockup" in _out[3] and "EmojiCard" in _out[3],
+           "the undocumented components changed — the reach census names "
+           "exactly which have no catalogue entry: %s" % _out[3])
+# ── THE CARD CATALOGUE IS REACHABLE BEYOND TWO ──────────────────────────────
+for _fn in ("mg_unique_prop_owner", "condition_components"):
+    _f = next((n for n in TREE.body
+               if isinstance(n, ast.FunctionDef) and n.name == _fn), None)
+    if _f is not None:
+        exec(compile(ast.Module([_f], []), "<s>", "exec"), _ns)
+import subprocess as _sp2
+_probe = _sp2.run([sys.executable, "-c", """
+import modal_stub, json; modal_stub.install(); import agentic_editor_app as A
+lang = sorted({A.derive_card_type('a claim', condition=c)[0]
+               for c in A.MG_CONDITION_ENUM} - {None}) + ['StatCard']
+props = sorted({A.derive_card_type('x', card_props={k: [1]})[0]
+                for k in A.MG_UNIQUE_PROP_OWNER} - {None})
+json.dump({'n_cond': len(A.MG_CONDITION_ENUM), 'lang': sorted(set(lang)),
+           'props': props,
+           'conflict': A.derive_card_type('x', condition='WHEN A NUMBER LANDS',
+                                          card_props={'messages': [1]})[1][:30],
+           'ambig': A.derive_card_type('x', card_props={'messages': [1], 'notes': [1]})[1][:16],
+           'cond_ambig': A.derive_card_type('a claim',
+                         condition='WHEN TIME OR SEQUENCE IS THE STORY')[1][:19],
+           'no_cond': A.derive_card_type('a claim')[0]}, __import__('sys').stdout)
+"""], capture_output=True, text=True)
+try:
+    _pr = json.loads(_probe.stdout or "{}")
+except Exception:
+    _pr = {}
+ok(bool(_pr), "the card-reach probe did not run: %r" % (_probe.stderr or "")[:200])
+if _pr:
+    ok(_pr["n_cond"] == 8, "the condition enum is not 8 wide: %s" % _pr["n_cond"])
+    ok(len(_pr["lang"]) >= 5,
+       "fewer than 5 components are reachable from language alone (%s) — the "
+       "catalogue was two wide and the condition field is what widened it"
+       % _pr["lang"])
+    ok(len(_pr["props"]) >= 10,
+       "fewer than 10 components are reachable by sending content props (%s) — "
+       "the prop table was offered by NO schema, which is why it had never "
+       "been exercised" % len(_pr["props"]))
+    ok(_pr["no_cond"] == "PullQuote",
+       "omitting the condition changed the existing answer — every plan and "
+       "ruling written before this must still derive what it derived")
+    ok(_pr["conflict"].startswith("PROPS_CONDITION_CONFLICT"),
+       "props naming a component the condition does not cover is silently "
+       "resolved instead of refused")
+    ok(_pr["ambig"].startswith("PROPS_AMBIGUOUS"),
+       "props for two components are silently resolved to one")
+    ok(_pr["cond_ambig"].startswith("CONDITION_AMBIGUOUS"),
+       "a condition with two bare-phrase components picks one on a proxy "
+       "instead of naming the choices — two derivations of primacy were tried "
+       "and both picked the VARIANT over the primary")
+# OFFERED, NOT JUST READ. card_props was read by the builder at two sites and
+# exposed by no schema — a consumer with no producer, which is the whole reason
+# "the prop table has never been exercised" was never a judgement the agent
+# made. Read the schemas, not the source.
+_cp_offered = any("card_props" in json.dumps(_t)
+                  for _t in (_ns.get("KNOWLEDGE_TOOLS") or []))
+if not _cp_offered:
+    # THE PROPERTY KEY, NOT A SUBSTRING OF THE JSON. Renaming the field to
+    # `_card_props_unused` kept `card_props` as a substring and the leg passed
+    # while the field was gone — the fifth time today a presence test has been
+    # satisfied by a name that no longer means anything.
+    _probe2 = _sp2.run([sys.executable, "-c", """
+import modal_stub, json; modal_stub.install(); import agentic_editor_app as A
+def keys(d, acc):
+    if isinstance(d, dict):
+        for k, v in d.items():
+            if k == 'properties' and isinstance(v, dict):
+                acc.update(v.keys())
+            keys(v, acc)
+    elif isinstance(d, list):
+        for v in d: keys(v, acc)
+    return acc
+rows = []
+for t in A.KNOWLEDGE_TOOLS:
+    ks = keys(t.get('input_schema') or {}, set())
+    if 'card_hero' in ks:
+        rows.append(['card_props' in ks, 'card_condition' in ks])
+print(json.dumps(rows))
+"""], capture_output=True, text=True)
+    try:
+        _rows = json.loads(_probe2.stdout or "[]")
+    except Exception:
+        _rows = []
+    ok(bool(_rows) and all(_r[0] for _r in _rows),
+       "card_props is not offered on a ruling surface that offers card_hero — "
+       "the builder reads it and nothing can send it")
+    ok(bool(_rows) and all(_r[1] for _r in _rows),
+       "card_condition is not offered on every surface that offers card_hero")
+ok(pathlib.Path("CARD_CATALOGUE_REACH.md").exists(),
+   "the catalogue reach census is not on the record")
+ok(pathlib.Path("AUTHORING_VERDICT.md").exists(),
+   "the authoring verdict is not on the record — Zac asked twice and the "
+   "answer has to survive this session")
 
 # ── 4. THE TERMINAL PATH IS REAL ────────────────────────────────────────────
 # A flag that nothing reads is the producer-with-no-consumer defect this repo

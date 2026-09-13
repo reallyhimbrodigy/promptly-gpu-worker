@@ -91,8 +91,21 @@ check("the beat's figure_t is assigned FROM figure_instant",
           for a_ in _ft_assigns for c in ast.walk(a_.value)))
 _fn_calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
              and getattr(n.func, "id", "") == "figure_note"]
+# PER SITE, NOT A TOTAL. `>= 2` stopped distinguishing the moment either site
+# could cover for the other: the brief and the unruled-beat list are DIFFERENT
+# surfaces, and one losing the call is the field-on-one-surface defect this
+# lane has hit four times. A floor on a sum hides which contributor vanished.
+_fn_lines = sorted(n.lineno for n in _fn_calls)
+_brief = [n for n in _fn_calls
+          if any(isinstance(x, ast.Constant) and isinstance(x.value, str)
+                 and "BEATS" in x.value for x in ast.walk(tree)
+                 if abs(getattr(x, "lineno", 0) - n.lineno) < 12)]
 check("both beat-line sites (brief and unruled list) call figure_note",
-      len(_fn_calls) >= 2, f"{len(_fn_calls)} call(s)")
+      len(_fn_calls) >= 2 and len(set(_fn_lines)) >= 2
+      and max(_fn_lines) - min(_fn_lines) > 50,
+      f"{len(_fn_calls)} call(s) at lines {_fn_lines} — the two sites are "
+      f"hundreds of lines apart; calls clustered together mean one surface "
+      f"lost its copy and the other is covering for it")
 
 # ── THE CARD LANDS ON IT ────────────────────────────────────────────────────
 _cst = [n for n in ast.walk(tree) if isinstance(n, ast.Assign)
@@ -158,6 +171,9 @@ check("a beat without an instant reads ABSENT, never on-time",
 _pl = [n for n in _setdefault_calls("placements")
        if isinstance(n.func, ast.Attribute) and n.func.attr == "append"]
 _dicts = [a_ for c in _pl for a_ in c.args if isinstance(a_, ast.Dict)]
+# EVERY record literal, and there must be more than one — the items branch and
+# the bare branch are separate code paths and a floor of 2 that both satisfy
+# from one path would miss the other going dark.
 check("every placement record carries t_moment beside t_start",
       len(_dicts) >= 2 and all(
           any(isinstance(k, ast.Constant) and k.value == "t_moment" for k in d.keys)

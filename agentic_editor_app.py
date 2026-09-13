@@ -35,6 +35,7 @@ NEVER GET BUILT:
 """
 import hashlib
 import json
+import ast
 import os
 import re
 import shutil
@@ -211,6 +212,783 @@ def _mg_props_teach():
 
 
 MG_PROPS_TEACH = _mg_props_teach()
+
+# ONE TEXT, TWO SURFACES. The same field exists on rule_all_beats and
+# beat_verdict, and this file has now shipped a field on one ruling surface and
+# not the other three times (purpose, card_condition, and this).
+#
+# FROM 05_motion_graphics, previously unreachable: "Every transition, overlay,
+# and motion graphic carries a `why` — <=12 words naming the specific moment
+# that asked for it". The judgment sheet's reason-grounding column has been
+# grading exactly this field against the frame while the agent was never told
+# what it is for — and rule_all_beats' copy had NO DESCRIPTION AT ALL, on the
+# surface called every run, while beat_verdict's repair path had one.
+# A TRANSLATION, MARKED AS ONE. Everything else wired from the catalogue is
+# EXTRACTED — pulled by anchor, unchanged. This is not: the source rule is
+#
+#     "Protected words (hook / payoff / close / key_moments) are never cut."
+#
+# and `key_moments` does not exist here. Translating it took a decision — that
+# this lane's equivalent of the peak ledger is "the beats you rule `zoom` on" —
+# so it carries a `translated` marker rather than `wired`, and a reader can
+# tell which claims a human reinterpreted from which were lifted.
+#
+# AND `cut` HAD NO DESCRIPTION ON EITHER SURFACE. It is answered on every beat
+# of every run and carried nothing but its enum. Third field found bare this
+# way after `why` and the primary surface's copy of it.
+CUT_FIELD_TEACH = (
+    "keep or cut THIS beat. PROTECTED POSITIONS ARE NEVER CUT: the hook, the "
+    "payoff and the close, and any beat you rule `zoom` on — a zoom with its "
+    "beat removed is a move with nothing to land on. "
+    "[01_cut_pass, translated 2026-09-11: the source says 'hook / payoff / "
+    "close / key_moments are never cut'; key_moments is the old pipeline's peak "
+    "ledger and its equivalent here is the beats you rule zoom on]"
+    # ── THE CRITERION, WHICH THIS FIELD NEVER CARRIED ──────────────────────
+    # It held a PROHIBITION and nothing else: protected positions are never
+    # cut. 01_cut_pass owns the rule for what TO cut and none of it was here.
+    # A field that says only what not to cut is consistent with round 65
+    # cutting 0.1s, 0s, 0s, 1.4s and 0.48s across five fixtures against a
+    # reference that cuts on 53% of beats.
+    #
+    # TRANSLATED, NOT LIFTED, and the translation is the whole difficulty.
+    # 01_cut_pass names three WORD-RANGE classes — a phrasal restart, a
+    # retake, a filler run — and this field is a WHOLE-BEAT keep/cut. Beats
+    # run 2.5-3.3s on every fixture measured, about a sentence each, so a
+    # restart mid-sentence is NOT addressable here. Wiring the three classes
+    # verbatim would demand something the field cannot express, which is the
+    # unsatisfiable-refusal shape `_assert_no_orphaned_demand` now certifies
+    # against. So: the classes are stated at BEAT granularity, and where a
+    # cut is sub-beat the field says so and names the surface that can do it.
+    "\n\nWHAT A CUT IS FOR. The mechanical pass already took the measured "
+    "silence; what is left for you is the speaker's own STRUCTURAL "
+    "REDUNDANCY, and at this granularity that means a WHOLE BEAT that is "
+    "redundant: a beat that is an abandoned start whose completed take is the "
+    "next beat, a beat that RETAKES a line another beat delivers better (cut "
+    "the weaker one and say which in `why`), or a beat that is filler and "
+    "dead weight end to end.\n\n"
+    "WHAT A CUT IS NOT FOR. It does NOT tighten real speech. A complete, "
+    "meaningful phrase delivered once and fluently is CONTENT, not a drag — "
+    "never cut it for 'leanness' or for pace. 'It took five minutes to edit. "
+    "I did nothing.' is not a stretch that drags; 'to edit' IS the sentence. "
+    "Content words in a flowing sentence are never removable.\n\n"
+    "WHEN UNSURE, KEEP. A pause you cannot tell is dead or dramatic is a "
+    "pause you keep — the mechanical pass already removed the measured "
+    "silence, so what remains is there on purpose until proven otherwise.\n\n"
+    "IF THE REDUNDANCY IS INSIDE A BEAT — a restart in the middle of a "
+    "sentence — this field cannot remove it, and ruling `cut` on the whole "
+    "beat would take the sentence with it. Keep the beat. A sub-beat cut is "
+    "`build_cut` with explicit keep_spans, after the edit is built.\n\n"
+    # WHAT A CUT IS IN THE REFERENCE CORPUS, ASKED OF THE CORPUS RATHER
+    # THAN OF A RATE. The annotator reports what each treatment does. Of 81
+    # beats it marks `cut`, ONE has a read describing removal; 47 describe a
+    # SHOT CHANGE and the rest describe what the new shot shows. The
+    # provenance settles it: `mechanical_cuts` are scene changes DETECTED IN
+    # THE FINISHED VIDEO. You cannot see a removal in a finished video --
+    # the removed material is gone. So the corpus `cut` marks where the edit
+    # changes shot, and it was never a record of what was taken out.
+    #
+    # THIS FIELD IS THE OTHER OPERATION. It removes. Comparing its output
+    # against that number compared two different things, which is why the
+    # gap looked impossible. Only 4 of those 81 beats carry `cut` alone: a
+    # cut travels with overlay_text 67 times, cutaway 25, card 18 -- he
+    # changes shot by cutting TO something.
+    "\n\nTHIS FIELD REMOVES; IT DOES NOT CHANGE THE SHOT. If the beat is "
+    "worth watching, KEEP it and let the families that put something new "
+    "on screen do the work — pace comes from what you ADD to a held shot, "
+    "not from deleting speech that earns its place. There is no number of "
+    "cuts to reach and none to avoid: a video with nothing redundant in it "
+    "is correctly cut at zero. "
+    "[reference_corpus, read 2026-09-12: 1 of 81 cut beats describes a "
+    "removal; the rest mark shot changes]"
+    "AND SAYING [] IS A REAL ANSWER, said on purpose. But the old pipeline's "
+    "cut pass came back EMPTY on 159 of 159 plans, which is not restraint, it "
+    "is a pass that never ran. A lean edit usually has something: an "
+    "abandoned start, a weaker take, a filler run. "
+    "[01_cut_pass, translated 2026-09-12: the source names three WORD-RANGE "
+    "classes; this field is a whole-beat decision, so they are stated at beat "
+    "granularity and the sub-beat case is routed to build_cut]")
+
+# THE BRACKETS ON THE BEAT LINE, EXPLAINED WHERE THE DECISION IS MADE.
+# `stall_note` writes mechanical evidence into every beat line — a stretch
+# delivered well below this speaker's own pace, an adjacent word repeated —
+# and nothing in the schema told the agent what a bracket meant. A producer
+# with no consumer: the evidence shipped on every line of every run and was
+# read as noise. It is stated as EVIDENCE and never as an instruction, because
+# a flagged beat that is worth keeping must stay keepable.
+CUT_EVIDENCE_TEACH = (
+    "\n\nTHE [BRACKETS] ON A BEAT LINE ARE MEASURED EVIDENCE, NOT AN "
+    "INSTRUCTION. Where a beat carries one, the harness measured something "
+    "mechanical about the delivery — a stretch well below this speaker's own "
+    "pace, or a word repeated back to back. A flagged beat may still be KEPT "
+    "for a reason you give in `why`, and an unflagged beat may still be cut "
+    "because it restates the one before it. No bracket means nothing was "
+    "measured, which is not the same as nothing being there.\n\n"
+    "IF A BEAT IS MOSTLY GOOD but opens with a breath or ends with a stall, "
+    "do not cut it — TRIM it with keep_from_s/keep_to_s and keep what works.")
+
+WHY_FIELD_TEACH = (
+    "about THIS beat's content. NAME THE SPECIFIC MOMENT that asked for this "
+    "treatment, in twelve words or fewer - 'the 55 degree spec is the payoff "
+    "number', 'pivot from problem into the demo'. A reason that would fit any "
+    "beat in the genre has not named one; the judgment sheet grades whether "
+    "your why holds against what is actually in the frame, so assert something "
+    "checkable rather than something agreeable. "
+    "[05_motion_graphics, wired 2026-09-11]")
+
+
+def mg_conditions(path=None):
+    """{condition: [components]} — EXTRACTED FROM THE CATALOGUE, never typed.
+
+    THE CATALOGUE ALREADY ANSWERS THE SELECTION QUESTION and the agent has never
+    seen it. `knowledge/05_motion_graphics.md` is organised under eight
+    condition headings — WHEN A NUMBER LANDS, WHEN A CLAIM GETS A VERDICT OR
+    STAMP, WHEN TIME OR SEQUENCE IS THE STORY — and every documented component
+    sits under the question it answers. That is the discriminator
+    `derive_card_type` does not have, written down for months, in a document
+    `read_knowledge` has been called ZERO times on.
+
+    Third instance of the same class: the overlay rule that stopped talking_head
+    subtitling itself, the card_props shape that cost three rounds of zero
+    cards, and this. A rule in a document the agent does not open is
+    indistinguishable from a rule nobody wrote.
+
+    DERIVED, so a catalogue edit cannot leave this behind — the repo's standing
+    rule after the hand-copied asset tables.
+    """
+    import re as _re
+    _p = path or os.path.join(_KNOWLEDGE_DIR, "05_motion_graphics.md")
+    try:
+        _txt = open(_p, encoding="utf-8").read()
+    except OSError as _e:
+        return ("FAILED", {}, "cannot read the catalogue: %s" % _e)
+    _heads = [(m.start(), m.group(1).strip())
+              for m in _re.finditer(r"──\s*(WHEN [^─]+?)\s*──", _txt)]
+    if not _heads:
+        return ("ABSENT", {},
+                "the catalogue carries no WHEN headings — the selection "
+                "structure this reads is gone, and a silent {} would read as "
+                "'no conditions' rather than 'the source changed shape'")
+    _out = {_h: [] for _p2, _h in _heads}
+    for _m in _re.finditer(r"\*\*([A-Z][A-Za-z]+)\*\*\s*\(", _txt):
+        _prev = [_h for _p2, _h in _heads if _p2 < _m.start()]
+        if not _prev:
+            continue                    # documented before the first heading
+        _c = _m.group(1)
+        if _c not in _out[_prev[-1]]:
+            _out[_prev[-1]].append(_c)
+    # DOCUMENT ORDER IS KEPT, NOT SORTED. The catalogue states primacy by
+    # ordering and by its own words — "DropCard: the floating-card sibling of
+    # DropBanner" — so the first component documented under a condition is the
+    # one it answers with by default. Sorting alphabetically threw that away and
+    # would have made the default a matter of spelling.
+    return ("MEASURED", {_k: _v for _k, _v in _out.items() if _v}, "")
+
+
+def wired_claims(surface=None):
+    """{doc: count} — claims whose SUBSTANCE was wired, by marker.
+
+    WHY THIS EXISTS BESIDE knowledge_reach. That function matches a document's
+    HEADING against the agent's surface, which is mechanical and cannot drift —
+    and it UNDERSTATES reach, because wiring a claim's substance without
+    copying its heading does not move the number. Four claims were wired on
+    2026-09-11 and the heading count stayed at 8.
+
+    So a wired claim carries a marker naming its source document, and this
+    counts the markers. It is not fuzzy matching and it is not a hand-kept
+    list: the marker is IN the text the agent reads, so a claim cannot be
+    counted as wired unless its text is actually on the surface.
+    """
+    import json as _json
+    import re as _re
+    if surface is None:
+        surface = _json.dumps(KNOWLEDGE_TOOLS) + _json.dumps(TOOLS)
+    _out = {}
+    for _m in _re.finditer(r"\[(\d\d_[a-z_]+), wired (\d{4}-\d\d-\d\d)\]", surface):
+        _out[_m.group(1)] = _out.get(_m.group(1), 0) + 1
+    return _out
+
+
+def knowledge_reach(doc_dir=None, surface=None):
+    """(state, rows, why) — every structural claim in knowledge/, and whether
+    the agent can see it at ruling time.
+
+    THE ANSWER TO "IS THE KNOWLEDGE WIRED PROPERLY", and it is not three rules.
+    77 headings across 14 documents; before 2026-09-11, ZERO were reachable.
+    The documents are readable only through `read_knowledge`, which has been
+    called 0 times in 30 runs, so every structural claim in the corpus has been
+    invisible at the moment of ruling.
+
+    Three found by accident, each after it had already cost something:
+      04_text_overlays  "the transcript already lives in the captions" —
+                        talking_head subtitled itself for four rounds
+      05_motion_graphics  "in the shape its catalogue entry shows" — three
+                        rounds of zero cards
+      05_motion_graphics  the eight WHEN condition headings — a 31-type
+                        catalogue read two wide
+    A rule in a document the agent does not open is indistinguishable from a
+    rule nobody wrote, and this counts how many there are rather than waiting
+    for the next one to be found by its damage.
+
+    IT MEASURES VISIBILITY, NOT ANSWERABILITY, and the two are different. A
+    claim counts as reachable when its text is in the prompt or a tool schema —
+    which is what decides whether the model can READ it. Whether the model can
+    ACT on it is a separate question: renaming `card_condition` to something
+    unusable leaves every heading in the schema's enum and description, so the
+    agent still sees all eight and can answer with none. Proven while trying to
+    build a positive control for this function, which failed three times before
+    the premise was the thing at fault rather than the gate.
+
+    NOT EVERYTHING HERE SHOULD BE WIRED, and that is the point of the
+    classification rather than the count. `13_placement_findings` and
+    `14_card_text_placement_rules` are MEASURED RATES — "77% of cards share
+    their beat", "39 of 40 card placements share" — and the standing law is
+    that the rates GRADE and never instruct. Wiring those would be the
+    density-rubric mistake with a bigger corpus behind it.
+    """
+    import json as _json
+    import re as _re
+    _dir = doc_dir or _KNOWLEDGE_DIR
+    if surface is None:
+        try:
+            _src = open(os.path.abspath(__file__), encoding="utf-8").read()
+            _lits = " ".join(
+                _n.value for _n in ast.walk(ast.parse(_src))
+                if isinstance(_n, ast.Constant) and isinstance(_n.value, str))
+            surface = (_lits + _json.dumps(KNOWLEDGE_TOOLS)
+                       + _json.dumps(TOOLS)).lower()
+        except Exception as _e:                               # noqa: BLE001
+            return ("FAILED", [], "cannot read the agent's own surface: %s" % _e)
+    _HEAD = _re.compile(r"^(?:#{1,4}\s+|──\s*|\*\*)([A-Z][^\n*─]{8,90})")
+    _rows = []
+    try:
+        _docs = sorted(_p for _p in os.listdir(_dir) if _p.endswith(".md"))
+    except OSError as _e:
+        return ("FAILED", [], "cannot list %s: %s" % (_dir, _e))
+    if not _docs:
+        return ("ABSENT", [], "no knowledge documents found at %s" % _dir)
+    for _d in _docs:
+        try:
+            _txt = open(os.path.join(_dir, _d), encoding="utf-8").read()
+        except OSError:
+            continue
+        for _l in _txt.splitlines():
+            _m = _HEAD.match(_l.strip())
+            if not _m:
+                continue
+            _h = _m.group(1).strip().rstrip("*").strip()
+            if len(_h.split()) < 3:
+                continue
+            _rows.append({"doc": _d, "claim": _h[:100],
+                          "reachable": _h.lower()[:40] in surface})
+    return ("MEASURED", _rows, "")
+
+
+def catalogue_bullets(doc, pattern=r"^\s*•\s*([a-z_]+)\s*→\s*(.+)$"):
+    """(state, {key: first sentence}, why) — condition-to-action bullets.
+
+    THE SAME MECHANISM AS mg_conditions AND FOR THE SAME REASON. The catalogue
+    writes its craft as `• hook → GRIP, instant — ...`, which is already
+    condition-to-action; it just lives in a document `read_knowledge` has been
+    called 0 times on. Extracted rather than hand-copied so a catalogue edit
+    cannot leave the prompt behind.
+
+    THE FIRST SENTENCE IS THE JOB and the rest is the register. Truncating
+    mechanically at the sentence boundary keeps the extraction honest — a
+    hand-written condensation is a second copy of the craft, which is the thing
+    this is fixing.
+    """
+    import re as _re
+    _p = os.path.join(_KNOWLEDGE_DIR, doc)
+    try:
+        _txt = open(_p, encoding="utf-8").read()
+    except OSError as _e:
+        return ("FAILED", {}, "cannot read %s: %s" % (doc, _e))
+    _out = {}
+    for _m in _re.finditer(pattern, _txt, _re.M):
+        _k, _v = _m.group(1), _m.group(2).strip()
+        # first sentence: up to the first '. ' that is not inside an ellipsis
+        _cut = len(_v)
+        for _sep in (". ", "; for ", " A close within"):
+            _i = _v.find(_sep)
+            if _i > 20:
+                _cut = min(_cut, _i + (1 if _sep == ". " else 0))
+        _out.setdefault(_k, _v[:_cut].strip())
+    if not _out:
+        return ("ABSENT", {},
+                "no condition-to-action bullets in %s — the document's shape "
+                "changed and a silent {} would read as 'no craft here'" % doc)
+    return ("MEASURED", _out, "")
+
+
+_ZOOM_JOB_STATE, ZOOM_ARC_JOBS, _ZOOM_JOB_WHY = catalogue_bullets(
+    "06_emphasis_zoom.md")
+if _ZOOM_JOB_STATE == "FAILED":
+    raise RuntimeError("the zoom catalogue could not be read (%s) — zoom_arc "
+                       "would ship with no craft behind it and nothing saying "
+                       "so" % _ZOOM_JOB_WHY)
+
+
+def mask_zoom_job(doc="06_emphasis_zoom.md"):
+    """(state, arcs, text) — the MASK-zoom job, and which arcs own it.
+
+    I REPORTED THAT `build` AND `breather` HAD NO GUIDANCE ANYWHERE. They have
+    it, stated outright, in the middle of a paragraph:
+
+        "A mask zoom CLAIMS the arc position of the word it sits on —
+         build/breather claims exist for exactly this job, and offer nothing
+         else."
+
+    My census extracts HEADINGS, and this claim is mid-paragraph, so the
+    instrument could not see it and I reported its absence as fact. A
+    heading-based sweep understates the corpus in a way it cannot self-report,
+    and "no guidance anywhere" was a claim about my extractor.
+
+    AND THE HARNESS ALREADY IMPLEMENTS IT INDEPENDENTLY. ZOOM_ARC_HOMES maps
+    build and breather to exactly ('SnapReframe', 'StepZoom') — the two small,
+    sub-second types the mask text names — while every peak position gets the
+    slower moves. Two derivations of the same rule agreeing is the strongest
+    evidence available that the rule is real and that neither is invented.
+    """
+    import re as _re
+    try:
+        _txt = open(os.path.join(_KNOWLEDGE_DIR, doc), encoding="utf-8").read()
+    except OSError as _e:
+        return ("FAILED", (), "cannot read %s: %s" % (doc, _e))
+    _m = _re.search(r"MASK zooms are functional: ([^.]+\.)", _txt)
+    _c = _re.search(r"([a-z_]+)/([a-z_]+) claims exist for exactly this job", _txt)
+    if not _m or not _c:
+        return ("ABSENT", (),
+                "the mask-zoom rule is not in %s in the shape this reads — it "
+                "is the only guidance build and breather have, and a silent "
+                "absence would put them back to being the cheap slot" % doc)
+    return ("MEASURED", (_c.group(1), _c.group(2)), _m.group(1).strip())
+
+
+_MASK_STATE, MASK_ARCS, MASK_JOB_TEXT = mask_zoom_job()
+
+
+# THE ARC RULES THE BODY SWEEP FOUND, pulled by anchor phrase so the text is
+# EXTRACTED and not transcribed. A heading sweep reached none of these: every
+# one is mid-paragraph.
+#
+# THE BODY SWEEP'S FUNNEL, 2026-09-11: 609 sentences name a ruling field or a
+# lane enum value; 241 are normative or definitional; 159 of those reference no
+# foreign schema and were unreachable. My earlier "7 instructable" was low by a
+# factor of twenty, because a heading sweep cannot see a rule stated in prose.
+_ARC_RULE_ANCHORS = (
+    ("06_emphasis_zoom.md", "Count follows the footage"),
+    ("01_cut_pass.md", "Zooms belong to peaks"),
+    # THE DOCUMENT NAME WAS WRONG in my first version — this sentence is in
+    # 00_job_and_arc, and I wrote 01_cut_pass from the sweep output's
+    # neighbouring row. The ABSENT state caught it and refused to ship the
+    # prompt without the rule, which is what the three-state return is for.
+    ("00_job_and_arc.md", "tempted to mark breather"),
+    ("01_cut_pass.md", "of any two zooms within 2s"),
+)
+
+
+def arc_rules(anchors=_ARC_RULE_ANCHORS):
+    """(state, [sentences], why) — arc rules extracted by anchor phrase."""
+    import re as _re
+    _out, _missing = [], []
+    for _doc, _anchor in anchors:
+        try:
+            _txt = open(os.path.join(_KNOWLEDGE_DIR, _doc), encoding="utf-8").read()
+        except OSError:
+            _missing.append("%s (unreadable)" % _doc)
+            continue
+        _i = _txt.find(_anchor)
+        if _i < 0:
+            _missing.append("%s: %r" % (_doc, _anchor[:40]))
+            continue
+        # the sentence containing the anchor
+        _start = max(_txt.rfind(".", 0, _i), _txt.rfind("\n", 0, _i)) + 1
+        _m = _re.search(r"[.!?]", _txt[_i:])
+        _end = _i + (_m.end() if _m else 200)
+        _out.append(" ".join(_txt[_start:_end].split()).lstrip("*• "))
+    if _missing:
+        # AN ANCHOR THAT NO LONGER MATCHES IS A RULE THAT LEFT THE CATALOGUE, or
+        # a sentence that was reworded. Either way the prompt must not silently
+        # ship without it.
+        return ("ABSENT", _out,
+                "%d arc rule anchor(s) no longer match: %s"
+                % (len(_missing), "; ".join(_missing)))
+    return ("MEASURED", _out, "")
+
+
+_ARC_RULE_STATE, ARC_RULES, _ARC_RULE_WHY = arc_rules()
+
+
+def sfx_moments(doc=None):
+    """{sound: THE MOMENT clause} — extracted from 07_sound_effects at import.
+
+    THE MATCHED PAIR ZAC NAMED, ANSWERED. Round 65 placed `boom` on car_short's
+    drift ("the moment where the drift happens with massive tire smoke") and
+    `shockingsfx` on car_mid's first frame ("opening hook that establishes the
+    dark mood"). Same family, same round, one earned and one reflex — and the
+    difference was not position, motion, or who chose the name. All eight sfx in
+    that round were agent-named, and Zac's own references put a sound on the
+    first beat 3 times in 14, so neither "derived from role" nor "openings are
+    reflex" survives contact with the evidence.
+
+    THE DIFFERENCE IS WHAT THE `why` POINTS AT, and 07_sound_effects already
+    says so: "A scenario is something the speaker says, shows, or does on camera
+    — the sentence, the number, the reversal, the charm. That is where a sound's
+    `why` points... where none exists, the moment carries no sound." The drift
+    why points at a scenario in the footage. The opening why points at the
+    beat's FUNCTION ("opening hook") and a MOOD ("dark mood") — neither of which
+    is something anyone says, shows or does.
+
+    AND THE FIELD WAS INSTRUCTING THE REFLEX. `sfx_name` carried no enum and
+    thirteen words: "which catalogue sound, when sfx is 'yes'. Pick by ROLE from
+    the table." Pick by ROLE is the opposite of pick by scenario. The reflex
+    placement did exactly what the field told it to do; the earned one ignored
+    the field and followed the document the field never mentions. That is the
+    fifth correct rule found behind a door the agent never opens, and the first
+    where the prompt actively contradicted the door.
+
+    Each of the sixteen sounds carries a LITERAL predicate — money-ching's
+    "minutes, hours and days are TIME words; time words never take the
+    register"; camera-flash's "the sound IS the shutter the story references".
+    Extracted so the agent is offered the predicate rather than a table of
+    names, and so a catalogue edit cannot leave the prompt behind.
+    """
+    import pathlib as _pl
+    _f = _pl.Path(doc or "knowledge/07_sound_effects.md")
+    if not _f.is_file():
+        return {}
+    _out = {}
+    for _line in _f.read_text(errors="replace").splitlines():
+        _m = re.match(r"\*\*([a-z0-9-]+)\*\*\s+—\s+(.*)", _line.strip())
+        if not _m:
+            continue
+        _name, _rest = _m.group(1), _m.group(2)
+        _mm = re.search(r"\*\*THE MOMENT:\*\*\s*(.+?)(?:\s*\*\*WHAT IT DOES|$)",
+                        _rest)
+        if _mm:
+            _out[_name] = " ".join(_mm.group(1).split())
+    return _out
+
+
+SFX_MOMENTS = sfx_moments()
+
+
+def sfx_name_teach():
+    """The sixteen sounds as PREDICATES, or a named absence."""
+    if not SFX_MOMENTS:
+        return ("the sound catalogue could not be read — this field is ABSENT "
+                "its guidance rather than free of it")
+    return ("\n\nEACH SOUND IS A MOMENT, NOT A MOOD. Match the footage against "
+            "the predicate; where no moment matches, the beat carries NO sound "
+            "— `voice` is a signed choice, not a failure. A `why` that names "
+            "the beat's function ('opening hook') or a feeling ('establishes "
+            "the dark mood') has not matched a scenario: a scenario is "
+            "something the speaker SAYS, SHOWS or DOES on camera. Matched "
+            "literally, never by association. [07_sound_effects, wired "
+            "2026-09-12]\n"
+            + "\n".join("  %s — %s" % (_k, SFX_MOMENTS[_k])
+                         for _k in sorted(SFX_MOMENTS)))
+
+
+def enum_craft(doc_dir=None, values=None):
+    """{enum value: [(doc, sentence)]} — the corpus's craft, keyed by the value
+    it governs. EXTRACTED AT IMPORT, never hand-copied.
+
+    THE 159 (154 BY THIS RECONSTRUCTION). A body-first sweep of knowledge/
+    found 241 sentences; 164 name a value this lane's schema actually offers
+    and 10 of those were already reachable through a heading. The rest were
+    craft the agent never sees — written about `payoff`, `zoom`, `text`,
+    `card`, `hook`, `build`, in prose under headings that do not match any
+    field name, so a heading sweep cannot find them and a hand-copy would rot.
+
+    DERIVED, so it cannot drift from the corpus: the sentences are read from
+    the documents at import and keyed by the enum value they mention. A claim
+    that leaves the corpus leaves the prompt in the same commit, and nobody has
+    to remember to update a list. This is the same rule the card catalogue is
+    built under, applied to prose.
+
+    The match is the VALUE AS A WORD, not a substring: `none` must not be
+    caught inside "nonetheless" and `cut` must not be caught inside "cutaway"
+    — which on this lane is a retired family, so admitting it here would wire
+    craft for something the pipeline refuses to build.
+    """
+    import re as _re, pathlib as _pl
+    _dir = _pl.Path(doc_dir or "knowledge")
+    # NO DEFAULT FROM THE FAMILY CONSTANTS. This runs BEFORE them — the tool
+    # schema is a literal evaluated at import — so the caller names the values.
+    # A silent empty default here would wire nothing and read as "the corpus
+    # says nothing", which is the absence-as-result failure this file keeps
+    # paying for.
+    _vals = list(values or [])
+    if not _vals:
+        raise ValueError("enum_craft needs the values to key on; an empty set "
+                         "would return {} and read as an empty corpus")
+    out = {}
+    if not _dir.is_dir():
+        return out                      # ABSENT is the caller's to report
+    for _f in sorted(_dir.glob("*.md")):
+        _txt = _f.read_text(errors="replace")
+        for _s in _re.split(r"(?<=[.!?])\s+", _txt):
+            _s = " ".join(_s.split())
+            if len(_s) < 25 or _s.startswith("#") or _s.startswith("|"):
+                continue
+            for _v in _vals:
+                if _re.search(r"(?<![A-Za-z_])%s(?![A-Za-z_])" % _re.escape(_v),
+                              _s, _re.I):
+                    out.setdefault(_v, []).append((_f.name, _s))
+    return out
+
+
+def craft_lines(value, craft=None, limit=6):
+    """The craft for ONE enum value as prompt text, each line marked with the
+    document it came from, or "" when the corpus says nothing about it.
+
+    MARKED, because a reader has to be able to tell a claim this pipeline
+    LIFTED from one a human reinterpreted — `wired` versus `translated` — and
+    because wired_claims counts the markers rather than a hand-kept list.
+    """
+    _c = (craft if craft is not None else enum_craft()).get(value) or []
+    if not _c:
+        return ""
+    # ROUND-ROBIN ACROSS DOCUMENTS, not first-come. Taking the first N matches
+    # in file order gave 49 of 72 wired claims to 00_job_and_arc purely because
+    # it sorts first — the craft would have come from whichever document the
+    # glob reached first rather than from the documents that own the value.
+    # One sentence from each document, then a second from each, until the cap.
+    _by_doc = {}
+    for _doc, _s in _c:
+        _by_doc.setdefault(_doc, []).append(_s)
+    _seen, _out, _i = set(), [], 0
+    while len(_out) < limit:
+        _took = False
+        for _doc in sorted(_by_doc):
+            if _i >= len(_by_doc[_doc]):
+                continue
+            _s = _by_doc[_doc][_i]
+            _took = True
+            if _s in _seen:
+                continue
+            _seen.add(_s)
+            _out.append("%s [%s, wired 2026-09-11]"
+                        % (_s, _doc.replace(".md", "")))
+            if len(_out) >= limit:
+                break
+        if not _took:
+            break
+        _i += 1
+    return "  ".join(_out)
+
+
+# ── THE CORPUS'S CRAFT, KEYED BY THE VALUE IT GOVERNS ───────────────────────
+# A body-first sweep of knowledge/ found 241 sentences. 164 name a value this
+# lane's schema actually offers; 10 were already reachable through a heading,
+# and the other 154 were craft the agent never saw — written about `payoff`,
+# `zoom`, `text`, `card`, `hook`, `build`, in prose under headings that match no
+# field name. A heading sweep cannot see them and a hand-copy would rot, so they
+# are EXTRACTED AT IMPORT and attached to the field each one governs.
+_ARC_VALUES = ["hook", "build", "mid_peak", "payoff", "breather", "close"]
+_FAMILY_VALUES = ["card", "text", "sfx", "zoom", "transition", "none"]
+_CUT_VALUES = ["keep", "cut"]
+_CORPUS_CRAFT = enum_craft(values=_ARC_VALUES + _FAMILY_VALUES + _CUT_VALUES)
+
+
+def _craft_block(values, label):
+    """One prompt block for a group of values, or a NAMED ABSENCE.
+
+    A value the corpus says nothing about prints as such. Silence and
+    "the document had no rule for this" are different facts, and only one of
+    them means the agent is free to choose.
+    """
+    _parts = []
+    for _v in values:
+        _t = craft_lines(_v, _CORPUS_CRAFT, limit=4)
+        _parts.append("%s: %s" % (_v, _t if _t else
+                                  "the catalogue states no rule for this value "
+                                  "— that is silence, not permission"))
+    return "\n\nWHAT THE CATALOGUE SAYS ABOUT EACH %s\n" % label + "\n".join(_parts)
+
+
+ARC_CORPUS_CRAFT = _craft_block(_ARC_VALUES, "ARC POSITION")
+FAMILY_CORPUS_CRAFT = _craft_block(_FAMILY_VALUES, "FAMILY")
+CUT_CORPUS_CRAFT = _craft_block(_CUT_VALUES, "CUT DECISION")
+
+
+def arc_jobs_teach(enum_values):
+    """The arc-position craft for zoom_arc, all six of them.
+
+    FOUR ARE PEAK POSITIONS with a job each. The other two are the MASK
+    positions, and the catalogue reserves them for exactly that: a functional
+    zoom covering a splice, small, outside the moment ledger. Round 46's zooms
+    clustered on `build` at 9-23x the reference rate because it was the vaguest
+    label available — and the reason it was vague is that its one job was
+    mid-paragraph where a heading sweep could not reach it.
+    """
+    _have = [(_k, ZOOM_ARC_JOBS[_k]) for _k in enum_values if _k in ZOOM_ARC_JOBS]
+    _txt = " ".join("%s = %s" % (_k, _v) for _k, _v in _have)
+    _mask = [_k for _k in enum_values if _k in (MASK_ARCS or ())]
+    if _mask and _MASK_STATE == "MEASURED":
+        _txt += (" %s = MASK, the only job they have: %s They are NOT peaks — "
+                 "a mask zoom serves the CUT, not the moment, and claiming one "
+                 "on a beat that wanted no zoom is how this field became the "
+                 "cheap slot."
+                 % (" and ".join(_mask), MASK_JOB_TEXT))
+    _unknown = [_k for _k in enum_values
+                if _k not in ZOOM_ARC_JOBS and _k not in (MASK_ARCS or ())]
+    if _unknown:
+        _txt += (" The catalogue has NO guidance for %s. Rule them on the beat, "
+                 "not on a rule that does not exist." % " or ".join(_unknown))
+    # THE BODY-SWEEP RULES. Four sentences a heading sweep could not reach,
+    # extracted by anchor. If any anchor stops matching the state is ABSENT and
+    # the text says so rather than shipping a prompt missing a rule silently.
+    if _ARC_RULE_STATE == "MEASURED" and ARC_RULES:
+        _txt += (" [01_cut_pass, wired 2026-09-11] [06_emphasis_zoom, wired "
+                 "2026-09-11] " + " ".join(ARC_RULES)
+                 # TRANSLATED, not extracted: the source states this inside a
+                 # `zoom_effect` schema block that does not exist here, so the
+                 # claim was lifted out of a foreign shape by hand.
+                 + " The arc position is YOUR CLAIM and nothing else about the "
+                   "move is: the harness picks the type from the position and "
+                   "the vibe, back-times the peak onto the word, and floors it "
+                   "at the clip head. Nothing for you to compute or clamp. "
+                   "[06_emphasis_zoom, translated 2026-09-11 from a zoom_effect "
+                   "schema block this lane does not have]")
+    elif ARC_RULES:
+        _txt += (" PARTIAL: %s. %s" % (_ARC_RULE_WHY, " ".join(ARC_RULES)))
+    return _txt
+
+
+def component_selection_arrows(doc="05_motion_graphics.md", min_arrows=20):
+    """(state, [(condition, component)], why) — the catalogue's own selection table.
+
+    THE CATALOGUE STATES SELECTION AS ARROWS, mid-paragraph, in the FITS/FIGHTS
+    lines: "Static numbers -> StatCard", "scattered hand-written notes ->
+    StickyNotes", "an ordered ranked list -> RankedList", "one bar toward a goal
+    -> ProgressBar". 39 of them across 21 components, and a heading sweep
+    reached none.
+
+    This is the complement to the two surfaces already wired. The WHEN
+    conditions say which QUESTION a beat asks; the content keys say which
+    component a given payload selects; these say what each component is FOR in
+    the agent's own terms — which is the half that was missing, because an agent
+    that knows eight questions and ten payload keys still has to decide that a
+    ranked list is what this moment wants.
+
+    ABSENT BELOW min_arrows, because the arrows are a prose convention and a
+    rewrite could drop them silently. A table that quietly shrank to three
+    entries would read as a catalogue with three selectable components.
+    """
+    import re as _re
+    try:
+        _txt = open(os.path.join(_KNOWLEDGE_DIR, doc), encoding="utf-8").read()
+    except OSError as _e:
+        return ("FAILED", [], "cannot read %s: %s" % (doc, _e))
+    _pat = _re.compile(r"([^.\n→*•]{6,70}?)\s*→\s*([A-Z][A-Za-z]+)")
+    _out, _seen = [], set()
+    for _m in _pat.finditer(_txt):
+        _cond = " ".join(_m.group(1).split())
+        _comp = _m.group(2)
+        if _comp not in VALID_MG_TYPES:
+            continue
+        # trim the leading fragment a sentence boundary leaves behind
+        _cond = _re.sub(r"^[^A-Za-z0-9]+", "", _cond)
+        _cond = _re.sub(r"^(?:pass the card label|one short word reads best)\.?\s*",
+                        "", _cond, flags=_re.I).strip()
+        if len(_cond) < 4 or (_cond.lower(), _comp) in _seen:
+            continue
+        _seen.add((_cond.lower(), _comp))
+        _out.append((_cond, _comp))
+    if len(_out) < min_arrows:
+        return ("ABSENT", _out,
+                "only %d selection arrows found in %s (expected at least %d) — "
+                "the prose convention changed, and a table that quietly shrank "
+                "would read as a catalogue with that many selectable components"
+                % (len(_out), doc, min_arrows))
+    return ("MEASURED", _out, "")
+
+
+_ARROW_STATE, COMPONENT_ARROWS, _ARROW_WHY = component_selection_arrows()
+
+
+def component_arrows_teach():
+    """The selection table as one line, or a named absence."""
+    if _ARROW_STATE != "MEASURED":
+        return ("THE CATALOGUE'S SELECTION TABLE COULD NOT BE READ (%s) — pick "
+                "by the content key instead." % _ARROW_WHY)
+    return ("WHAT EACH COMPONENT IS FOR, from the catalogue's own FITS/FIGHTS "
+            "lines: " + "; ".join("%s -> %s" % (_c, _t)
+                                  for _c, _t in COMPONENT_ARROWS)
+            + ". [05_motion_graphics, wired 2026-09-11]")
+
+
+def mg_unique_prop_owner(prop_keys=None):
+    """{prop key: component} for every key declared by EXACTLY ONE component.
+
+    THE COMPONENT IS IDENTIFIED BY WHAT IT IS GIVEN. 9 of the 10 content keys
+    in the catalogue are unique — `messages` is only ChatThread, `notes` only
+    StickyNotes, `bars` only BarRace — and every variant carries a unique
+    distinguishing prop too: `firstSide` only TimelineRoadmap, `step` only
+    StepDivider, `titleLead` only DropCard. So the selection is mechanical and
+    nothing here is taste anyone invented.
+
+    DERIVED FROM MG_PROP_KEYS, which is itself generated from the components.
+    A new component with a new content key becomes selectable the day it lands.
+    """
+    _P = prop_keys if prop_keys is not None else MG_PROP_KEYS
+    _own = {}
+    for _t, _sp in (_P or {}).items():
+        for _k in (set((_sp or {}).get("declared") or [])
+                   | set((_sp or {}).get("required") or [])):
+            _own.setdefault(_k, set()).add(_t)
+    return {_k: next(iter(_v)) for _k, _v in _own.items() if len(_v) == 1}
+
+
+_MG_COND_STATE, MG_CONDITIONS, _MG_COND_WHY = mg_conditions()
+if _MG_COND_STATE != "MEASURED":
+    # LOUD AT IMPORT. A silent {} makes every condition unoffered and the card
+    # catalogue silently narrows back to two, which is the state this whole
+    # thread is about.
+    raise RuntimeError(
+        "the motion-graphics catalogue's condition headings could not be read "
+        "(%s: %s) — the condition enum would be EMPTY and the card catalogue "
+        "would narrow back to StatCard and PullQuote with nothing saying so"
+        % (_MG_COND_STATE, _MG_COND_WHY))
+MG_CONDITION_ENUM = list(MG_CONDITIONS)
+MG_UNIQUE_PROP_OWNER = mg_unique_prop_owner()
+
+
+def condition_components(condition, one_field_only=False):
+    """The components under a condition, in DOCUMENT ORDER.
+
+    one_field_only keeps those whose required props are a single text field —
+    the ones a bare `card_hero` can fill with no props at all.
+    """
+    _cs = MG_CONDITIONS.get(condition) or []
+    if not one_field_only:
+        return list(_cs)
+    _out = []
+    for _c in _cs:
+        _req = list((MG_PROP_KEYS.get(_c) or {}).get("required") or [])
+        if len(_req) == 1 and _req[0] in ("text", "title", "label"):
+            _out.append(_c)
+    # NO PRIMACY IS INVENTED HERE, and two attempts to derive one both failed:
+    #
+    #   document order   puts StepDivider — which exists to carry a "STEP 2/05"
+    #                    kicker — ahead of SectionDivider, the general chapter
+    #                    card. The VARIANT before the PRIMARY, decided by where
+    #                    an entry sits in a markdown file.
+    #   unique-prop count  StepDivider owns 6, SectionDivider 8, so it picks the
+    #                    variant AGAIN. The count measures how many STYLING
+    #                    knobs a component exposes (scrimColor, showVignette),
+    #                    not how specialised its CONTENT is. A proxy that
+    #                    conflates the two is a guess wearing arithmetic.
+    #
+    # So the order is left as the catalogue's and the CALLER refuses when there
+    # is more than one candidate. Five of the eight conditions have exactly one
+    # and are answered outright; the other two name their choices and the prop
+    # that selects each, which is educate-rather-than-validate instead of a
+    # default nobody chose.
+    return _out
+
 
 
 _REMOTION_SRC = os.path.abspath(os.path.join(_HERE, "..", "..", "src", "remotion"))
@@ -1217,126 +1995,8 @@ def _surface_offers(can_express, field):
     return can_express is None or field in can_express
 
 
-def half_ruling_refusal(v, can_express=None):
-    """The reason this ruling is HALF a ruling, or None. PURE.
-
-    EXTRACTED 2026-09-11 because it was enforced on exactly one of two ruling
-    surfaces. `rule_all_beats` ran these checks; the singular `beat_verdict`
-    tool ran NONE of them, and its handler read four hardcoded fields out of
-    the THIRTEEN its own schema offers — so zoom_arc, purpose, text_content,
-    sfx_name and the card fields were accepted by the schema and silently
-    dropped by the handler. Builder-2 measured the consequence on round 63:
-    four re-ruled beats each LOST fields the first ruling supplied — a beat
-    ruled `text` with no copy, a beat ruled `sfx` with no name.
-
-    It was inert only because the second execute was refused 4 of 4. The
-    build's per-beat lookup is a dict comprehension — LAST WINS — so on any run
-    where that refusal does not fire, the zoom builds with zoom_arc=None.
-    Latent, not absent.
-
-    One function, both surfaces. Two copies of a rule is how a rule ends up
-    enforced on one of them.
-    """
-    tr = [str(t).lower() for t in (v.get("treatment") or [])]
-    # ── A HALF-RULING IS REFUSED WHERE IT IS MADE ───────────
-    # Both of these used to be discovered at BUILD time, where
-    # the only outcome is a skip: the placement is lost, the run
-    # is paid for, and the log blames the ruling. Here it costs
-    # one line to fix and the agent is still holding the beat.
-    why = None
-    if "zoom" in tr:
-        arc = str(v.get("zoom_arc") or "").strip().lower()
-        if arc not in ZOOM_ARC_HOMES:
-            why = (
-                f"beat {v.get('beat')}: ruled 'zoom' with "
-                f"zoom_arc={v.get('zoom_arc')!r}. WHICH MOMENT "
-                f"this is cannot be derived from timing, and it "
-                f"decides the move: payoff takes a committed "
-                f"push, a hook takes a snap or a pull. Give one "
-                f"of {sorted(ZOOM_ARC_HOMES)}.")
-    if why is None and "sfx" in tr and _surface_offers(can_express, "sfx_name"):
-        # TWO VOCABULARIES FOR ONE INTENT, AND THE LOSS IS INVISIBLE AT BOTH
-        # ENDS. The agent says "this beat has a sound" by putting `sfx` in
-        # `treatment`; the BUILD requires the separate `sfx: "yes"` field. When
-        # it says one and not the other the ruling is accepted, carried through
-        # the plan, and silently skipped at build time.
-        #
-        # MEASURED over 37 runs / 11 rounds in this lane, and reproduced
-        # independently by Builder-2 on theirs at the same figures:
-        #     sfx in treatment                       75
-        #       field "yes" + sfx_name       -> BUILT 50
-        #       field ABSENT                 -> DROPPED 17
-        #       field stored None            -> DROPPED  6
-        #       field "no"                   -> DROPPED  2
-        # 25 of 75 placements lost, and `half_ruling_stripped` reads ZERO across
-        # all 37 — because the stripper's sfx arm keys on the SAME wrong field
-        # (`v.get("sfx","no") == "yes"`), so a beat with treatment ["sfx"] and
-        # no field is never in `_nosfx` and is never reported either.
-        #
-        # THE TREATMENT IS THE INTENT. A beat that names the family has decided
-        # the moment needs SOUND; requiring it to say so twice is a second
-        # vocabulary, not a second decision. So the refusal asks for the thing
-        # that genuinely cannot be derived — WHICH sound — and treats the field
-        # as satisfied by the treatment.
-        nm = str(v.get("sfx_name") or "").strip()
-        fld = str(v.get("sfx") or "").strip().lower()
-        if fld == "no":
-            why = (
-                f"beat {v.get('beat')}: ruled 'sfx' in treatment but "
-                f"sfx='no'. Those contradict — the treatment says this moment "
-                f"needs a sound and the field says it does not. Drop 'sfx' "
-                f"from the treatment or set sfx='yes' and name the sound.")
-        elif not nm:
-            why = (
-                f"beat {v.get('beat')}: ruled 'sfx' with no sfx_name. WHICH "
-                f"sound cannot be derived from timing — it is the one thing "
-                f"you say about a sound, the way zoom_arc is for a zoom. Give "
-                f"a name from the inventory.")
-    if why is None and "card" in tr:
-        # THE ACCEPTANCE GATE MUST ASK FOR WHAT THE SCHEMA
-        # OFFERS. It demanded `card_type` — a field b13730c
-        # REMOVED from the schema when cards became derived. The
-        # agent could not supply it, was rejected, and re-ruled
-        # the same beat identically about five times: round 47's
-        # control shows exactly that loop, three beats each.
-        #
-        # I removed the field and left the gate demanding it.
-        # That is the mirror of the card_props_mismatch orphan —
-        # there a NAME with no producer, here a DEMAND with no
-        # supply — and both are invisible until something tries
-        # to satisfy them.
-        hero = str(v.get("card_hero") or "").strip()
-        if not hero:
-            why = (
-                f"beat {v.get('beat')}: ruled 'card' with no "
-                f"card_hero. That is the ONE thing you say about "
-                f"a card — the component and its props are "
-                f"derived from it, the way zoom_arc derives the "
-                f"zoom. Give the figure or the short phrase the "
-                f"card is about.")
-        else:
-            # SAME DERIVATION THE BUILDER USES. A gate that
-            # accepts what the builder then refuses is a second
-            # opinion nobody asked for, and this file has paid
-            # for divergent copies of one rule before.
-            ct, dw = derive_card_type(
-                hero, str(v.get("text_content") or ""))
-            if not ct:
-                why = f"beat {v.get('beat')}: {dw}"
-            else:
-                _pp6, _pw6 = derive_card_props(ct, hero,
-                                               str(v.get("card_label") or ""))
-                _, bad = coerce_mg_props(dict(_pp6))
-                if bad:
-                    why = (
-                        f"beat {v.get('beat')}: {ct} needs a "
-                        f"NUMBER for {bad} and {hero!r} does "
-                        f"not give one. It counts up to a target, "
-                        f"so a word renders a blank card with no "
-                        f"error. If this beat has no quoted "
-                        f"figure, a short claim still takes a "
-                        f"card — the phrase becomes a quote card.")
-    return why
+# (half_ruling_refusal: a second copy stood here demanding sfx_name. See the
+#  note on admit_verdict below — the demand pre-empted _derive_sfx_name.)
 
 def _contract_violations(ledger):
     """Pull the contract failures out of the failure ledger.
@@ -1637,6 +2297,111 @@ def insert_request(brief, why="", at_s=None, duration_s=None):
 # hole rather than losing it — an UNFILLED insert that vanishes on the next turn
 # is worse than a refusal, because the user was told it was recorded.
 _PLAN_KIND_INSERT = "insert_request"
+
+
+_PLAN_KIND_CAPTION = "caption_signature"
+
+
+def caption_signature(style, fps, pages):
+    """(state, sig) — what the captions ACTUALLY are this run, as a comparable
+    fingerprint. MEASURED | ABSENT.
+
+    THE BLIND SPOT THIS CLOSES. Captions are BURNED, not ruled per beat: they
+    leave no verdict and no manifest entry, so `reedit_delta` sees zero changed
+    beats whether a re-edit restyled them or did nothing at all. "Make the
+    captions bigger" and a run that silently no-opped were indistinguishable,
+    and fidelity had to fall back on `caption_composited`, which is true in both
+    cases. That is the paid re-edit no-op scored as a success — the exact shape
+    the delta was built to catch everywhere else.
+
+    So the captions get a fingerprint of their own: the style, the frame rate
+    the style implies, and the PAGE LAYOUT — how the words were grouped and
+    broken. Page layout is included deliberately: a restyle that keeps the same
+    style name but regroups the words is a real change the user will see, and a
+    signature over the style alone would call it a no-op.
+
+    ABSENT when there are no captions, which is NOT "unchanged": a run that
+    burned no captions and a run whose captions are identical to last time are
+    different facts, and only one of them means the instruction was obeyed.
+    """
+    if not pages:
+        return ("ABSENT", None)
+    import hashlib as _h, json as _j
+    _pages = [" ".join(str(_w) for _w in (_pg or [])) if isinstance(_pg, (list, tuple))
+              else str(_pg) for _pg in pages]
+    _body = _j.dumps({"style": str(style or ""), "fps": fps, "pages": _pages},
+                     sort_keys=True)
+    return ("MEASURED", {"style": str(style or ""), "fps": fps,
+                         "pages": len(_pages),
+                         "fp": _h.sha256(_body.encode("utf-8")).hexdigest()})
+
+
+def plan_with_caption(plan, sig):
+    """The durable plan plus the caption fingerprint, as its own kind.
+
+    THE PLAN IS THE ONLY THING THAT SURVIVES THE TURN — the server persists it
+    and hands it back as `prior_plan` — and the plan is a list of PER-BEAT
+    entries while captions are global. So the signature rides as its own kind,
+    exactly as an unfilled insert request does. A comparison needs both sides,
+    and the prior side can only come from here.
+    """
+    if not sig:
+        return list(plan or [])
+    return list(plan or []) + [dict(sig, kind=_PLAN_KIND_CAPTION)]
+
+
+def caption_from_plan(plan):
+    """(rulings, sig|None) — split the caption fingerprint back out.
+
+    An entry with no `kind` is a ruling: every plan written before this existed
+    has none, and reading `kind` as REQUIRED would discard every prior plan on
+    the first re-edit after it shipped — the mistake inserts_from_plan already
+    documents.
+    """
+    _rulings, _sig = [], None
+    for _e in (plan or []):
+        if isinstance(_e, dict) and _e.get("kind") == _PLAN_KIND_CAPTION:
+            _sig = {_k: _v for _k, _v in _e.items() if _k != "kind"}
+        else:
+            _rulings.append(_e)
+    return (_rulings, _sig)
+
+
+def captions_changed(prior_sig, now_state, now_sig):
+    """(state, changed, why) — did THIS run's captions differ from last run's?
+
+    FOUR ANSWERS, because three of them are not "no":
+      MEASURED True   the fingerprints differ — the captions really changed
+      MEASURED False  identical fingerprints — this was a caption no-op
+      ABSENT          no prior signature: the plan predates this feature, or
+                      last run burned none. NOT "unchanged" — unknowable.
+      REMOVED         last run had captions and this one has none
+
+    The ABSENT arm is the one that matters for honesty. A plan written before
+    this shipped carries no signature, and answering "unchanged" for it would
+    invent a fact; answering "changed" would excuse a no-op. It says neither.
+    """
+    if now_state == "ABSENT":
+        return ("REMOVED" if prior_sig else "ABSENT", False,
+                "this run burned no captions"
+                + (" and the previous run did" if prior_sig else ""))
+    if not prior_sig or not prior_sig.get("fp"):
+        return ("ABSENT", False,
+                "no caption fingerprint on the prior plan — it predates this "
+                "record or last run burned none, so a restyle and a no-op "
+                "cannot be told apart for THIS turn")
+    _same = prior_sig.get("fp") == (now_sig or {}).get("fp")
+    if _same:
+        return ("MEASURED", False,
+                "identical caption fingerprint (style=%s fps=%s pages=%s) — "
+                "the captions were NOT changed"
+                % (prior_sig.get("style"), prior_sig.get("fps"),
+                   prior_sig.get("pages")))
+    return ("MEASURED", True,
+            "captions changed: style %s->%s  fps %s->%s  pages %s->%s"
+            % (prior_sig.get("style"), (now_sig or {}).get("style"),
+               prior_sig.get("fps"), (now_sig or {}).get("fps"),
+               prior_sig.get("pages"), (now_sig or {}).get("pages")))
 
 
 def plan_with_inserts(plan, insert_requests):
@@ -2477,6 +3242,34 @@ KNOWLEDGE_TOOLS = [{
                          "description": "targeted_change ONLY: the families the "
                                         "request asks for. One of: text, card, "
                                         "sfx, zoom, transition, cut, caption"},
+            # MEASURED ON REAL TRAFFIC, 2026-06-25..2026-09-12: 425 of 5,943
+            # distinct briefs (7.2%) and 338 of 7,958 users (4.2%) name
+            # something the edit must NOT do. "no captions" dominates, and the
+            # most common shape is a WHOLE-VIDEO brief with one exclusion —
+            # "viral and engaging no captions in video" — which declares
+            # full_edit and had nothing to carry the exclusion at all.
+            "forbidden": {"type": "array", "items": {"type": "string"},
+                          "description":
+                              "ANY MODE. The families this request says NOT to "
+                              "do — 'no captions', 'without subtitles', 'no "
+                              "filters', 'nothing else'. This is NOT the "
+                              "opposite of `families` and it is not only for "
+                              "targeted_change: a request can ask for a full "
+                              "edit AND rule one thing out, and that is the "
+                              "commonest shape it takes.\n\n"
+                              "PUT IT HERE EVEN WHEN THE REST OF THE BRIEF IS "
+                              "VAGUE. 'make it viral, no captions' is a full "
+                              "edit with `forbidden: [\"caption\"]` — the "
+                              "vagueness of the rest does not soften the one "
+                              "thing they were specific about.\n\n"
+                              "An exclusive phrasing names the OTHERS: 'only "
+                              "zooms' means every family except zoom is "
+                              "forbidden. 'just add captions and nothing else' "
+                              "is the same shape.\n\n"
+                              "Delivering a forbidden family FAILS THE RUN. It "
+                              "is the one part of the brief the user was "
+                              "explicit about, and it is the cheapest thing in "
+                              "the world to honour."},
             "targets": {"type": "object",
                         "description": (
                             "RESOLVE THE SOFT MODIFIERS. A request rarely gives "
@@ -2644,30 +3437,17 @@ KNOWLEDGE_TOOLS = [{
                                                     "figure or a claim worth "
                                                     "stamping takes BOTH: the "
                                                     "caption carries the words, "
-                                                    "the card carries the number",
+                                                    "the card carries the number"
+                                                    + FAMILY_CORPUS_CRAFT,
                                      "items": {"type": "string",
                                                "enum": ["card", "text", "sfx",
                                                         "zoom", "cutaway",
                                                         "transition",
                                                         "none"]}},
                                  "cut": {"type": "string", "enum": ["keep", "cut"],
-        "description":
-            "KEEP this beat in the edit, or CUT it out entirely. "
-            "A BARE ENUM IS A LIST OF WORDS — this field shipped with no "
-            "description at all and the agent kept 93.6% of beats across 517 "
-            "rulings, so here is what the decision actually is. "
-            "An edit is what you REMOVE as much as what you add: a false "
-            "start, a repeated point, a stall before the speaker finds the "
-            "word, a beat that restates the one before it, a run-up that says "
-            "nothing — those are `cut`. The beat line shows mechanical "
-            "evidence in [brackets] where there is any: a long silence inside "
-            "the beat, or a stretch delivered well below this speaker's own "
-            "pace. That is EVIDENCE, not an instruction — a flagged beat may "
-            "still be kept for a reason you give in `why`, and an unflagged "
-            "beat may still be cut because it is redundant. "
-            "If a beat is mostly good but opens with a breath or ends with a "
-            "stall, do not cut it — TRIM it with keep_from_s/keep_to_s and "
-            "keep what works."},
+                                         "description": (CUT_FIELD_TEACH
+                                                         + CUT_EVIDENCE_TEACH
+                                                         + CUT_CORPUS_CRAFT)},
                                  "text_content": {
                                      "type": "string",
                                      "description": "REQUIRED when treatment "
@@ -2688,20 +3468,107 @@ KNOWLEDGE_TOOLS = [{
                                                     "'WHO?'), the ONE word worth "
                                                     "stamping, the figure. Short, "
                                                     "punchy, upper case reads "
-                                                    "best."},
+                                                    "best. AUTHOR IT IN THE "
+                                                    "SPEAKER'S OWN VOICE — the "
+                                                    "words on screen are part "
+                                                    "of the edit's voice, not a "
+                                                    "narrator's summary of it "
+                                                    "[05_motion_graphics, "
+                                                    "wired 2026-09-11]\n\n"
+                                                    # FOUR RULES FROM
+                                                    # 04_text_overlays, the
+                                                    # document that OWNS this
+                                                    # field and was never
+                                                    # wired to it. The
+                                                    # duplicate-captions rule
+                                                    # above came from
+                                                    # 05_motion_graphics and
+                                                    # 9 of 11 overlays in
+                                                    # round 65 were still
+                                                    # co-visible with their
+                                                    # own words, so what 04
+                                                    # adds is the SKIP option
+                                                    # and the structural
+                                                    # anchor — not a louder
+                                                    # version of the same
+                                                    # warning.
+                                                    "AN OVERLAY SHOWS "
+                                                    "FRAMING, THE CAPTIONS "
+                                                    "SHOW SPEECH — two "
+                                                    "different jobs on two "
+                                                    "different layers. If "
+                                                    "the text you are about "
+                                                    "to write duplicates "
+                                                    "what the captions will "
+                                                    "show, rewrite it as a "
+                                                    "LABEL ('THE NAME', "
+                                                    "'WHO?') **or SKIP IT** "
+                                                    "— not every beat wants "
+                                                    "an overlay, and a "
+                                                    "duplicate is worse than "
+                                                    "an absence.\n\n"
+                                                    "THE ANCHOR SUMMONS THE "
+                                                    "OVERLAY: a chapter "
+                                                    "turn, an act shift, a "
+                                                    "cold-open hook naming "
+                                                    "the promise, three "
+                                                    "parallel items the "
+                                                    "speaker enumerates. It "
+                                                    "marks STRUCTURE — it "
+                                                    "tells the viewer where "
+                                                    "they are. A video with "
+                                                    "clear turns wants one "
+                                                    "at each; a video that "
+                                                    "runs as ONE CONTINUOUS "
+                                                    "THOUGHT lets the "
+                                                    "captions carry it "
+                                                    "alone.\n\n"
+                                                    "IF THE TEXT COULD FIT "
+                                                    "ANY VIDEO IN THIS "
+                                                    "GENRE, rewrite it from "
+                                                    "this video's own "
+                                                    "specifics.\n\n"
+                                                    "A LABEL IS <=6 WORDS "
+                                                    "and lives in the UPPER "
+                                                    "THIRD: captions sit at "
+                                                    "the bottom and the face "
+                                                    "in the upper-middle "
+                                                    "band, so that is the "
+                                                    "one free band. "
+                                                    "[04_text_overlays, "
+                                                    "wired 2026-09-12]"},
+                                 # OFFERED **AND** DERIVED, on Zac's ruling
+                                 # 2026-09-11. I had deleted this field because
+                                 # two ways to state one thing lost 25 of 75
+                                 # placements. Deleting it also deleted a
+                                 # DISTINCTION: `sfx: "yes"` with no name means
+                                 # "a sound belongs here, you choose it", and
+                                 # `sfx_name` means "this sound". Naming the
+                                 # sound is CRAFT, not bookkeeping, and the
+                                 # agent must be able to do one without the
+                                 # other. The field is filled from `treatment`
+                                 # when empty — one source of truth for
+                                 # WHETHER, while WHICH stays the agent's.
                                  "sfx": {"type": "string", "enum": ["yes", "no"],
                                          "description":
-                                             "REQUIRED on hook and close "
-                                             "beats: does this beat take a "
-                                             "sound? yes = a sound belongs "
-                                             "here — name it in sfx_name, or "
-                                             "leave sfx_name empty to say a "
-                                             "sound belongs here and let the "
-                                             "harness pick one for this "
-                                             "beat's role. no = this moment "
-                                             "plays dry. Naming 'sfx' in "
-                                             "treatment already means yes; "
-                                             "the two must not disagree."},
+                                             "does this beat take a sound? "
+                                             "Ruling 'sfx' in `treatment` "
+                                             "already says yes and this is "
+                                             "FILLED IN FOR YOU -- you do not need to set it.\n\n"
+                                             # THIS FIELD SAID: set it without a name and "a sound belongs
+                                             # here, choose it from the beats ROLE". sfx_name, two fields
+                                             # below, says "pick by the MOMENT in the footage, NOT by the
+                                             # beats role". Adjacent fields, one axis, opposite instructions --
+                                             # and I wrote the role sentence in the same hour I fixed sfx_name
+                                             # to reject it. 07_sound_effects settles it: "where none exists,
+                                             # the moment carries no sound."
+                                             "A SOUND WITH NO MOMENT IS NOT A SOUND YOU WANT. If nothing in "
+                                             "this beat matches a sounds predicate, DO NOT RULE sfx -- silence "
+                                             "chosen on purpose is a signed answer, and marking a nothing is "
+                                             "as wrong as missing a peak. The harness can fall back to the "
+                                             "beats role when you name no sound, but that is a LAST RESORT the "
+                                             "pipeline takes, never a way to choose one. Name the sound in "
+                                             "sfx_name. [07_sound_effects, wired 2026-09-12]"},
                                  # ── THE FIELDS THE HARNESS CANNOT DERIVE ────
                                  # Everything else about a placement — where it
                                  # sits, how fast a zoom travels, how early a
@@ -2710,9 +3577,13 @@ KNOWLEDGE_TOOLS = [{
                                  # not: words do not exist until written, and
                                  # what to SHOW is a semantic choice.
                                  "sfx_name": {"type": "string",
-                                     "description": "which catalogue sound, when "
-                                                    "sfx is 'yes'. Pick by ROLE "
-                                                    "from the table."},
+                                     "enum": sorted(SFX_MOMENTS) or None,
+                                     "description": "WHICH sound. Pick by the "
+                                                    "MOMENT in the footage, not "
+                                                    "by the beat's role — role "
+                                                    "is where it sits, the "
+                                                    "moment is what happens."
+                                                    + sfx_name_teach()},
                                  "card_hero": {"type": "string",
                                      # REQUIRED, and it says so now. Removing
                                      # card_type and card_props made this the
@@ -2725,12 +3596,23 @@ KNOWLEDGE_TOOLS = [{
                                      "description": "REQUIRED when treatment "
                                                     "includes 'card': the "
                                                     "number or short phrase the "
-                                                    "card is ABOUT. This is the "
-                                                    "ONLY thing you say about a "
-                                                    "card — the component and "
-                                                    "its props are derived from "
-                                                    "it, the way zoom_arc "
-                                                    "derives the zoom. A figure "
+                                                    "card is ABOUT.\n\n"
+                                                    # IT USED TO CLAIM IT WAS "the ONLY thing you say about a card",
+                                                    # while card_props says "the key you send selects the component"
+                                                    # and card_condition says "the component is derived from your
+                                                    # answer". Three fields, three claims on one decision, each
+                                                    # internally consistent. derive_card_type settles it: props >
+                                                    # figure-in-hero > condition > PullQuote. So this field was the
+                                                    # FALSE one, and it told the agent not to send the two that
+                                                    # actually decide -- which is why 0 cards across every round to
+                                                    # date came from the prop table.
+                                                    "IT IS NOT THE ONLY THING YOU SAY. card_props OUTRANKS it (a "
+                                                    "uniquely-owned key names its component outright), a FIGURE here "
+                                                    "comes next (a number becomes StatCard), then card_condition "
+                                                    "narrows a short phrase, then PullQuote. SEND WHICHEVER OF THEM "
+                                                    "YOU KNOW. "
+                                                    "A figure becomes a counting card; a short claim becomes a quote "
+                                                    "card. "
                                                     "becomes a counting card; a "
                                                     "short claim becomes a "
                                                     "quote card. A beat line "
@@ -2740,6 +3622,92 @@ KNOWLEDGE_TOOLS = [{
                                                     "anchored on that instant"},
                                  "card_label": {"type": "string",
                                      "description": "the card's supporting line"},
+                                 # THE CONDITION, NOT THE COMPONENT. A bare
+                                 # 29-name enum is what failed: round 42 read
+                                 # "1 distinct of 29 selectable, StatCard=4"
+                                 # because the cached prefix named StatCard and
+                                 # nothing else, and the field description wrote
+                                 # the incumbency down. Eight questions, each
+                                 # already carrying its own sentence in the
+                                 # catalogue, is a choice the agent can actually
+                                 # make — and the harness derives the component
+                                 # from it, where the derivation is checkable.
+                                 #
+                                 # THE ENUM IS DERIVED FROM THE CATALOGUE at
+                                 # import and raises if the headings cannot be
+                                 # read, so it cannot drift from the document it
+                                 # describes and cannot silently become empty.
+                                 # THE PROP TABLE'S FIELD, WHICH DID NOT EXIST.
+                                 # `card_props` is read by the builder at two
+                                 # sites and by RULING_DECISION_FIELDS, and was
+                                 # offered by NO SCHEMA — a consumer with no
+                                 # producer. MG_PROPS_TEACH was generated and
+                                 # referenced only at its own definition: a
+                                 # measured table with no reader, the class this
+                                 # repo has paid for twice. So "the prop table
+                                 # has never been exercised" was never a
+                                 # judgement the agent made; there was no way to
+                                 # send it.
+                                 #
+                                 # THE CONTENT KEY IS THE SELECTOR and it is
+                                 # derived from the components, so a new one is
+                                 # offered the day it lands. 208 tokens for the
+                                 # shapes, ~150 for the map — and at Haiku's
+                                 # cache rate prefix size is nearly free while
+                                 # wall clock is the cost, so this is not a
+                                 # budget question.
+                                 "card_props": {
+                                     "type": "object",
+                                     "description": (
+                                         "the card's CONTENT, when a phrase is "
+                                         "not enough. The key you send selects "
+                                         "the component: " + ", ".join(
+                                             "%s -> %s" % (_k, _v) for _k, _v in
+                                             sorted(MG_UNIQUE_PROP_OWNER.items())
+                                             if _k in ("annotations", "bars",
+                                                       "items", "messages",
+                                                       "notes", "notifications",
+                                                       "pills", "stats", "tags",
+                                                       "firstSide", "step",
+                                                       "titleLead", "count",
+                                                       "number"))
+                                         + ". Full shapes: " + MG_PROPS_TEACH
+                                         + " Send the props for ONE component; "
+                                           "keys from two is refused, and so is "
+                                           "a component the condition you named "
+                                           "does not cover. Three values are "
+                                           "computed live rather than typed: "
+                                           "'timestamp' renders T+N.Ns, "
+                                           "'wordcount' a ticking count, 'wpm' "
+                                           "words per minute "
+                                           "(05_motion_graphics, previously "
+                                           "unreachable).")},
+                                 "card_condition": {
+                                     "type": "string",
+                                     "enum": MG_CONDITION_ENUM,
+                                     "description": (
+                                         "which question this beat's card "
+                                         "answers. "
+                                         # IT SAID "the component IS DERIVED FROM YOUR ANSWER", which is
+                                         # the third field to claim that one decision. derive_card_type:
+                                         # props > figure-in-hero > condition > PullQuote. So condition
+                                         # NARROWS; it does not decide, and a uniquely-owned prop key or a
+                                         # figure in card_hero both overrule it. Found by the leg that
+                                         # allows at most ONE field to claim the authority -- I had fixed
+                                         # card_hero and card_props and would have left this one.
+                                         "THIS NARROWS, IT DOES NOT DECIDE: a uniquely-owned `card_props` "
+                                         "key names its component outright and a FIGURE in `card_hero` "
+                                         "becomes StatCard, both ahead of this. Where neither settles it, "
+                                         "the catalogue is organised by these and your answer picks among "
+                                         "them: " + "; ".join(
+                                             "%s -> %s" % (_c, ", ".join(MG_CONDITIONS[_c][:3]))
+                                             for _c in MG_CONDITION_ENUM)
+                                         + ". Omit it and you get StatCard for a "
+                                           "figure or PullQuote for a phrase, "
+                                           "which is two of thirty-one. "
+                                           "[05_motion_graphics, wired "
+                                           "2026-09-11] "
+                                         + component_arrows_teach())},
                                  # WHICH COMPONENT, and its props. This is the
                                  # one family whose TYPE the harness cannot
                                  # derive: a quoted headline number is a
@@ -2823,20 +3791,62 @@ KNOWLEDGE_TOOLS = [{
                                                     "function — `purpose` is "
                                                     "the function axis. Where "
                                                     "they share a word they "
-                                                    "must agree."},
-                                 "why": {"type": "string"}},
+                                                    "must agree.\n\n"
+                                     # THE CRAFT, FROM THE CATALOGUE. Eleven
+                                     # claims about this field sat in
+                                     # 06_emphasis_zoom and none of them reached
+                                     # here; read_knowledge has been called 0
+                                     # times in 30 runs. Extracted at import so
+                                     # a catalogue edit cannot leave it behind,
+                                     # and the arcs the catalogue does NOT
+                                     # cover say so rather than reading as
+                                     # silence.
+                                                    "WHAT THE MOVE MUST DO at "
+                                                    "each position — the "
+                                                    "position names the JOB, "
+                                                    "the vibe picks the "
+                                                    "register, and they are "
+                                                    "ORTHOGONAL: do not let "
+                                                    "'it is a peak' default you "
+                                                    "to punchy. "
+                                                    "[06_emphasis_zoom, wired "
+                                                    "2026-09-11] "
+                                                    + arc_jobs_teach(
+                                                        ["hook", "build", "mid_peak",
+                                                         "payoff", "breather", "close"])
+                                                    + ARC_CORPUS_CRAFT},
+                                 "why": {"type": "string",
+                                     "description": WHY_FIELD_TEACH}},
                              "required": ["beat", "purpose", "treatment",
                                           "cut", "why"]}}},
                      "required": ["verdicts"]},
 }, {
     "name": "beat_verdict",
     "description": (
-        "Rule on ONE beat — the whole decision, once. What goes here (a card, a "
-        "text overlay, or nothing), whether the beat is kept or cut, and WHY. "
-        "Every beat in your brief needs one before you finish. This replaced "
-        "three separate gates: each of those forced a family, and forcing one "
-        "family measurably starved the others. There is one question per beat "
-        "so nothing can be satisfied at another family's expense."),
+        "THE SURGICAL INSTRUMENT, AND IT IS ONLY OFFERED ON A RE-EDIT. You are "
+        "changing an edit that already exists: this beat's previous ruling is "
+        "already loaded, and so is every other beat's. Use this to change the "
+        "ONE beat the instruction named — and nothing else.\n\n"
+        "IT IS NOT AN ALTERNATIVE TO rule_all_beats. If the instruction touches "
+        "several beats, rule them TOGETHER with rule_all_beats: that is not a "
+        "worse way to do this, it is the right one, and it is available to you "
+        "here for exactly that. Reach for this tool when the change is one "
+        "beat.\n\n"
+        "A SECOND RULING OF A BEAT YOU HAVE ALREADY RULED IS DISCARDED, NOT "
+        "MERGED. The first ruling stands and you will be told the beat was "
+        "already ruled. This is not a retry surface: to change a beat you have "
+        "just ruled, you must be inside the scope the instruction declared, and "
+        "the ruling must carry EVERY field it should keep — a ruling cannot "
+        "carry over what it does not repeat.\n\n"
+        "WHAT GOES HERE is the whole decision for that beat, once: the families "
+        "(a card, a text overlay, a zoom, a sound, or none), whether it is kept "
+        "or cut, and WHY. One question per beat, so nothing is satisfied at "
+        "another family's expense — three separate gates were tried and each "
+        "forced a family, which measurably starved the others.\n\n"
+        "THE BEATS THE INSTRUCTION DID NOT NAME ARE NOT YOURS TO CHANGE. A "
+        "ruling on a beat outside the declared scope is REFUSED and counted — "
+        "it is neither silently applied nor silently dropped. The user asked "
+        "for one thing; the rest of their edit is not in question."),
     "input_schema": {"type": "object",
                      "properties": {
                          "beat": {"type": "integer", "description": "the beat index"},
@@ -2855,126 +3865,53 @@ KNOWLEDGE_TOOLS = [{
                                      "description":
                                          "what this moment IS — the key the "
                                          "reference exemplars are indexed by"},
-                                                  "treatment": {"type": "array",
+                         # AN ARRAY ON BOTH SURFACES. Builder-2's copy declared
+                         # `"type": "string"` while rule_all_beats declared an
+                         # array of the same enum — so a ruling made through
+                         # this tool arrived as a BARE STRING and every consumer
+                         # doing `for t in (v.get("treatment") or [])` iterated
+                         # it character by character: round 46's 'c','a','r','d'
+                         # families exactly. SEVEN, with cutaway, per the merge
+                         # ruling; the enum moves with _TREATMENT_FAMILIES or
+                         # _assert_treatment_surface_agrees raises at import.
+                         "treatment": {"type": "array",
                                        "items": {
                                            "type": "string",
                                            "enum": ["card", "text", "sfx",
                                                     "zoom", "cutaway",
                                                     "transition", "none"]}},
                          "cut": {"type": "string", "enum": ["keep", "cut"],
-        "description":
-            "KEEP this beat in the edit, or CUT it out entirely. "
-            "A BARE ENUM IS A LIST OF WORDS — this field shipped with no "
-            "description at all and the agent kept 93.6% of beats across 517 "
-            "rulings, so here is what the decision actually is. "
-            "An edit is what you REMOVE as much as what you add: a false "
-            "start, a repeated point, a stall before the speaker finds the "
-            "word, a beat that restates the one before it, a run-up that says "
-            "nothing — those are `cut`. The beat line shows mechanical "
-            "evidence in [brackets] where there is any: a long silence inside "
-            "the beat, or a stretch delivered well below this speaker's own "
-            "pace. That is EVIDENCE, not an instruction — a flagged beat may "
-            "still be kept for a reason you give in `why`, and an unflagged "
-            "beat may still be cut because it is redundant. "
-            "If a beat is mostly good but opens with a breath or ends with a "
-            "stall, do not cut it — TRIM it with keep_from_s/keep_to_s and "
-            "keep what works."},
-                         # THE COMPANION FIELDS THE GATE DEMANDS. This tool
-                         # offered the FULL treatment enum and NONE of the
-                         # fields normalise_verdict requires, so every text,
-                         # zoom and cutaway ruling made through the repair path
-                         # was structurally impossible to satisfy: the agent
-                         # cannot send a field the schema does not offer, so it
-                         # re-ruled the same beat identically until the turns
-                         # ran out.
+                                         "description": (CUT_FIELD_TEACH
+                                                         + CUT_EVIDENCE_TEACH
+                                                         + CUT_CORPUS_CRAFT)},
+                         # THE COMPANION FIELDS ARE **DERIVED**, NOT PASTED.
+                         # This tool offered the full treatment enum and NONE
+                         # of the fields normalise_verdict requires, so every
+                         # text, zoom and cutaway ruling made through the repair
+                         # path was structurally impossible to satisfy — the
+                         # agent cannot send a field the schema does not offer,
+                         # so it re-ruled the same beat identically until the
+                         # turns ran out. Round 47 called beat_verdict 3 times
+                         # and logged 22 rejections.
                          #
-                         # It is Builder-2's card_type orphan in the same
-                         # direction — a gate demanding what no schema supplies
-                         # — and it was on the ONE path whose entire job is to
-                         # fix a rejected ruling. Round 47 called beat_verdict
-                         # 3 times and logged 22 rejections.
+                         # I FIXED IT BY HAND-COPYING EIGHT PROPERTY BLOCKS FROM
+                         # rule_all_beats, and Builder-2's smoke_reruled_visible
+                         # caught it: two declarations of one field is exactly
+                         # the divergence the fix exists to prevent, and it
+                         # drifts the first time either side is edited.
+                         # `_sync_verdict_surfaces` copies every missing field
+                         # off the plural tool's item schema at import instead,
+                         # and reports WHICH it added so a silent no-op is
+                         # visible.
                          #
                          # THE INVARIANT, stated because the fix is only half of
                          # it: a description that says REQUIRED must have a gate
                          # that enforces it, AND the gate may only demand what
-                         # the schema offers. Both directions, on EVERY tool
-                         # that names families — checking one tool passes while
-                         # the other is broken, which is how this survived.
-                         "text_content": {
-                             "type": "string",
-                             "description": "REQUIRED when treatment includes "
-                                            "'text': the words to burn on "
-                                            "screen for this beat."},
-                         "keep_from_s": {"type": "number",
-                             "description":
-                                 "OPTIONAL, cut=keep only. Keep this beat from "
-                                 "this SOURCE second instead of its start — "
-                                 "trim a breath or a stall without losing the "
-                                 "beat."},
-                         "keep_to_s": {"type": "number",
-                             "description":
-                                 "OPTIONAL, cut=keep only. Keep until this "
-                                 "SOURCE second. The kept window must be at "
-                                 "least 0.6s and must not split a spoken word; "
-                                 "a trim that does is REFUSED and named."},
-                         "framing": {"type": "string",
-                             "enum": ["blur", "fit", "crop"],
-                             "description":
-                         "ONLY for a source whose shape is not "
-                         "9:16 (landscape, square). What to do "
-                         "with the frame on THIS beat: `blur` "
-                         "keeps the whole frame over a blurred "
-                         "fill (nothing lost), `fit` keeps it "
-                         "on black bars, `crop` fills the "
-                         "screen and LOSES the sides. Crop when "
-                         "the subject is centred and the edges "
-                         "are empty; blur or fit when there is "
-                         "text, a face, or anything readable "
-                         "near an edge. Omit it and the frame "
-                         "is kept whole (blur)."},
-                         "zoom_arc": {
-                             "type": "string",
-                             "enum": ["hook", "build", "mid_peak",
-                                      "payoff", "breather", "close"],
-                             "description": "REQUIRED when treatment includes "
-                                            "'zoom': WHICH MOMENT this is. It "
-                                            "decides the move and cannot be "
-                                            "derived from timing."},
-                         "cutaway_from_s": {
-                             "type": "number",
-                             "description": "REQUIRED when treatment includes "
-                                            "'cutaway': the timestamp IN THE "
-                                            "SOURCE of the other moment to "
-                                            "show here, in seconds. The picture "
-                                            "cuts to it and back while THIS "
-                                            "beat's audio keeps playing, so it "
-                                            "must show what this beat is "
-                                            "talking about. It cannot be inside "
-                                            "this beat's own footage."},
-                         # card_hero and card_label, MIRRORED FROM
-                         # rule_all_beats. I added the other three and stopped,
-                         # and Builder-2's per-tool orphan check caught these
-                         # two immediately — the check working on the very fix
-                         # it was merged alongside. Cards are the family that
-                         # burned three beats and five turns in round 47, so
-                         # leaving them off the repair path would have kept the
-                         # exact loop the round was meant to close.
-                         "card_hero": {
-                             "type": "string",
-                             "description": "REQUIRED when treatment includes "
-                                            "'card': the number or short phrase "
-                                            "the card is ABOUT. This is the "
-                                            "ONLY thing you say about a card — "
-                                            "the component and its props are "
-                                            "derived from it, the way zoom_arc "
-                                            "derives the zoom. A figure becomes "
-                                            "a counting card; a short claim "
-                                            "becomes a quote card"},
-                         "card_label": {
-                             "type": "string",
-                             "description": "the card's supporting line"},
+                         # the schema offers — both directions, on EVERY tool
+                         # that names families. `_assert_no_orphaned_demand`
+                         # certifies the second at import.
                          "why": {"type": "string",
-                                 "description": "about THIS beat's content"}},
+                                 "description": WHY_FIELD_TEACH}},
                      "required": ["beat", "purpose", "treatment", "cut",
                                   "why"]},
 }, {
@@ -2994,6 +3931,75 @@ KNOWLEDGE_TOOLS = [{
                          "max_hits": {"type": "integer"}},
                      "required": ["query"]},
 }]
+
+
+
+
+# ── TWO SYNCS, TWO JOBS, TWO NAMES ──────────────────────────────────────────
+# Both lanes wrote a function called `_sync_verdict_surfaces` and they do
+# DIFFERENT THINGS: this one copies missing FIELDS onto the singular tool, the
+# one further down copies missing DESCRIPTIONS. The merge kept both, under one
+# name, so the second silently replaced the first — the fields sync never ran
+# and every import-time cert that finds a function by walking the AST for its
+# name read the copy that does not execute. Same name, same file, opposite
+# halves of one guarantee.
+def _sync_verdict_surfaces():
+    """beat_verdict offers EXACTLY the fields rule_all_beats offers. DERIVED.
+
+    ZAC'S STANDARD IS THAT BOTH PATHS EDIT EQUALLY WELL, and the re-edit surface
+    was structurally worse at obeying the user: eight of the thirteen fields the
+    main surface offers were simply absent from this one — card_condition,
+    card_hero, card_label, card_props, sfx, sfx_name, text_content, zoom_arc.
+    Nothing caught it, because a missing field produces no error anywhere. The
+    agent is not offered it, so it cannot supply it, so the beat is ruled
+    without it and the boundary stores nothing. A beat re-ruled through
+    beat_verdict could never carry a caption's copy, a card's hero, a zoom's
+    arc or a sound's name.
+
+    `_assert_verdict_surfaces_offer_the_same_fields` RECORDED that gap as KNOWN
+    rather than closing it, which was the right call for a check and the wrong
+    place to leave a product. This closes it.
+
+    DERIVED, NOT COPIED, and that is the whole point. Eight pasted property
+    blocks would drift the first time one side was edited — the divergence they
+    are meant to prevent, reintroduced by the fix for it. The singular tool's
+    properties are now BUILT from the plural tool's item schema at import, so
+    the two surfaces cannot disagree: there is one declaration and one place to
+    change it.
+
+    Fields the singular tool already declares KEEP their own text: `treatment`
+    and `cut` carry descriptions tuned to a one-beat call, and overwriting them
+    with the batch tool's wording would make the prompt worse in the name of
+    symmetry. Symmetry is required of the FIELD SET, not of the prose.
+    """
+    import copy as _cp
+    _plural = next((t for t in KNOWLEDGE_TOOLS
+                    if t.get("name") == "rule_all_beats"), None)
+    _single = next((t for t in KNOWLEDGE_TOOLS
+                    if t.get("name") == "beat_verdict"), None)
+    if _plural is None or _single is None:
+        raise AssertionError(
+            "a verdict tool is missing, so the surfaces cannot be synced: "
+            "rule_all_beats=%s beat_verdict=%s"
+            % (_plural is not None, _single is not None))
+    _items = ((((_plural.get("input_schema") or {}).get("properties") or {})
+               .get("verdicts") or {}).get("items") or {})
+    _src_props = _items.get("properties") or {}
+    if not _src_props:
+        raise AssertionError(
+            "rule_all_beats declares no verdict item properties — the sync "
+            "would silently leave beat_verdict as it was, which is the "
+            "absence-as-success failure this file keeps paying for")
+    _dst = (_single.get("input_schema") or {}).setdefault("properties", {})
+    _added = []
+    for _k, _v in _src_props.items():
+        if _k not in _dst:
+            _dst[_k] = _cp.deepcopy(_v)
+            _added.append(_k)
+    return sorted(_added)
+
+
+VERDICT_SURFACES_SYNCED = _sync_verdict_surfaces()
 
 
 # BOTH files are required for the capability arm: 14 says WHERE families go,
@@ -3224,7 +4230,17 @@ _MODAL_MEM_USD_PER_GIB_S = 0.00000667
 # 139.4s on car_short, and the nested set sums to 76.3 inside an 83.5s parent.
 _NESTED_IN_EXECUTE = ("build_cut", "build_alpha_layer", "composite_captions",
                       "build_zoom", "build_transitions", "build_sfx",
-                      "build_reel", "build_cutaway")
+                      "build_reel", "build_cutaway",
+                      # ADDED 2026-09-11, AND THE GUARD CAUGHT ITS OMISSION.
+                      # build_control_composite is called from inside
+                      # execute_plan (twice: once for the caption/text input,
+                      # once for card's). Left out of this set it counted as
+                      # top-level, the top-level sum reached 248.8s against a
+                      # 219.4s run, and run_cost reported INCOHERENT rather
+                      # than printing a share — which is the negative-remainder
+                      # guard working on the person who wrote it, one commit
+                      # after adding the stage it did not know about.
+                      "build_control_composite")
 
 
 def container_usd_per_s(cpu, memory_mb):
@@ -3408,6 +4424,122 @@ def blind_rebuilds(turns):
                     _blind += 1
                 _seen = False
     return ("MEASURED", _blind, _total)
+_EMPTYISH = (None, "", [], {})
+# A KEY THAT WAS NEVER WRITTEN IS NOT A KEY SET TO None, and conflating them is
+# the absent-as-zero family — which I reproduced inside the very reporter built
+# to expose it. `_r.get(k)` returned None for both, so round 63's motion beat 0
+# printed `sfx 'yes' -> None` when the truth is `sfx 'yes' -> KEY ABSENT`.
+#
+# The difference is not cosmetic. A STORED None defeats `.get("sfx", "no")` and
+# the beat goes silently sfx-less; an ABSENT key lets the default stand and the
+# beat is safe. A peer session reported the stored-None failure from its own
+# lane; on this lane the key is absent, so that failure does not occur here —
+# and only a reporter that tells the two apart can say so.
+_MISSING = "<key absent>"
+
+
+def verdicts_fingerprint(vs):
+    """sha256 over the verdict list, or None when there is nothing to hash.
+
+    `built_from` is derived from `executed_verdicts`, the frozen copy taken at
+    execute time. That derivation is only worth anything if the freeze is
+    genuinely untouched — if something downstream mutates it in place,
+    `built_from` reports the same answer whether or not the freeze held, and a
+    number that cannot fail is not a measurement. (Raised by a peer session
+    reading the filing; it was right, and this file has paid for exactly this
+    before — the half-ruling stripper rewriting `treatment` IN PLACE is what
+    made the frozen copy necessary in the first place.)
+    """
+    if not isinstance(vs, list):
+        return None
+    import hashlib as _hl, json as _js
+    return _hl.sha256(
+        _js.dumps(vs, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
+def reruled_beats(verdicts, executed=None, executed_fp=None):
+    """(state, rows) — beats ruled more than once: WHAT CHANGED, WHAT WAS LOST,
+    and WHICH ruling the build actually used.
+
+    Round 63 `motion` carried 12 `beat_verdicts` for 10 beats and nothing said
+    so. The singular `beat_verdict` tool appends with NO duplicate check (
+    `rule_all_beats` has one, plus the half-ruling refusal and the full
+    VERDICT_FIELDS projection), writes 4 of the schema's fields, and replies
+    `"ruled": len({v["beat"] for v in beat_verdicts})` — a DEDUPED count, so
+    the agent is told "ruled 10 of 10" and cannot tell it just contradicted
+    itself. Beat 0's second ruling dropped `zoom_arc` from "hook" to None while
+    keeping "zoom" in `treatment`.
+
+    It was inert on that round only because the second execute_plan was
+    REFUSED. Had it run, the build's own per-beat lookup is
+    `{v.get("beat"): v for v in beat_verdicts}` — a dict comprehension, so LAST
+    WINS — and the zoom would have been built with no arc, silently, in the
+    field this lane spent the day wiring craft into. **Latent, not fixed**, and
+    bounding it is Builder-1's; this reports it.
+
+    THREE STATES, because the zero is ambiguous otherwise. `verdicts` not a
+    list is ABSENT — a ledger that never recorded rulings and a run that never
+    re-ruled a beat are different facts. A present list with no duplicate is a
+    MEASURED zero.
+    """
+    if not isinstance(verdicts, list):
+        return ("ABSENT", [])
+    # A DERIVATION IS ONLY AS GOOD AS THE FREEZE IT READS. If the recorded
+    # fingerprint disagrees with the copy in hand, the copy was mutated after
+    # the build and `built_from` is unanswerable — say so rather than return a
+    # confident value that cannot be wrong.
+    _freeze_ok = True
+    if executed_fp is not None and isinstance(executed, list):
+        _freeze_ok = (verdicts_fingerprint(executed) == executed_fp)
+    _order = {}
+    for _v in verdicts:
+        if isinstance(_v, dict) and _v.get("beat") is not None:
+            _order.setdefault(_v["beat"], []).append(_v)
+    _ex = {}
+    for _v in (executed if isinstance(executed, list) else []):
+        # FIRST occurrence, because executed_verdicts is a frozen copy that can
+        # itself carry duplicates; taking the last here would read the defect
+        # as the answer to the question about the defect.
+        if isinstance(_v, dict) and _v.get("beat") is not None:
+            _ex.setdefault(_v["beat"], _v)
+    _rows = []
+    for _beat, _rul in sorted(_order.items(), key=lambda kv: (kv[0] is None, kv[0])):
+        if len(_rul) < 2:
+            continue
+        _keys = set()
+        for _r in _rul:
+            _keys |= set(_r)
+        _changed, _lost = {}, []
+        for _k in sorted(_keys - {"beat"}):
+            _vals = [(_r[_k] if _k in _r else _MISSING) for _r in _rul]
+            # A FIELD THAT WAS EMPTY THROUGHOUT IS NOT A CHANGE. `None ->
+            # <key absent>` differs technically and tells a reader nothing, and
+            # eleven such rows per beat bury the four that matter. Report a
+            # field only if some ruling actually said something about it.
+            if all(_x in _EMPTYISH or _x == _MISSING for _x in _vals):
+                continue
+            if any(_x != _vals[0] for _x in _vals):
+                _changed[_k] = _vals
+                if (_vals[0] not in _EMPTYISH and _vals[0] != _MISSING
+                        and (_vals[-1] in _EMPTYISH or _vals[-1] == _MISSING)):
+                    _lost.append(_k)
+        # WHICH RULING BUILT, derived from the frozen executed copy rather than
+        # asserted from the merge rule — the merge rule is the thing in doubt.
+        if not _freeze_ok:
+            _built = "FREEZE_MUTATED"     # the record of what built was rewritten
+        elif not _changed:
+            _built = "identical"          # not vacuously "first": nothing differs
+        elif _beat not in _ex:
+            _built = "NOT_EXECUTED"
+        else:
+            _e = _ex[_beat]
+            _first = all(_e.get(_k) == _rul[0].get(_k) for _k in _changed)
+            _last = all(_e.get(_k) == _rul[-1].get(_k) for _k in _changed)
+            _built = ("first==later" if _first and _last else
+                      "first" if _first else "later" if _last else "MIXED")
+        _rows.append({"beat": _beat, "rulings": len(_rul), "built_from": _built,
+                      "changed": _changed, "lost_fields": _lost})
+    return ("MEASURED", _rows)
 
 
 def figure_instant(beat, numeric_ts):
@@ -4899,6 +6031,21 @@ def delivery_fps(actual, tol=0.1):
 def geometry_normalise_filter(src_w, src_h, out_w=1080, out_h=1920,
                               framing="blur"):
     """(filter, mode, crop_loss) to bring a source to the delivery geometry.
+
+    KEPT THIS NAME AND THIS CONTRACT on Zac's merge ruling 2026-09-12.
+    lane/duration-producer carried a function of the same name with a DIFFERENT
+    contract: no `framing` argument, returning a PLAIN COMMA CHAIN with no
+    labels, substituted between explicit [cv]/[outv] by its one caller. That
+    lane renamed its side to `delivery_geometry_chain` and then deleted it with
+    its caller here.
+
+    TWO FUNCTIONS, ONE NAME, TWO CONTRACTS is the collision that cost this lane
+    five rounds of "Too many inputs specified for the scale filter" — a
+    labelled fragment comma-appended to a chain, unsubstituted. A silent merge
+    resolution here would have swapped one contract for the other and the
+    failure would have looked like an ffmpeg bug. This one returns labelled
+    fragments because per-beat framing needs N of them in one graph; a comma
+    chain structurally cannot express blur-fill, which is a split/overlay.
 
     MODULE LEVEL AND PURE so a test can call it with real dimensions.
 
@@ -6968,7 +8115,8 @@ def derive_card_props(mg_type, hero, label=""):
     return (_p, "filled %s from the phrase" % sorted(_p))
 
 
-def derive_card_type(hero, beat_text="", vibe=""):
+def derive_card_type(hero, beat_text="", vibe="", condition=None,
+                     card_props=None):
     """(type, why) — WHICH component this claim wants. Never a default.
 
     Returns (None, why) when the claim does not want a card at all, which is a
@@ -6976,13 +8124,49 @@ def derive_card_type(hero, beat_text="", vibe=""):
     nobody can read is the failure this whole thread began with.
     """
     _h = str(hero or "").strip()
+    # WHAT IT IS GIVEN IDENTIFIES IT. A prop key owned by exactly one component
+    # names that component outright — `messages` is ChatThread and nothing
+    # else — so structured content selects its own carrier and the 12 components
+    # that need a list stop being unreachable. This is the path `card_props`
+    # was built for and had never been used on.
+    _owned = sorted({MG_UNIQUE_PROP_OWNER[_k]
+                     for _k in (card_props or {})
+                     if _k in MG_UNIQUE_PROP_OWNER})
+    if len(_owned) == 1:
+        _c = _owned[0]
+        if condition and _c not in (MG_CONDITIONS.get(condition) or []):
+            # THE TWO ANSWERS DISAGREE. Say so instead of silently preferring
+            # one: the props name a component the stated condition does not
+            # cover, and picking either would be inventing an answer neither
+            # input gave.
+            return (None, "PROPS_CONDITION_CONFLICT: card_props name %s, which "
+                          "the catalogue does not list under %r. Send props for "
+                          "a component under that condition, or name the "
+                          "condition %s belongs to"
+                          % (_c, condition,
+                             next((_k for _k, _v in MG_CONDITIONS.items()
+                                   if _c in _v), "(undocumented)")))
+        return (_c, "card_props carry %s, which only %s declares"
+                % (", ".join(_k for _k in (card_props or {})
+                             if MG_UNIQUE_PROP_OWNER.get(_k) == _c), _c))
+    if len(_owned) > 1:
+        return (None, "PROPS_AMBIGUOUS: card_props carry keys owned by %s — "
+                      "send the props for one component, not several"
+                      % ", ".join(_owned))
     if not _h:
         return (None, "no phrase to stamp — the agent ruled a card and named "
                       "nothing to put on it")
     # A QUOTED FIGURE WANTS THE COUNTER. StatCard requires value:number and
     # counts up to it; that is what an escalating-counter hook IS, and it is the
     # component the three missed moments wanted.
-    if _CARD_FIGURE.search(_h):
+    # A STATED CONDITION OUTRANKS THE FIGURE HEURISTIC. "The 3-Part Hook" is a
+    # TITLE that happens to contain a numeral, and the figure rule sent it to
+    # StatCard even under WHEN STEPS OR ITEMS ARE ENUMERATED. The heuristic
+    # exists for when nothing was said; when the agent has named the question
+    # the beat answers, a digit in the phrase is not a better answer than the
+    # answer it gave.
+    if _CARD_FIGURE.search(_h) and (
+            not condition or "StatCard" in (MG_CONDITIONS.get(condition) or [])):
         return ("StatCard", "the phrase carries a figure, and StatCard is the "
                             "only component that counts up to one")
     # A PHRASE WITH NO FIGURE IS STILL A CLAIM. "HOURS TO EDIT" is the third
@@ -6992,10 +8176,46 @@ def derive_card_type(hero, beat_text="", vibe=""):
     # can carry.
     _words = [w for w in re.split(r"\s+", _h) if w]
     if len(_words) <= 5:
-        return ("PullQuote", "a short claim with no figure — PullQuote reads "
-                             "`text` and carries a phrase whole")
-    return (None, "the phrase is too long to stamp (%d words); a card is a "
-                  "few words at reading size, not a sentence" % len(_words))
+        # THE CONDITION PICKS THE PHRASE CARD. Eight components take a single
+        # text field and the catalogue already says which question each answers;
+        # without a condition this returned the only one it had ever been told
+        # about, which is how a 31-type catalogue read two wide.
+        if condition:
+            _cands = condition_components(condition, one_field_only=True)
+            if len(_cands) == 1:
+                return (_cands[0],
+                        "a short claim with no figure, and %s is the only "
+                        "component under %r that a bare phrase fills"
+                        % (_cands[0], condition))
+            if len(_cands) > 1:
+                # REFUSED RATHER THAN DEFAULTED. Both take a title and nothing
+                # in the catalogue ranks them, so naming the distinguishing
+                # prop hands the choice back to the agent instead of making it
+                # on a proxy.
+                _sel = "; ".join(
+                    "%s: send %s" % (_c, " or ".join(
+                        sorted(_k for _k, _v in MG_UNIQUE_PROP_OWNER.items()
+                               if _v == _c)[:3]) or "nothing distinctive")
+                    for _c in _cands)
+                return (None, "CONDITION_AMBIGUOUS: %d components under %r take "
+                              "a bare phrase and the catalogue does not rank "
+                              "them — %s" % (len(_cands), condition, _sel))
+            return (None, "NO_ONE_FIELD_COMPONENT: nothing under %r takes a "
+                          "bare phrase — the components there need structured "
+                          "content, so send card_props" % condition)
+        return ("PullQuote", "a short claim with no figure and no condition "
+                             "named — PullQuote reads `text` and carries a "
+                             "phrase whole")
+    # A COPY FAULT IS NOT A CATALOGUE GAP, and conflating them sent the one
+    # reachable refusal at the wrong remedy. `author_component` was offered for
+    # a hero of six words — a 270-token tool, plus a 431-token prompt block,
+    # answering a problem that needs THREE FEWER WORDS. Marked so the caller
+    # can tell the two apart; see AUTHORING_VERDICT.md for why the other kind
+    # has never been observed.
+    return (None, "HERO_TOO_LONG: the phrase is too long to stamp (%d words); "
+                  "a card is a few words at reading size, not a sentence. "
+                  "Shorten it to five words or fewer — PullQuote carries a "
+                  "phrase whole" % len(_words))
 
 
 # ── REFERENCE RETRIEVAL — the examples, at the moment of ruling ─────────────
@@ -8208,9 +9428,13 @@ def remap_words(spans, words):
     for a, b in spans:
         for w in words:
             if w["s"] >= a - 1e-6 and w["e"] <= b + 1e-6:
-                kept.append({"w": w["w"],
-                             "s": w["s"] - a + off,
-                             "e": w["e"] - a + off})
+                # ANNOTATE, DO NOT RECONSTRUCT. This rebuilt each word as
+                # {w, s, e} and silently dropped every other field it was
+                # handed. The remap's job is to move the CLOCK, so it now
+                # copies the word and overwrites the two times — anything
+                # else the ingest attached survives by default instead of
+                # surviving only if someone remembered to list it.
+                kept.append(dict(w, s=w["s"] - a + off, e=w["e"] - a + off))
         off += (b - a)
     return kept
 
@@ -8295,84 +9519,6 @@ def _verdict_fields():
 TREATMENT_FAMILIES = tuple(_TREATMENT_FAMILIES)
 
 
-def normalise_verdict(v):
-    """(ok, record, reason) — the TYPE BOUNDARY for one beat ruling. PURE.
-
-    WHY THIS EXISTS. Round 46, talking_head, printed this:
-
-        RULED vs BUILT : a 3->0 GAP  c 3->0 GAP  card 0->0  d 3->0 GAP  r 3->0 GAP
-        [1] ['c', 'a', 'r', 'd']/keep  10 times a day workload. StatCard hero '10'.
-
-    The agent supplied `treatment` as the BARE STRING "card" against a schema
-    that correctly declares an array. Nothing rejected it, so:
-
-      * seven consumers doing `for t in (v.get("treatment") or [])` iterated the
-        STRING and got 'c','a','r','d';
-      * led["ruled_vs_built"] keys off set(_fam_ruled), so those four letters
-        became four reported FAMILIES, each 3->0 with a GAP marker, while the
-        real `card 0->0` read clean;
-      * three cards were ruled and ZERO built, and the accounting blamed
-        families that do not exist.
-
-    AND THE SAME PAYLOAD BROKE THE DEDUP. The ingest guard is
-    `if _v.get("beat") in _seen: continue` — first ruling wins — but `_seen`
-    holds whatever type arrived. Proven directly:
-
-        beat 1 (int) then beat 1 (int)   -> 1 stored, dedup works
-        beat 1 (int) then beat "1" (str) -> 2 STORED, dedup BYPASSED
-
-    So beat 1 carried BOTH ['none'] and the corrupt ruling, and every per-beat
-    count in that round counted one beat twice. One missing check, two symptoms:
-    the character-families and the duplicate verdict.
-
-    REJECTS RATHER THAN COERCES, because Zac ruled it loud. A coerced
-    `"card" -> ["card"]` would paper over an agent that is emitting the wrong
-    shape, and we would never learn it was. The rejection is recorded in
-    led["verdicts_rejected"] with the reason and printed, so a run that loses
-    rulings says which and why instead of reporting phantom families.
-    """
-    if not isinstance(v, dict):
-        return False, None, f"verdict is {type(v).__name__}, not an object"
-    if v.get("beat") is None:
-        return False, None, "no beat index"
-    # BEAT: one canonical type, so the dedup set cannot be bypassed by "1" vs 1.
-    _b = v.get("beat")
-    if isinstance(_b, bool) or not isinstance(_b, (int, float, str)):
-        return False, None, f"beat is {type(_b).__name__}"
-    try:
-        beat = int(str(_b).strip())
-    except (TypeError, ValueError):
-        return False, None, f"beat {_b!r} is not an integer index"
-    # TREATMENT: a LIST. A bare string is the defect, named explicitly.
-    _t = v.get("treatment")
-    if isinstance(_t, str):
-        return False, None, (f"treatment is the STRING {_t!r}, not a list — a "
-                             f"string is iterated character by character and "
-                             f"becomes {sorted(set(_t))} families")
-    if _t is None:
-        _t = []
-    if not isinstance(_t, (list, tuple)):
-        return False, None, f"treatment is {type(_t).__name__}, not a list"
-    fams, bad = [], []
-    for _x in _t:
-        if not isinstance(_x, str):
-            bad.append(repr(_x)); continue
-        _n = _x.strip().lower()
-        (fams if _n in TREATMENT_FAMILIES else bad).append(_n)
-    if bad:
-        return False, None, (f"treatment carries {bad} — outside the closed set "
-                             f"{list(TREATMENT_FAMILIES)}")
-    # A FAMILY THAT NAMES NOTHING IS NOT A RULING. cutaway is the first family
-    # built with the grounding requirement in place, so it is enforced HERE
-    # rather than discovered at build time as another ruled_not_built.
-    if "cutaway" in fams and v.get("cutaway_from_s") is None:
-        return False, None, ("treatment includes 'cutaway' but no "
-                             "cutaway_from_s — a cutaway must name the source "
-                             "moment it cuts to")
-    rec = dict(v)
-    rec["beat"] = beat
-    rec["treatment"] = fams
-    return True, rec, ""
 # ── THE DURABLE PLAN ────────────────────────────────────────────────────────
 #
 # `execute_plan` takes NO ARGUMENTS: it runs from the verdicts in harness state.
@@ -8579,8 +9725,24 @@ def cutaway_source_ref(ref, sources, durations):
     return (CUTAWAY_REF_OK, _idx, _t, "source %d at %.2fs" % (_idx, _t))
 
 
+# WHAT execute_plan CAN ACTUALLY BUILD, family -> step type. The dispatch reads
+# this and so does the grader, so "the pipeline never built it" and "the agent
+# never ruled it" can never be confused for one another.
+BUILT_FAMILIES = {"text": "overlay_text", "zoom": "emphasis", "sfx": "sfx",
+                  "card": "card", "transition": "transition",
+                  # CUTAWAY IS BUILT (merge ruling 2026-09-12). Round 67 built
+                  # 4 of them and the manifest DECLARED 0 — `accounting_
+                  # unbalanced` fired on exactly this absence, because the
+                  # grader read a set the builder had outgrown.
+                  "cutaway": "cutaway"}
+
+
 FIDELITY_OK, FIDELITY_SHORT, FIDELITY_OVER, FIDELITY_UNSCOPED = (
     "FAITHFUL", "SHORT", "OVERREACHED", "UNSCOPED")
+# A FIFTH STATE, AND THE ONLY ONE THE USER SPELLED OUT. "no captions" is not a
+# scope the edit overshot — it is an instruction, and delivering the thing
+# somebody explicitly refused is a different failure from delivering extra.
+FIDELITY_FORBIDDEN = "FORBIDDEN"
 
 
 def spec_fidelity(spec, placements, cut_made=False, captions_made=False):
@@ -8621,6 +9783,17 @@ def spec_fidelity(spec, placements, cut_made=False, captions_made=False):
     # is led["caption_composited"], and the caller passes it.
     if captions_made:
         _built.add("caption")
+    # ── FORBIDDEN RUNS FIRST, AND IN EVERY MODE ────────────────────────────
+    # This sat behind the mode gate in every earlier version, which meant the
+    # commonest negative-constraint brief on real traffic — a full_edit that
+    # rules one thing out — returned UNSCOPED and NOTHING OBJECTED while the
+    # pipeline burned the captions the user had just refused.
+    _forbidden = {str(_f).lower() for _f in (_sc.get("forbidden") or [])}
+    _violated = sorted(_forbidden & _built)
+    if _violated:
+        return (FIDELITY_FORBIDDEN, [], _violated,
+                "the request said NOT to do %s and the edit contains it. This "
+                "is the one thing they were explicit about." % _violated)
     if _mode != "targeted_change":
         return (FIDELITY_UNSCOPED, [], sorted(_built),
                 "mode=%s — no declared family scope, so fidelity cannot be "
@@ -8643,6 +9816,361 @@ def spec_fidelity(spec, placements, cut_made=False, captions_made=False):
                                                          _missing))
     return (FIDELITY_OK, [], [],
             "asked for %s and delivered exactly that" % sorted(_asked))
+
+
+
+
+COHERENT, INCOHERENT, VACANT, INERT = (
+    "COHERENT", "INCOHERENT", "VACANT", "INERT")
+
+
+OVERLAY_WINDOW_CAP_S, OVERLAY_WINDOW_FLOOR_S = 3.0, 0.6
+
+
+def overlay_covisible(placements, beats, caption_words, min_token=3):
+    """(state, rows) — overlays showing a word the CAPTION is showing at the
+    same instant. PURE. MEASURED | ABSENT.
+
+    THE DIFFERENT QUESTION, not a tighter threshold. `overlay_restates_speech`
+    asks whether overlays repeat the SPEECH across beats, and passes on two
+    arms: a consecutive run of 3, or a share of 0.7. Round 65's car_mid scored
+    `share 0.50, longest_run 1, verdict "editorial"` — a pass — while the frame
+    at 5.5s showed "UNEMPLOYED" stacked directly above "unemployed".
+
+    Tightening those arms would be the wrong fix: a threshold chosen to catch
+    this case is calibrated on this case, which is how a corpus gate learned
+    "detailed" and called it "usable". The defect is not a rate at all. It is
+    CO-VISIBILITY — the same word on screen twice at one instant — and that is
+    BINARY. There is no population to mis-fit, because one frame either shows a
+    word twice or it does not.
+
+    It also cannot be answered by the older function, whose signature is
+    `(verdicts, beats, min_run=3)`: it is never told whether captions are on.
+    And when they are, a restating overlay is co-visible BY CONSTRUCTION,
+    because the captions are burned from the same speech the overlay restated.
+
+    The window comes from the build's own rule — `min(3.0, max(0.6, beat
+    duration))` — so the check asks about the interval the overlay is actually
+    on screen rather than an interval of its own invention.
+
+    ABSENT when there are no overlays or no caption words: a run with nothing to
+    duplicate is not a clean run, it is a run this question does not apply to.
+    """
+    import re as _re
+    _texts = [_p for _p in (placements or [])
+              if str((_p or {}).get("family") or "").lower() == "text"]
+    if not _texts or not caption_words:
+        return ("ABSENT", [])
+    _by_i = {_b.get("i"): _b for _b in (beats or []) if isinstance(_b, dict)}
+
+    def _toks(_s):
+        return {_t for _t in _re.findall(r"[a-z0-9']+", str(_s or "").lower())
+                if len(_t) >= min_token}
+
+    _rows = []
+    for _p in _texts:
+        _b = _by_i.get(_p.get("beat")) or {}
+        _t0 = _p.get("t_start")
+        if _t0 is None:
+            continue
+        _bs, _be = _b.get("t_start"), _b.get("t_end")
+        _dur = (min(OVERLAY_WINDOW_CAP_S,
+                    max(OVERLAY_WINDOW_FLOOR_S, float(_be) - float(_bs)))
+                if _bs is not None and _be is not None
+                else OVERLAY_WINDOW_FLOOR_S)
+        _t1 = float(_t0) + _dur
+        _ov = _toks(_p.get("content"))
+        if not _ov:
+            continue
+        _shown = set()
+        for _w in caption_words:
+            _ws, _we = _w.get("s"), _w.get("e")
+            if _ws is None or _we is None:
+                continue
+            if float(_we) > float(_t0) and float(_ws) < _t1:   # half-open overlap
+                _shown |= _toks(_w.get("w") or _w.get("word"))
+        _both = sorted(_ov & _shown)
+        if _both:
+            _rows.append({"beat": _p.get("beat"),
+                          "window": [round(float(_t0), 2), round(_t1, 2)],
+                          "overlay": str(_p.get("content") or "")[:60],
+                          "duplicated": _both})
+    return ("MEASURED", _rows)
+
+
+
+
+def branch_bound_reads(module_src):
+    """[(func, name, store_line, read_line)] — a local assigned ONLY inside one
+    arm of a conditional and read outside it. PURE.
+
+    THE CLASS PYFLAKES DOES NOT SEE, and it has now cost this project a round.
+    Round 66 collected 5/5 ok=False on a NameError in `edit()`: a name assigned
+    only inside the `else:` arm of a cutaway conditional, read unconditionally
+    by the BEATS block below it. 108 green smokes and four import-time certs
+    missed it because nothing in that lane CALLS edit().
+
+    My own gate missed it too, and worse: `smoke_no_undefined_names` is a
+    pyflakes wrapper whose docstring claims "no use-before-assignment".
+    Verified against the exact shape — pyflakes exits 0. It sees a name that is
+    never assigned; it does not see one assigned on only some paths. The
+    docstring was an overclaim and this function is what it claimed to be.
+
+    CONSERVATIVE ON PURPOSE. It flags only the unambiguous shape: every
+    assignment to the name sits inside ONE arm of a single `if`, the sibling
+    arm assigns it nowhere, and the name is read at a shallower level after
+    that `if`. A name assigned in BOTH arms is always bound and is not flagged;
+    a name assigned before the `if` is not flagged. A checker that cried wolf
+    here would be turned off, and then the class comes back.
+    """
+    import ast as _ast
+    _t = _ast.parse(module_src)
+    _out = []
+    for _fn in _ast.walk(_t):
+        if not isinstance(_fn, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+            continue
+        # every If directly in this function body (not nested in another stmt)
+        for _i, _st in enumerate(_fn.body):
+            if not isinstance(_st, _ast.If):
+                continue
+            def _stores(_nodes):
+                _s = {}
+                for _n in _nodes:
+                    for _x in _ast.walk(_n):
+                        if isinstance(_x, _ast.Name) and isinstance(_x.ctx, _ast.Store):
+                            _s.setdefault(_x.id, _x.lineno)
+                return _s
+            _in_body, _in_else = _stores(_st.body), _stores(_st.orelse)
+
+            def _terminates(_arm):
+                """Does this arm leave the function, so the read below is
+                unreachable from it?
+
+                THE EARLY-RETURN GUARD IS THE COMMON CORRECT SHAPE and the
+                first real file I ran this on flagged one:
+                `if ff and exists(ff): filt = ... else: return {"error": ...}`
+                then reads `filt`. That read cannot happen unless the body ran.
+                Without this arm the checker cries wolf on a correct idiom, and
+                a checker that cries wolf gets turned off — and then the class
+                it was written for comes back.
+
+                An EMPTY arm does not terminate: `if x: y = 1` with no else
+                falls through with y unbound, which is the dangerous case.
+                """
+                if not _arm:
+                    return False
+                _last = _arm[-1]
+                if isinstance(_last, (_ast.Return, _ast.Raise, _ast.Continue,
+                                      _ast.Break)):
+                    return True
+                if isinstance(_last, _ast.Expr) and isinstance(_last.value, _ast.Call):
+                    return "exit" in _ast.unparse(_last.value.func)
+                return False
+
+            # assigned in exactly one arm, AND the other arm falls through
+            _only = {}
+            for _k, _v in _in_body.items():
+                if _k not in _in_else and not _terminates(_st.orelse):
+                    _only[_k] = _v
+            for _k, _v in _in_else.items():
+                if _k not in _in_body and not _terminates(_st.body):
+                    _only[_k] = _v
+            if not _only:
+                continue
+            # not bound anywhere else in the function outside this If
+            _elsewhere = set()
+            for _j, _other in enumerate(_fn.body):
+                if _j == _i:
+                    continue
+                for _x in _ast.walk(_other):
+                    if isinstance(_x, _ast.Name) and isinstance(_x.ctx, _ast.Store):
+                        _elsewhere.add(_x.id)
+            for _a in _fn.args.posonlyargs + _fn.args.args + _fn.args.kwonlyargs:
+                _elsewhere.add(_a.arg)
+            if _fn.args.vararg:
+                _elsewhere.add(_fn.args.vararg.arg)
+            if _fn.args.kwarg:
+                _elsewhere.add(_fn.args.kwarg.arg)
+            # read AFTER the If, at function-body level
+            for _later in _fn.body[_i + 1:]:
+                for _x in _ast.walk(_later):
+                    if (isinstance(_x, _ast.Name) and isinstance(_x.ctx, _ast.Load)
+                            and _x.id in _only and _x.id not in _elsewhere):
+                        _out.append((_fn.name, _x.id, _only[_x.id], _x.lineno))
+    # one row per (func, name)
+    _seen, _uniq = set(), []
+    for _r in _out:
+        if (_r[0], _r[1]) in _seen:
+            continue
+        _seen.add((_r[0], _r[1]))
+        _uniq.append(_r)
+    return _uniq
+
+def caption_evidence(words):
+    """(n, scripts, dominant) — WHAT the captions say, not that they happened.
+
+    `caption_composited` IS A PRESENCE FLAG and my fidelity rule was taking it
+    as evidence that captions were DELIVERED. Round 65's car_short shows the
+    gap: the flag read True and the only caption on screen was "ОЙ" — Cyrillic,
+    the transcriber hearing engine noise and crowd as Russian speech on a car
+    video with no talking. "Captions were composited" and "captions say
+    something" are different facts, and the second is the one a user sees.
+
+    The script census is recorded rather than judged. I will not infer an
+    EXPECTED language here: this lane has a real multilingual route, Arabic
+    graduated on nine of nine Tier-1 checks, and a check that assumed Latin
+    would reject correct work. What it does is make the distribution visible so
+    a run whose captions are entirely one unexpected script is legible in the
+    log instead of only in the pixels.
+    """
+    import unicodedata as _ud
+    _n, _scripts = 0, {}
+    for _w in (words or []):
+        _t = str((_w or {}).get("w") or (_w or {}).get("word") or _w or "").strip()
+        if not _t:
+            continue
+        _n += 1
+        for _ch in _t:
+            if not _ch.isalpha():
+                continue
+            try:
+                _name = _ud.name(_ch)
+            except ValueError:
+                continue
+            _sc = _name.split()[0]
+            _scripts[_sc] = _scripts.get(_sc, 0) + 1
+    _dom = max(_scripts, key=_scripts.get) if _scripts else None
+    return (_n, _scripts, _dom)
+
+
+def unscoped_coherence(ruled_vs_built, placements, cut_made=False,
+                       captions_made=False, beats_ruled=0):
+    """(state, dropped, unbuildable, why) — the ONLY thing judgeable when the
+    brief declared no scope. PURE.
+
+    48.2% OF USERS WRITE "viral engaging video" AND NOTHING ELSE, and every one
+    of the 37 fixture runs to date is that case. `spec_fidelity` answers
+    UNSCOPED for all of them — correctly, because "did what was asked for land"
+    has no referent when nothing specific was asked. So NOTHING has ever judged
+    the half of traffic that is most of the traffic.
+
+    WHAT CAN BE JUDGED WITHOUT A SCOPE IS THE RUN'S OWN CLAIMS. The agent ruled
+    a family on N beats; the pipeline built it on M. That comparison needs no
+    target, no reference rate and no taste: it holds the run to what it itself
+    decided, which is the same question `spec_fidelity` asks of the brief,
+    asked of the only asker available.
+
+    THIS IS A GRADE AND IT NEVER INSTRUCTS. No count here is a floor, none of
+    it reaches the prompt, and a run that places two things because two moments
+    deserved them is COHERENT. The standing law is that the density rates grade
+    and never instruct; this is built to the same line, and it is a per-run
+    comparison rather than a rate, so there is no population constant to fit.
+
+    TWO KINDS OF GAP, AND THEY BELONG TO DIFFERENT OWNERS:
+      DROPPED      a family with a builder, ruled and not built. 54% of runs,
+                   59 placements (sfx 25, text 22, zoom 8, card 4). The run
+                   decided something and did not deliver it.
+      UNBUILDABLE  ruled, and this pipeline HAS no builder for it. 30 of 30 are
+                   `cutaway`, retired from the enum. Not the run's failure and
+                   not graded as one — it is the capability-gap list.
+
+    THREE STATES. VACANT is not INCOHERENT: an edit that placed nothing, cut
+    nothing and burned no captions is a different failure from one that placed
+    things it had ruled away, and only one of them means the run did nothing.
+    """
+    _dropped, _unb = {}, {}
+    for _fam, _v in (ruled_vs_built or {}).items():
+        if not isinstance(_v, dict):
+            continue
+        _r, _b = int(_v.get("ruled") or 0), int(_v.get("built") or 0)
+        if _r > _b:
+            (_dropped if _fam in BUILT_FAMILIES else _unb)[_fam] = (_r, _b)
+    _did_anything = bool(placements) or bool(cut_made) or bool(captions_made)
+    if not _did_anything:
+        return (VACANT, _dropped, _unb,
+                "the edit contains nothing — no placement, no cut, no captions. "
+                "A brief with no scope still asked for an edit.")
+    # ── INERT: SOMETHING CHANGED, AND NOTHING WAS PLACED ───────────────────
+    # ROUND 65 DEFEATED THE VACANT ARM WITH A 1.4-SECOND CUT. screen_recording
+    # ruled all 36 of its beats `none`, placed NOTHING, and removed 1.4s of
+    # 90.5s — and `bool(cut_made)` was enough to call that "something happened"
+    # and grade it COHERENT. I tested PRESENCE where the question was whether
+    # the run did any editorial work, which is the `bool(keep_spans)` shape I
+    # fixed elsewhere and re-introduced here within the hour.
+    #
+    # STATED WITHOUT A RATE, deliberately. Not "cut less than N% of the source"
+    # — that is a population constant and the density rates GRADE, never
+    # instruct. ZERO PLACEMENTS ACROSS BEATS THAT WERE RULED is rate-free: zero
+    # is zero at 3 beats and at 36, and a run that takes none of 36 chances is
+    # abstaining rather than being restrained.
+    #
+    # A run that places two things because two moments deserved them is still
+    # COHERENT. This arm fires only at zero.
+    if not placements and beats_ruled:
+        return (INERT, _dropped, _unb,
+                "nothing was placed on any of %d ruled beat(s) — the only "
+                "change is a cut. Restraint is placing few things; this is "
+                "placing none, and a brief with no scope asked for an edit."
+                % beats_ruled)
+    if _dropped:
+        _n = sum(_r - _b for _r, _b in _dropped.values())
+        return (INCOHERENT, _dropped, _unb,
+                "%d placement(s) ruled and not built: %s. The run decided these "
+                "and did not deliver them — nothing was asked for specifically, "
+                "so its own rulings are the standard it is held to."
+                % (_n, ", ".join("%s %d->%d" % (_f, _r, _b)
+                                 for _f, (_r, _b) in sorted(_dropped.items()))))
+    return (COHERENT, _dropped, _unb,
+            "everything ruled was built"
+            + ("; %s ruled with no builder in this pipeline (capability gap, "
+               "not this run's failure)"
+               % ", ".join(sorted(_unb)) if _unb else ""))
+
+
+def reedit_delta(prior, current):
+    """(state, beats, families) — what a RE-EDIT actually changed. PURE.
+
+    ONE FIDELITY STANDARD, BOTH PATHS — and the standard is the same question,
+    so what has to change is the POPULATION it is asked about, not the rule.
+    `spec_fidelity` asks: did what was asked for land, and did anything land
+    that was not asked for. On a fresh edit every placement is the answer. On a
+    RE-EDIT the placements are the whole prior plan, so "make the captions
+    bigger" reads FAITHFUL on a run that changed nothing — the captions were
+    already there from last time. That is the paid re-edit no-op, scored as a
+    success.
+
+    So the caller hands spec_fidelity the placements on the beats this run
+    actually changed. Same function, same thresholds, right population.
+
+    A beat counts as changed if it is NEW, or if any field the boundary stores
+    differs from the prior ruling. `why` is EXCLUDED: rewording the rationale
+    for an identical ruling is not an edit, and counting it would make every
+    re-edit look like it delivered.
+
+    THREE STATES. No prior snapshot is ABSENT — a run with no record of what it
+    started from cannot say what it changed, and that is different from a run
+    that changed nothing.
+    """
+    if not isinstance(prior, list) or not isinstance(current, list):
+        return ("ABSENT", [], [])
+    _pri = {}
+    for _v in prior:
+        if isinstance(_v, dict) and _v.get("beat") is not None:
+            _pri.setdefault(_v["beat"], _v)
+    _beats, _fams = [], set()
+    for _v in current:
+        if not isinstance(_v, dict) or _v.get("beat") is None:
+            continue
+        _b = _v["beat"]
+        _was = _pri.get(_b)
+        _keys = [_k for _k in VERDICT_FIELDS if _k != "why"]
+        if _was is None or any(_v.get(_k) != _was.get(_k) for _k in _keys):
+            _beats.append(_b)
+            for _t in (_v.get("treatment") or []):
+                _fams.add(str(_t).lower())
+            if str(_v.get("cut") or "").lower() == "cut":
+                _fams.add("cut")
+    return ("MEASURED", sorted(set(_beats)), sorted(_fams - {"none", ""}))
 
 
 def reedit_merge(prior, targets, incoming):
@@ -8678,13 +10206,11 @@ def reedit_merge(prior, targets, incoming):
     return out, refused
 
 
-# FIELDS THE BOUNDARY COMPUTES RATHER THAN ASKS FOR. Declared, because a
-# derived field is invisible to any check scoped to "what the schema offers" —
-# and that is the scoping the build-reads guard used, so a derived field was
-# structurally unchecked.
-BOUNDARY_DERIVED = {"sfx"}
+# (BOUNDARY_DERIVED lived here. It and DERIVED_VERDICT_FIELDS were the same
+# set under one name per lane; folded into DERIVED_VERDICT_FIELDS below, which
+# additionally carries HOW each field is derived rather than only that it is.)
 
-def _sync_verdict_surfaces():
+def _sync_verdict_descriptions():
     """The singular ruling tool inherits the plural one's field descriptions.
 
     TWO SURFACES, ONE VOCABULARY — and the descriptions had already diverged
@@ -8754,45 +10280,247 @@ def _sync_verdict_surfaces():
 
 
 VERDICT_FIELDS = _verdict_fields()
+# FIELDS THE BOUNDARY COMPUTES RATHER THAN ASKS FOR. The build may read these
+# and the boundary must store them, but the agent is never offered them — a
+# second way to state something it has already stated is a disagreement waiting
+# to happen, and `sfx` was exactly that for 25 placements.
+DERIVED_VERDICT_FIELDS = {
+    "sfx": lambda _r: ("yes" if "sfx" in [str(_t).lower()
+                                          for _t in (_r.get("treatment") or [])]
+                       else "no"),
+}
+# WHAT THE BOUNDARY ACTUALLY KEEPS: asked-for plus derived. The build may read
+# anything in here and nothing outside it.
+STORED_VERDICT_FIELDS = tuple(VERDICT_FIELDS) + tuple(DERIVED_VERDICT_FIELDS)
 assert "beat" in VERDICT_FIELDS and "treatment" in VERDICT_FIELDS, (
     "the verdict schema could not be read, so the boundary would store nothing")
 
+# ==========================================================================
+# ONE ADMISSION DOOR FOR BOTH RULING SURFACES.
+#
+# PORTED VERBATIM FROM lane/agentic-editor (c6, 08e2c56) on Zac's ruling:
+# "Don't invent a second shape. Two divergent copies of one rule is the bill
+# this file keeps paying." The four functions below are theirs. Only the
+# FIELD COUNTS in the prose are corrected to this lane's, because the two
+# files have diverged and quoting theirs here would be the same error one
+# level up: on lane/agentic-editor the plural tool declares 15 fields and the
+# singular 13; HERE it is 13 and 5.
+#
+# What this lane adds, both verified here and not present in the filing:
+#   * `beat_verdict.treatment` was declared "type": "string" against the
+#     plural tool's array — a bare string stored verbatim and then iterated
+#     character by character by every consumer. Round 46's 'c','a','r','d'
+#     families, latent on this lane because the agent sent lists anyway.
+#   * `cutaway` was ruled 6 times on round 63 against a closed set that did
+#     not contain it.
+# ==========================================================================
 
-def record_rejection(led, rj):
-    """Ledger AND PRINT one refused ruling. The only place either happens.
 
-    TWO SHAPES IN ONE LIST IS HOW THIS BROKE BEFORE. One append put a bare
-    STRING into `_rejected` while its sibling twelve lines up put
-    {"beat", "reason"} — and the printer reads `.get('beat')`. It crashed round
-    47's talking_head on the FIRST rejection this pipeline has ever produced:
-    nothing had been rejected before, so two shapes lived in one list for as
-    long as the list stayed empty. An empty container is where a shape
-    disagreement hides, because every consumer of nothing agrees.
+def half_ruling_refusal(v):
+    """The reason this ruling is HALF a ruling, or None. PURE.
 
-    Now there is one constructor (admit_verdict) and one recorder, so there is
-    no second shape to disagree with. It also means the "[verdict REJECTED]"
-    line has exactly one source: the second ruling surface printing its own
-    copy would make every source-presence check on that literal ambiguous —
-    delete the one that matters and the check stays green.
+    EXTRACTED 2026-09-11 because it was enforced on exactly one of two ruling
+    surfaces. `rule_all_beats` ran these checks; the singular `beat_verdict`
+    tool ran NONE of them, and its handler read four hardcoded fields out of
+    the THIRTEEN its own schema offers — so zoom_arc, purpose, text_content,
+    sfx_name and the card fields were accepted by the schema and silently
+    dropped by the handler. Builder-2 measured the consequence on round 63:
+    four re-ruled beats each LOST fields the first ruling supplied — a beat
+    ruled `text` with no copy, a beat ruled `sfx` with no name.
 
-    PRINTED, not only ledgered. A rejected ruling is a LOST PLACEMENT and the
-    round must say which; a counter in the ledger and nowhere else answers no
-    question anyone can ask.
+    It was inert only because the second execute was refused 4 of 4. The
+    build's per-beat lookup is a dict comprehension — LAST WINS — so on any run
+    where that refusal does not fire, the zoom builds with zoom_arc=None.
+    Latent, not absent.
+
+    One function, both surfaces. Two copies of a rule is how a rule ends up
+    enforced on one of them.
     """
-    led.setdefault("verdicts_rejected", []).append(rj)
-    # LOUD ABOUT A WRONG SHAPE, never crashing on one. A malformed rejection is
-    # still a lost placement; dying here loses the whole run to a formatting
-    # bug in a diagnostic.
-    if not isinstance(rj, dict):
-        print(f"  [verdict REJECTED] (MALFORMED rejection record, not a "
-              f"dict): {rj!r}", flush=True)
-        return
-    print(f"  [verdict REJECTED] beat {rj.get('beat')!r}: "
-          f"{rj.get('reason')}", flush=True)
+    tr = [str(t).lower() for t in (v.get("treatment") or [])]
+    # ── A HALF-RULING IS REFUSED WHERE IT IS MADE ───────────
+    # Both of these used to be discovered at BUILD time, where
+    # the only outcome is a skip: the placement is lost, the run
+    # is paid for, and the log blames the ruling. Here it costs
+    # one line to fix and the agent is still holding the beat.
+    why = None
+    if "zoom" in tr:
+        arc = str(v.get("zoom_arc") or "").strip().lower()
+        if arc not in ZOOM_ARC_HOMES:
+            why = (
+                f"beat {v.get('beat')}: ruled 'zoom' with "
+                f"zoom_arc={v.get('zoom_arc')!r}. WHICH MOMENT "
+                f"this is cannot be derived from timing, and it "
+                f"decides the move: payoff takes a committed "
+                f"push, a hook takes a snap or a pull. Give one "
+                f"of {sorted(ZOOM_ARC_HOMES)}.")
+    # SFX WAS THE ODD ONE OUT AND IT COST 25 OF 75 RULED PLACEMENTS. The card
+    # and text guards ask whether the FAMILY IS IN `treatment`; the sfx guard
+    # asked whether the separate `sfx` field equals "yes". A beat ruled
+    # `treatment: ["sfx"]` with no `sfx` field was invisible to it, sailed
+    # through the plan, and was silently skipped at build time — where the only
+    # outcome is a skip: the placement is lost, the run is paid for, and the log
+    # blames the ruling. Measured over 37 runs: 50 rulings carried
+    # treatment+field+name and built 50; 25 carried treatment without the field
+    # and dropped 25. Exact on both sides.
+    #
+    # ONE VOCABULARY. Putting `sfx` in treatment IS the intent; the field is a
+    # restatement, and a beat that says one without the other is a half ruling.
+    # NO SFX ARM HERE, AND THAT IS DELIBERATE. I added one, and it was wrong in
+    # KIND: `sfx_name` is DERIVABLE — `_derive_sfx_name` fills it from the
+    # beat's role — and this function is pure, runs before any beat is in hand,
+    # and so cannot know whether the derivation would have succeeded. Refusing
+    # here pre-empts a live deriver and turns "a sound here, you pick" into an
+    # unsatisfiable demand, which is the refused-forever failure c6 named.
+    #
+    # A nameless sfx ruling is caught AFTER derivation instead, by the second
+    # `_nosfx` pass — which is exactly why that pass exists and says "Recompute
+    # AFTER derivation" above it.
+    #
+    # A CONTRADICTION IS A DIFFERENT MATTER and is refused here, because nothing
+    # downstream can resolve it. `treatment: ["sfx"]` with `sfx: "no"` is the
+    # agent saying both "there is a sound here" and "there is not": the build
+    # reads the field and skips, the treatment says otherwise, and the ledger
+    # shows a ruled family that never appeared. Fill-when-empty gives one
+    # source of truth for a BLANK field; it cannot give one for a field that
+    # disagrees. This refusal pre-empts no deriver — `_derive_sfx_name` supplies
+    # a NAME, never the yes/no — and it is satisfiable from either side.
+    if why is None and "sfx" in tr and str(v.get("sfx") or "").lower() == "no":
+        why = (
+            f"beat {v.get('beat')}: `treatment` includes 'sfx' and the `sfx` "
+            f"field says 'no'. Those are opposite answers to one question and "
+            f"the build follows the field, so this would silently place "
+            f"nothing. Drop 'sfx' from treatment, or leave the field blank and "
+            f"it will be filled in as 'yes'.")
+    if why is None and "card" in tr:
+        # THE ACCEPTANCE GATE MUST ASK FOR WHAT THE SCHEMA
+        # OFFERS. It demanded `card_type` — a field b13730c
+        # REMOVED from the schema when cards became derived. The
+        # agent could not supply it, was rejected, and re-ruled
+        # the same beat identically about five times: round 47's
+        # control shows exactly that loop, three beats each.
+        #
+        # I removed the field and left the gate demanding it.
+        # That is the mirror of the card_props_mismatch orphan —
+        # there a NAME with no producer, here a DEMAND with no
+        # supply — and both are invisible until something tries
+        # to satisfy them.
+        hero = str(v.get("card_hero") or "").strip()
+        if not hero:
+            why = (
+                f"beat {v.get('beat')}: ruled 'card' with no "
+                f"card_hero. That is the ONE thing you say about "
+                f"a card — the component and its props are "
+                f"derived from it, the way zoom_arc derives the "
+                f"zoom. Give the figure or the short phrase the "
+                f"card is about.")
+        else:
+            # SAME DERIVATION THE BUILDER USES. A gate that
+            # accepts what the builder then refuses is a second
+            # opinion nobody asked for, and this file has paid
+            # for divergent copies of one rule before.
+            ct, dw = derive_card_type(
+                hero, str(v.get("text_content") or ""))
+            if not ct:
+                why = f"beat {v.get('beat')}: {dw}"
+            else:
+                _pp6, _pw6 = derive_card_props(ct, hero,
+                                               str(v.get("card_label") or ""))
+                _, bad = coerce_mg_props(dict(_pp6))
+                if bad:
+                    why = (
+                        f"beat {v.get('beat')}: {ct} needs a "
+                        f"NUMBER for {bad} and {hero!r} does "
+                        f"not give one. It counts up to a target, "
+                        f"so a word renders a blank card with no "
+                        f"error. If this beat has no quoted "
+                        f"figure, a short claim still takes a "
+                        f"card — the phrase becomes a quote card.")
+    return why
 
 
-def admit_verdict(led, v, seen, reedit=False, reedit_targets=None,
-                  can_express=None):
+def normalise_verdict(v):
+    """(ok, record, reason) — the TYPE BOUNDARY for one beat ruling. PURE.
+
+    WHY THIS EXISTS. Round 46, talking_head, printed this:
+
+        RULED vs BUILT : a 3->0 GAP  c 3->0 GAP  card 0->0  d 3->0 GAP  r 3->0 GAP
+        [1] ['c', 'a', 'r', 'd']/keep  10 times a day workload. StatCard hero '10'.
+
+    The agent supplied `treatment` as the BARE STRING "card" against a schema
+    that correctly declares an array. Nothing rejected it, so:
+
+      * seven consumers doing `for t in (v.get("treatment") or [])` iterated the
+        STRING and got 'c','a','r','d';
+      * led["ruled_vs_built"] keys off set(_fam_ruled), so those four letters
+        became four reported FAMILIES, each 3->0 with a GAP marker, while the
+        real `card 0->0` read clean;
+      * three cards were ruled and ZERO built, and the accounting blamed
+        families that do not exist.
+
+    AND THE SAME PAYLOAD BROKE THE DEDUP. The ingest guard is
+    `if _v.get("beat") in _seen: continue` — first ruling wins — but `_seen`
+    holds whatever type arrived. Proven directly:
+
+        beat 1 (int) then beat 1 (int)   -> 1 stored, dedup works
+        beat 1 (int) then beat "1" (str) -> 2 STORED, dedup BYPASSED
+
+    So beat 1 carried BOTH ['none'] and the corrupt ruling, and every per-beat
+    count in that round counted one beat twice. One missing check, two symptoms:
+    the character-families and the duplicate verdict.
+
+    REJECTS RATHER THAN COERCES, because Zac ruled it loud. A coerced
+    `"card" -> ["card"]` would paper over an agent that is emitting the wrong
+    shape, and we would never learn it was. The rejection is recorded in
+    led["verdicts_rejected"] with the reason and printed, so a run that loses
+    rulings says which and why instead of reporting phantom families.
+    """
+    if not isinstance(v, dict):
+        return False, None, f"verdict is {type(v).__name__}, not an object"
+    if v.get("beat") is None:
+        return False, None, "no beat index"
+    # BEAT: one canonical type, so the dedup set cannot be bypassed by "1" vs 1.
+    _b = v.get("beat")
+    if isinstance(_b, bool) or not isinstance(_b, (int, float, str)):
+        return False, None, f"beat is {type(_b).__name__}"
+    try:
+        beat = int(str(_b).strip())
+    except (TypeError, ValueError):
+        return False, None, f"beat {_b!r} is not an integer index"
+    # TREATMENT: a LIST. A bare string is the defect, named explicitly.
+    _t = v.get("treatment")
+    if isinstance(_t, str):
+        return False, None, (f"treatment is the STRING {_t!r}, not a list — a "
+                             f"string is iterated character by character and "
+                             f"becomes {sorted(set(_t))} families")
+    if _t is None:
+        _t = []
+    if not isinstance(_t, (list, tuple)):
+        return False, None, f"treatment is {type(_t).__name__}, not a list"
+    fams, bad = [], []
+    for _x in _t:
+        if not isinstance(_x, str):
+            bad.append(repr(_x)); continue
+        _n = _x.strip().lower()
+        (fams if _n in TREATMENT_FAMILIES else bad).append(_n)
+    if bad:
+        return False, None, (f"treatment carries {bad} — outside the closed set "
+                             f"{list(TREATMENT_FAMILIES)}")
+    # A FAMILY THAT NAMES NOTHING IS NOT A RULING. cutaway is the first family
+    # built with the grounding requirement in place, so it is enforced HERE
+    # rather than discovered at build time as another ruled_not_built.
+    if "cutaway" in fams and v.get("cutaway_from_s") is None:
+        return False, None, ("treatment includes 'cutaway' but no "
+                             "cutaway_from_s — a cutaway must name the source "
+                             "moment it cuts to")
+    rec = dict(v)
+    rec["beat"] = beat
+    rec["treatment"] = fams
+    return True, rec, ""
+
+
+
+
+def admit_verdict(led, v, seen, reedit=False, reedit_targets=None):
     """Admit ONE beat ruling. -> (admitted, rejection|None). MUTATES led/seen.
 
     THE WHOLE ADMISSION, IN ONE PLACE, BECAUSE THERE ARE TWO RULING SURFACES.
@@ -8855,155 +10583,87 @@ def admit_verdict(led, v, seen, reedit=False, reedit_targets=None,
             o for o in kept if o.get("beat") != v.get("beat")]
         seen.discard(v.get("beat"))
     # 3. THE HALF-RULING REFUSAL, where the agent is still holding the beat.
-    why = half_ruling_refusal(v, can_express)
+    why = half_ruling_refusal(v)
     if why:
         return False, {"beat": v.get("beat"), "reason": why}
-    # A PLACEMENT THE SURFACE CANNOT COMPLETE IS NAMED, NOT SILENTLY DROPPED.
-    # Where the refusal was skipped because the tool cannot express the field,
-    # the ruling still cannot build — so it is recorded as a LOST placement
-    # with the schema named as the cause, instead of vanishing at build time
-    # the way 25 of 75 sfx rulings did.
-    if ("sfx" in [str(t).lower() for t in (v.get("treatment") or [])]
-            and not str(v.get("sfx_name") or "").strip()
-            and not _surface_offers(can_express, "sfx_name")):
-        led.setdefault("placements_lost_to_schema", []).append(
-            {"beat": v.get("beat"), "family": "sfx",
-             "why": "ruled through a tool whose schema has no sfx_name"})
-    # 3b. ONE INTENT, ONE VOCABULARY. The agent says "this beat needs a sound"
-    #     by naming `sfx` in the treatment; the BUILD gates on the separate
-    #     `sfx: "yes"` field. Measured over 37 runs in this lane: 75 ruled, 50
-    #     built, 25 lost to exactly that mismatch — and invisible at both ends,
-    #     because the half-ruling stripper keys on the same wrong field.
-    #
-    #     THE TREATMENT IS THE DECISION. half_ruling_refusal above has already
-    #     refused the contradictory case (treatment says sfx, field says "no")
-    #     and the unnamed case, so anything reaching here has named a sound and
-    #     not contradicted itself. Filling the field is DERIVATION, not a
-    #     second opinion: the agent's own value always wins where it gave one.
-    if "sfx" in [str(t).lower() for t in (v.get("treatment") or [])]:
-        if str(v.get("sfx") or "").strip().lower() != "yes":
-            v = dict(v)
-            v["sfx"] = "yes"
-            led.setdefault("sfx_field_derived", []).append(v.get("beat"))
     # 4. EVERY FIELD THE SCHEMA OFFERS.
     rec = {k: v.get(k) for k in VERDICT_FIELDS}
     rec["why"] = str(v.get("why") or "")
+    # ── DERIVED, NOT ASKED FOR TWICE ───────────────────────────────────────
+    # `sfx` was a SECOND WAY TO SAY the same thing: the agent put "sfx" in
+    # `treatment` AND answered a yes/no field, and the build read only the
+    # field. 25 of 75 ruled placements were lost to the two disagreeing, and
+    # the guard meant to catch it read the field as well.
+    #
+    # Putting the family in `treatment` IS the intent. The field is now
+    # computed from it, so they cannot disagree — there is nothing to keep in
+    # sync, which is the only kind of consistency that does not rot.
+    # FILLED WHEN EMPTY, NEVER OVERRIDDEN — c6's rule and the right one. The
+    # agent's own answer wins; the derivation only supplies what was left
+    # blank, so `treatment: ["sfx"]` alone still means yes without the agent
+    # having to say it twice.
+    # LEDGERED WHERE IT IS DERIVED, because the PRINTER ALREADY EXISTED and its
+    # producer did not. `SFX FIELD : derived sfx='yes' ...` reads
+    # led["sfx_field_derived"], and the merge deleted the only code that wrote
+    # it — leaving a line that would report 0 derivations forever on a boundary
+    # deriving one for every sfx ruling. A consumer with no producer prints a
+    # confident zero, which is the shape this whole file exists to refuse.
+    for _k, _fn in DERIVED_VERDICT_FIELDS.items():
+        if str(rec.get(_k) or "").strip() == "":
+            rec[_k] = _fn(rec)
+            led.setdefault(_k + "_field_derived", []).append(rec.get("beat"))
     led["beat_verdicts"].append(rec)
     seen.add(v.get("beat"))
     return True, None
 
 
-def _assert_verdict_surfaces_offer_the_same_fields() -> None:
-    """The two ruling tools must offer the same fields, or name the difference.
+def record_rejection(led, rj):
+    """Ledger AND PRINT one refused ruling. The only place either happens.
 
-    THE OTHER HALF OF THE SAME DEFECT. admit_verdict makes both surfaces
-    ADMIT alike; it cannot make them OFFER alike. `rule_all_beats` declares 15
-    fields and `beat_verdict` declares 13, so a beat ruled through the singular
-    tool can never carry sfx. The agent is not offered the field, so the beat is
-    silently sfx-less and nothing says so.
+    TWO SHAPES IN ONE LIST IS HOW THIS BROKE BEFORE. One append put a bare
+    STRING into `_rejected` while its sibling twelve lines up put
+    {"beat", "reason"} — and the printer reads `.get('beat')`. It crashed round
+    47's talking_head on the FIRST rejection this pipeline has ever produced:
+    nothing had been rejected before, so two shapes lived in one list for as
+    long as the list stayed empty. An empty container is where a shape
+    disagreement hides, because every consumer of nothing agrees.
 
-    NOT because of the stored None. Builder-2 raised that — the boundary stores
-    `sfx: None` where their lane leaves the key absent — and I checked all six
-    read sites before repeating it: every one is `.get("sfx", "no")` compared
-    against `"yes"`, and `str(None).lower()` is `"none"`, which fails that test
-    exactly as the `"no"` default does. Absent-key and stored-None are
-    behaviourally identical here. The defect is the missing field, full stop;
-    saying the storage shape compounds it would be a note that is WRONG, which
-    is worse than one that is missing.
+    Now there is one constructor (admit_verdict) and one recorder, so there is
+    no second shape to disagree with. It also means the "[verdict REJECTED]"
+    line has exactly one source: the second ruling surface printing its own
+    copy would make every source-presence check on that literal ambiguous —
+    delete the one that matters and the check stays green.
 
-    Nothing asserted this. `_assert_treatment_surface_agrees` compares PROSE
-    against SCHEMA and `_assert_beat_contract_identical` compares the two beat
-    SOURCES; neither compares the two verdict TOOLS to each other.
-
-    THE KNOWN DIFFERENCE IS NAMED, NOT TOLERATED. Tool schemas are Builder-2's
-    region, so this records the gap with its owner instead of closing it — and
-    any NEW divergence fails the container at import. A check that silently
-    accepted the current state would rot into "the surfaces agree" the first
-    time someone read it.
+    PRINTED, not only ledgered. A rejected ruling is a LOST PLACEMENT and the
+    round must say which; a counter in the ledger and nowhere else answers no
+    question anyone can ask.
     """
-    def _props(name):
-        for t in list(TOOLS) + list(KNOWLEDGE_TOOLS):
-            if t.get("name") != name:
-                continue
-            s = t.get("input_schema") or {}
-            if name == "rule_all_beats":
-                return set((((s.get("properties") or {}).get("verdicts") or {})
-                            .get("items", {}).get("properties", {})))
-            return set(s.get("properties") or {})
-        return set()
-    plural, single = _props("rule_all_beats"), _props("beat_verdict")
-    if not plural or not single:
-        raise AssertionError(
-            "a verdict tool could not be read, so this check is ABSENT: "
-            f"rule_all_beats={len(plural)} beat_verdict={len(single)}")
-    # OWNED BY BUILDER-2 (tool schemas). Filed 2026-09-11: beat_verdict cannot
-    # rule sfx, so a beat ruled through it is silently sfx-less.
-    KNOWN = {"sfx", "sfx_name"}
-    diff = (plural - single) | (single - plural)
-    new_diff = diff - KNOWN
-    assert not new_diff, (
-        "the two ruling surfaces offer different fields and the difference is "
-        f"not the recorded one: {sorted(new_diff)}. A field on one surface "
-        f"only is a ruling the agent can make through one tool and not the "
-        f"other, and the boundary stores None either way")
-    assert KNOWN <= diff or not (KNOWN & (plural | single)), (
-        "the recorded sfx divergence is gone — delete it from KNOWN so this "
-        "check stops excusing something that no longer happens")
+    led.setdefault("verdicts_rejected", []).append(rj)
+    # LOUD ABOUT A WRONG SHAPE, never crashing on one. A malformed rejection is
+    # still a lost placement; dying here loses the whole run to a formatting
+    # bug in a diagnostic.
+    if not isinstance(rj, dict):
+        print(f"  [verdict REJECTED] (MALFORMED rejection record, not a "
+              f"dict): {rj!r}", flush=True)
+        return
+    print(f"  [verdict REJECTED] beat {rj.get('beat')!r}: "
+          f"{rj.get('reason')}", flush=True)
 
 
-def _assert_one_admission_surface(module_src: str) -> None:
-    """No ruling reaches led["beat_verdicts"] except through admit_verdict.
+# (admit_verdict: a second copy stood here with a `can_express` parameter and
+#  an sfx_name demand. Deleted — `_derive_sfx_name` fills that field from the
+#  beat's role, so refusing at ruling time pre-empts a live deriver and makes
+#  'a sound here, you pick' unsatisfiable. The survivor derives instead.)
 
-    THE CHECK THAT MAKES THIS REGRESSION IMPOSSIBLE. The defect was never that
-    the checks were wrong — `rule_all_beats` ran all three correctly. It was
-    that a SECOND tool appended to the same list without them, and nothing
-    anywhere said the list had one legitimate door. Two ruling surfaces, one of
-    them guarded, and the gap was invisible for as long as the unguarded one
-    was rarely used.
 
-    So the door is now named and this asserts there is only one. A third
-    surface — a repair tool, a re-edit path, a fixture loader — cannot append a
-    ruling without either calling admit_verdict or failing the container at
-    import.
+# (_assert_verdict_surfaces_offer_the_same_fields: a second copy stood here
+#  carrying KNOWN={'sfx','sfx_name'}. Deleted on Zac's ruling — the survivor
+#  has an EMPTY exception set because the divergence was closed, not excused.)
 
-    BOUNDED ON PURPOSE: this catches `.append`/`.extend`, the act of admitting
-    ONE new ruling. Whole-list rebinds are left alone because seeding a re-edit
-    from a prior plan (`led["beat_verdicts"] = list(_prior)`) is a legitimate
-    non-admission, and a check that rejects it would be turned off.
-    """
-    if not module_src:
-        # NAMED, NOT SILENT. A cert that cannot read its own source is ABSENT,
-        # and an absent check that returns cleanly is the failure class this
-        # file has paid for four times.
-        raise AssertionError(
-            "_assert_one_admission_surface got no module source: the check "
-            "is ABSENT, not passing")
-    import ast
-    tree = ast.parse(module_src)
-    owner = {}
-    for fn in ast.walk(tree):
-        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            for node in ast.walk(fn):
-                owner.setdefault(node, fn.name)
-    bad = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        f = node.func
-        if not (isinstance(f, ast.Attribute) and f.attr in ("append", "extend")):
-            continue
-        tgt = f.value
-        if not (isinstance(tgt, ast.Subscript)
-                and isinstance(tgt.slice, ast.Constant)
-                and tgt.slice.value == "beat_verdicts"):
-            continue
-        where = owner.get(node, "<module>")
-        if where != "admit_verdict":
-            bad.append(f"{where}() at line {node.lineno}")
-    assert not bad, (
-        "a beat ruling is admitted outside admit_verdict, so it skips the "
-        "type boundary, the dedup and the half-ruling refusal: "
-        + ", ".join(bad))
+
+# (_assert_one_admission_surface: a byte-identical second copy stood here
+#  after the merge. Deleted — Python runs the LAST definition, so the copy a
+#  name-based cert finds is not the copy that executes.)
 
 
 def _assert_build_reads_only_stored_fields(module_src: str) -> None:
@@ -9030,16 +10690,29 @@ def _assert_build_reads_only_stored_fields(module_src: str) -> None:
                 and isinstance(_n.args[0].value, str)):
             _read.add(_n.args[0].value)
     # The store step must copy from ONE schema-derived list, not a hand list.
-    # MOVED, NOT WEAKENED: the copy now lives in admit_verdict, which is the
-    # single door both ruling surfaces go through. This regex named the old
-    # inline location and FIRED when the code moved — which is the check
-    # working, not the check being in the way.
-    if not re.search(r"rec = \{k: v\.get\(k\) for k in VERDICT_FIELDS\}",
-                     module_src):
+    # WAS A REGEX FOR ONE SPELLING (`_rec = {k: _v.get(k) ...}`). That spelling
+    # was the plural handler's local; the copy now lives in admit_verdict, the
+    # single admission door, under its own names. A regex for a variable name
+    # tests the name, so this asks the structural question instead: the
+    # comprehension must exist INSIDE admit_verdict and iterate VERDICT_FIELDS.
+    # Strictly stronger than the grep — it also fails if the copy migrates back
+    # out to a call site, which is the drift the original was written for.
+    _av = next((n for n in _ast.walk(_tree)
+                if isinstance(n, _ast.FunctionDef) and n.name == "admit_verdict"),
+               None)
+    if _av is None:
         raise AssertionError(
-            "the boundary no longer copies the verdict fields from a single "
-            "schema-derived list — a hand-written copy list is a second "
-            "vocabulary and it drifted silently once already")
+            "admit_verdict not found — there is no single admission door, so "
+            "the boundary cannot be copying from one schema-derived list")
+    if not any(isinstance(_n, _ast.DictComp)
+               and any(isinstance(_g.iter, _ast.Name)
+                       and _g.iter.id == "VERDICT_FIELDS"
+                       for _g in _n.generators)
+               for _n in _ast.walk(_av)):
+        raise AssertionError(
+            "admit_verdict no longer copies the verdict fields from "
+            "VERDICT_FIELDS — a hand-written copy list is a second vocabulary "
+            "and it drifted silently once already")
     # AND THE LIST ITSELF MUST COVER WHAT THE BUILD READS. Comparing
     # VERDICT_FIELDS against VERDICT_FIELDS is a tautology — the first version
     # of this did exactly that and passed while the list was truncated to three
@@ -9053,35 +10726,186 @@ def _assert_build_reads_only_stored_fields(module_src: str) -> None:
                  .get("verdicts") or {}).get("items", {}).get("properties", {}))
     if not _offered:
         raise AssertionError("the verdict schema could not be read")
-    # OFFERED **OR DERIVED**, AND THE `OR DERIVED` IS THE WHOLE FIX.
-    # This scoped to `_read & _offered` — every field the build reads that the
-    # SCHEMA currently offers. So a field REMOVED from the schema drops out of
-    # `_offered` and STOPS BEING CHECKED, at the exact moment it is most likely
-    # to be wrong. The guard would go silent on precisely the field somebody
-    # just changed.
+    # OFFERED **OR DERIVED**, AGAINST WHAT IS ACTUALLY STORED. This compared
+    # `_read & _offered` against the asked-for fields, so a field REMOVED from
+    # the schema left `_offered` and stopped being checked at all — at the
+    # exact moment it is most likely to be wrong. That is not hypothetical:
+    # the boundary DERIVES `sfx` from the treatment (two vocabularies for one
+    # intent, 25 of 75 placements lost to the mismatch), and a derived field is
+    # read by the build and offered by no tool. Both lanes hit it, from
+    # opposite directions — one by deriving the field, one by deleting it.
     #
-    # It is not hypothetical here: the boundary now DERIVES `sfx` from the
-    # treatment (two vocabularies for one intent, 25 of 75 placements lost to
-    # the mismatch). A derived field is read by the build and may not be
-    # offered by any tool, which is the removed-field case wearing different
-    # clothes. Builder-2 hit it from the other direction on their lane, having
-    # deleted the field outright.
-    _gap = sorted((_read & (_offered | BOUNDARY_DERIVED)) - set(VERDICT_FIELDS))
+    # ONE NAME FOR DERIVED. `BOUNDARY_DERIVED` and `DERIVED_VERDICT_FIELDS`
+    # were the same set under two names, one per lane; a closed set defined
+    # twice is two things to get wrong.
+    _known = _offered | set(DERIVED_VERDICT_FIELDS)
+    _gap = sorted((_read & _known) - set(STORED_VERDICT_FIELDS))
     if _gap:
         raise AssertionError(
             f"execute_plan reads verdict field(s) {_gap} that the boundary does "
             f"not store. `.get()` returns None and None is indistinguishable "
             f"from 'the agent did not say', so the build blames the ruling for "
             f"a field the harness threw away.")
-    # AND A FIELD THE BOUNDARY DERIVES MUST ACTUALLY BE STORED. Deriving a
-    # value and then not keeping it is the same defect one step earlier — the
-    # build reads None and blames the ruling for something the harness computed
-    # and dropped.
-    _lost = sorted(BOUNDARY_DERIVED - set(VERDICT_FIELDS))
-    if _lost:
+    # AND A DERIVED FIELD MUST SURVIVE THE PROJECTION THAT STORES IT.
+    # `set(DERIVED) - set(STORED)` is a TAUTOLOGY here — STORED is literally
+    # asked-for plus derived, so the first version of this check could never
+    # fail. What can actually go wrong is ORDER: admit_verdict projects
+    # `rec = {k: v.get(k) for k in VERDICT_FIELDS}` and THEN fills the derived
+    # keys. Move the derivation above the projection and every derived value is
+    # computed and immediately discarded — the build reads None and blames the
+    # ruling for something the harness worked out and threw away.
+    _av2 = next((_n for _n in _ast.walk(_tree)
+                 if isinstance(_n, _ast.FunctionDef)
+                 and _n.name == "admit_verdict"), None)
+    _proj = [_n.lineno for _n in _ast.walk(_av2 or _ast.Module(body=[], type_ignores=[]))
+             if isinstance(_n, _ast.DictComp)
+             and any(isinstance(_g.iter, _ast.Name)
+                     and _g.iter.id == "VERDICT_FIELDS" for _g in _n.generators)]
+    _deriv = [_n.lineno for _n in _ast.walk(_av2 or _ast.Module(body=[], type_ignores=[]))
+              if isinstance(_n, _ast.For) and isinstance(_n.iter, _ast.Call)
+              and "DERIVED_VERDICT_FIELDS" in _ast.unparse(_n.iter)]
+    if not _deriv:
         raise AssertionError(
-            f"the boundary derives {_lost} and does not store it — the "
-            f"derivation is thrown away before the build can read it")
+            "admit_verdict never fills DERIVED_VERDICT_FIELDS — the boundary "
+            "declares fields it computes and computes none of them")
+    if _proj and min(_deriv) < max(_proj):
+        raise AssertionError(
+            f"admit_verdict derives (line {min(_deriv)}) BEFORE it projects "
+            f"onto VERDICT_FIELDS (line {max(_proj)}) — every derived value is "
+            f"computed and then discarded by the projection")
+
+    # THE `_both` LEG IS GONE. It failed when a field was both DERIVED and
+    # OFFERED, on the grounds that two ways to state one thing is the defect.
+    # Zac ruled the other way and the reasoning is better: the field carries a
+    # DISTINCTION the treatment cannot — "a sound here, you pick" versus "this
+    # sound" — so offering it is not a second vocabulary for the same statement.
+    # One source of truth for WHETHER (treatment, filled forward); the agent
+    # keeps WHICH. Removed rather than commented out, since a disabled leg reads
+    # like protection.
+
+
+
+def _assert_no_orphaned_demand(module_src: str) -> None:
+    """Every field a ruling GATE demands must be one the ruling schema OFFERS.
+
+    RAISED BY A PEER SESSION (c6) FROM ITS OWN LANE, and it is the sharper form
+    of a failure this file has already paid for. The acceptance gate once
+    demanded `card_type` after that field had been REMOVED from the schema: the
+    agent could not supply it, was rejected, and re-ruled the same beat
+    identically about five times. Round 47's control shows three beats each.
+
+    A DEMAND WITH NO SUPPLY IS WORSE THAN A SILENT DROP. One costs a placement;
+    the other costs the RUN, because the agent can never satisfy it and keeps
+    trying. Adding `sfx_name` to half_ruling_refusal is precisely the move that
+    creates one if a ruling surface does not offer that field.
+
+    It does not fire on this lane today — `_sync_verdict_surfaces` makes both
+    surfaces offer the same twelve — but that is a property to ASSERT rather
+    than a coincidence to rely on, and the demands are read out of the gate's
+    OWN SOURCE so a new one cannot be added without being checked.
+    """
+    # READ FROM THE MODULE SOURCE, NOT VIA inspect.getsource — which raises
+    # OSError whenever the module was not loaded from a file (exec'd, zipped,
+    # or built into an image), and an import-time cert that CRASHES on its own
+    # introspection kills the container instead of answering. Same shape as the
+    # sibling asserts, which all take the source as an argument.
+    import ast as _ast
+    if not module_src:
+        raise AssertionError(
+            "_assert_no_orphaned_demand got no module source: the check is "
+            "ABSENT, not passing")
+    _gate = next((_n for _n in _ast.walk(_ast.parse(module_src))
+                  if isinstance(_n, _ast.FunctionDef)
+                  and _n.name == "half_ruling_refusal"), None)
+    if _gate is None:
+        raise AssertionError(
+            "half_ruling_refusal not found in the module source, so the "
+            "demands it makes cannot be checked against what is offered")
+    _demanded = {
+        _n.args[0].value
+        for _n in _ast.walk(_gate)
+        if isinstance(_n, _ast.Call) and isinstance(_n.func, _ast.Attribute)
+        and _n.func.attr == "get" and _n.args
+        and isinstance(_n.args[0], _ast.Constant)
+        and isinstance(_n.args[0].value, str)}
+    _demanded -= {"beat", "treatment"}
+    _offered = set()
+    for _t in list(TOOLS) + list(KNOWLEDGE_TOOLS):
+        if _t.get("name") == "rule_all_beats":
+            _offered = set(
+                (((_t.get("input_schema") or {}).get("properties") or {})
+                 .get("verdicts") or {}).get("items", {}).get("properties", {}))
+    if not _offered:
+        raise AssertionError("the verdict schema could not be read, so this "
+                             "check is ABSENT rather than passing")
+    _orphan = sorted(_demanded - _offered - set(DERIVED_VERDICT_FIELDS))
+    if _orphan:
+        raise AssertionError(
+            f"half_ruling_refusal demands {_orphan}, which the ruling schema "
+            f"does not offer. The agent cannot supply it, so the refusal is "
+            f"UNSATISFIABLE and it will re-rule the same beat until the turns "
+            f"run out — refused-forever costs the run, a silent drop costs one "
+            f"placement.")
+
+
+def _assert_no_shadowed_definitions(module_src: str) -> None:
+    """No top-level name is defined twice. The merge class, RED-proven by a merge.
+
+    WHAT HAPPENED. Merging lane/duration-producer into lane/agentic-editor left
+    SEVEN functions defined twice at module level — half_ruling_refusal,
+    normalise_verdict, record_rejection, admit_verdict, both surface asserts,
+    and `_sync_verdict_surfaces`. Both lanes had written the same fix in the
+    same week; git saw two additions in different places and kept both, with no
+    conflict marker anywhere near them.
+
+    WHY IT IS INVISIBLE. Python binds the LAST definition. Every import-time
+    cert in this file locates its subject with `next(n for n in ast.walk(tree)
+    if n.name == ...)`, which returns the FIRST. So the checks ran green over
+    code that does not execute, in the same file, in the same process. Four
+    certs and 94 smokes passed while `admit_verdict` called a
+    `half_ruling_refusal` with the wrong arity — a TypeError on the first
+    ruling of every arm of the next round.
+
+    And `_sync_verdict_surfaces` was worse than a duplicate: the two lanes gave
+    ONE NAME to TWO DIFFERENT JOBS (copy the missing fields; copy the missing
+    descriptions), so the merge did not duplicate a guarantee, it deleted half
+    of one.
+
+    THE ALLOWED EXCEPTION is a rebind of a name onto itself — `f =
+    _instrumented(f)` — which wraps rather than shadows and is read as such.
+    """
+    import ast as _ast
+    if not module_src:
+        raise AssertionError(
+            "_assert_no_shadowed_definitions got no module source: the check "
+            "is ABSENT, not passing")
+    _seen, _dup = {}, {}
+    for _n in _ast.parse(module_src).body:
+        if isinstance(_n, (_ast.FunctionDef, _ast.AsyncFunctionDef,
+                           _ast.ClassDef)):
+            _names = [(_n.name, _n.lineno)]
+        elif isinstance(_n, _ast.Assign):
+            # A SELF-WRAP IS NOT A SHADOW. `f = _instrumented(f)` rebinds the
+            # name to a wrapper AROUND the same function; the original is still
+            # reachable and nothing was lost. Anything else that re-binds a name
+            # already bound to a def IS a shadow.
+            _src = _ast.unparse(_n.value)
+            _names = [(_t.id, _n.lineno) for _t in _n.targets
+                      if isinstance(_t, _ast.Name)
+                      and not _src.startswith(("_instrumented(" + _t.id,))]
+        else:
+            continue
+        for _nm, _ln in _names:
+            if _nm in _seen:
+                _dup.setdefault(_nm, [_seen[_nm]]).append(_ln)
+            else:
+                _seen[_nm] = _ln
+    if _dup:
+        raise AssertionError(
+            "top-level names defined more than once — Python runs the LAST and "
+            "every cert that finds a function by name reads the FIRST, so the "
+            "checks go green over code that does not execute: "
+            + "; ".join(f"{_k} at {_v}" for _k, _v in sorted(_dup.items())))
 
 
 def _assert_treatment_surface_agrees(module_src: str) -> None:
@@ -9212,6 +11036,135 @@ def _assert_prompt_blocks_present():
             f"looks normal and behaves differently, which is how a prompt that "
             f"still described the deleted `shell` tool cost 3x for a full day.")
 
+def _assert_verdict_surfaces_offer_the_same_fields() -> None:
+    """The two ruling tools must offer the same fields, or name the difference.
+
+    THE OTHER HALF OF THE SAME DEFECT. admit_verdict makes both surfaces
+    ADMIT alike; it cannot make them OFFER alike. ON THIS LANE `rule_all_beats` declares 13
+    fields and `beat_verdict` declares 5 — not 15 and 13, which is
+    lane/agentic-editor's shape. Eight fields can be ruled through one tool and
+    not the other: card_condition, card_hero, card_label, card_props, sfx,
+    sfx_name, text_content, zoom_arc.
+
+    AND THE FAILURE DIFFERS BY LANE, which is why the numbers matter. There the
+    singular tool DECLARES sfx, the boundary stores None, and
+    `_derive_sfx_name`'s `.get("sfx", "no")` returns the stored None rather than
+    the default — silently sfx-less. Here the key is simply ABSENT, so the
+    default stands and that particular failure does not occur. Same tool, same
+    filing, opposite outcomes.
+
+    Nothing asserted this. `_assert_treatment_surface_agrees` compares PROSE
+    against SCHEMA and `_assert_beat_contract_identical` compares the two beat
+    SOURCES; neither compares the two verdict TOOLS to each other.
+
+    THE KNOWN DIFFERENCE IS NAMED, NOT TOLERATED. Tool schemas are Builder-2's
+    region, so this records the gap with its owner instead of closing it — and
+    any NEW divergence fails the container at import. A check that silently
+    accepted the current state would rot into "the surfaces agree" the first
+    time someone read it.
+    """
+    def _props(name):
+        for t in list(TOOLS) + list(KNOWLEDGE_TOOLS):
+            if t.get("name") != name:
+                continue
+            s = t.get("input_schema") or {}
+            if name == "rule_all_beats":
+                return set((((s.get("properties") or {}).get("verdicts") or {})
+                            .get("items", {}).get("properties", {})))
+            return set(s.get("properties") or {})
+        return set()
+    plural, single = _props("rule_all_beats"), _props("beat_verdict")
+    if not plural or not single:
+        raise AssertionError(
+            "a verdict tool could not be read, so this check is ABSENT: "
+            f"rule_all_beats={len(plural)} beat_verdict={len(single)}")
+    # EMPTY, AND THAT IS THE POINT. It held eight fields that beat_verdict did
+    # not offer — card_condition, card_hero, card_label, card_props, sfx,
+    # sfx_name, text_content, zoom_arc — recorded rather than closed. Closing
+    # them was the right call: a re-edit surface missing eight of the main
+    # surface's thirteen fields is structurally worse at obeying the user, and
+    # no check catches that because a field nobody offers produces no error
+    # anywhere.
+    #
+    # `_sync_verdict_surfaces` now DERIVES the singular tool's properties from
+    # the plural tool's item schema, so the two cannot diverge by construction
+    # and there is nothing left to excuse. The check below is now the strict
+    # one: ANY divergence fails the container at import.
+    #
+    # If a future divergence is genuinely intended, add it here WITH its
+    # consequence — and the assert after it fails if it is ever closed without
+    # being deleted from this set, so the record cannot rot into "the surfaces
+    # agree".
+    KNOWN = set()
+    diff = (plural - single) | (single - plural)
+    new_diff = diff - KNOWN
+    assert not new_diff, (
+        "the two ruling surfaces offer different fields and the difference is "
+        f"not the recorded one: {sorted(new_diff)}. A field on one surface "
+        f"only is a ruling the agent can make through one tool and not the "
+        f"other, and the boundary stores None either way")
+    _closed = KNOWN - diff
+    assert not _closed, (
+        f"recorded divergences {sorted(_closed)} are gone — delete them from "
+        f"KNOWN in the same commit that closes them, so this check stops "
+        f"excusing something that no longer happens")
+
+
+def _assert_one_admission_surface(module_src: str) -> None:
+    """No ruling reaches led["beat_verdicts"] except through admit_verdict.
+
+    THE CHECK THAT MAKES THIS REGRESSION IMPOSSIBLE. The defect was never that
+    the checks were wrong — `rule_all_beats` ran all three correctly. It was
+    that a SECOND tool appended to the same list without them, and nothing
+    anywhere said the list had one legitimate door. Two ruling surfaces, one of
+    them guarded, and the gap was invisible for as long as the unguarded one
+    was rarely used.
+
+    So the door is now named and this asserts there is only one. A third
+    surface — a repair tool, a re-edit path, a fixture loader — cannot append a
+    ruling without either calling admit_verdict or failing the container at
+    import.
+
+    BOUNDED ON PURPOSE: this catches `.append`/`.extend`, the act of admitting
+    ONE new ruling. Whole-list rebinds are left alone because seeding a re-edit
+    from a prior plan (`led["beat_verdicts"] = list(_prior)`) is a legitimate
+    non-admission, and a check that rejects it would be turned off.
+    """
+    if not module_src:
+        # NAMED, NOT SILENT. A cert that cannot read its own source is ABSENT,
+        # and an absent check that returns cleanly is the failure class this
+        # file has paid for four times.
+        raise AssertionError(
+            "_assert_one_admission_surface got no module source: the check "
+            "is ABSENT, not passing")
+    import ast
+    tree = ast.parse(module_src)
+    owner = {}
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for node in ast.walk(fn):
+                owner.setdefault(node, fn.name)
+    bad = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        f = node.func
+        if not (isinstance(f, ast.Attribute) and f.attr in ("append", "extend")):
+            continue
+        tgt = f.value
+        if not (isinstance(tgt, ast.Subscript)
+                and isinstance(tgt.slice, ast.Constant)
+                and tgt.slice.value == "beat_verdicts"):
+            continue
+        where = owner.get(node, "<module>")
+        if where != "admit_verdict":
+            bad.append(f"{where}() at line {node.lineno}")
+    assert not bad, (
+        "a beat ruling is admitted outside admit_verdict, so it skips the "
+        "type boundary, the dedup and the half-ruling refusal: "
+        + ", ".join(bad))
+
+
 
 _assert_prompt_blocks_present()
 
@@ -9232,7 +11185,15 @@ _assert_verdict_surfaces_offer_the_same_fields()
 # The surfaces must OFFER the same fields (above) and EXPLAIN them the same
 # way (here) — a field offered on both and described on one is a choice the
 # agent can make on one surface and only guess at on the other.
-_SYNCED_VERDICT_DESCRIPTIONS = _sync_verdict_surfaces()
+_SYNCED_VERDICT_DESCRIPTIONS = _sync_verdict_descriptions()
+# A GATE MAY NOT DEMAND WHAT NO SURFACE OFFERS. Refused-forever costs the RUN;
+# a silent drop costs one placement. Raised by Builder-2 from their own lane.
+# ONE DEFINITION PER NAME. Earned by this merge: seven functions arrived twice
+# and every name-based cert read the copy that does not run.
+_assert_no_shadowed_definitions(open(__file__).read()
+                                if os.path.exists(__file__) else "")
+_assert_no_orphaned_demand(open(__file__).read()
+                           if os.path.exists(__file__) else "")
 # Runs at IMPORT, in the container, on every run — not in a test file that can
 # be skipped. The two beat sources must stay interchangeable or the verdict
 # machinery silently rules on a field one of them does not supply.
@@ -9417,9 +11378,22 @@ def edit(source_key: str, brief: str,
     def _control_composite(before, dur_s):
         """(path or None) — `before` composited with an EMPTY layer.
 
-        One extra ffmpeg pass per distinct input, measured at 11.43s of a
-        314.4s run. Failure is LOUD and falls back to the window control rather
-        than silently leaving the family unmeasurable."""
+        THE PRICE, CORRECTED BY THE SECOND MEASUREMENT. I quoted 2.1-3.2% of
+        wall from composite_captions, then 3.6% from round 60's single
+        composite. Round 61 ran TWO — text/caption's input and card's are
+        different files — and cost 30.43s of a 219.4s run: 13.9%. Both earlier
+        figures were right about what they measured and wrong as the price of
+        the feature, because the feature grew a second composite when card was
+        wired. A per-input cost quoted before the number of inputs was settled
+        is an estimate wearing a measurement's clothes.
+
+        Still worth it at 13.9%: it is the only control that can see a short
+        label, and without it five of seven real overlays read INERT. But it is
+        now the third-largest stage on this fixture and a candidate for the
+        same decode work as build_reel and build_alpha_layer.
+
+        Failure is LOUD and falls back to the window control rather than
+        silently leaving the family unmeasurable."""
         _key = str(before)
         if _key in _ctrl_cache:
             return _ctrl_cache[_key]
@@ -10248,8 +12222,12 @@ def edit(source_key: str, brief: str,
         # drift against speech is silent and ffmpeg exits 0 either way. One
         # clock is what makes the two paths comparable rather than merely both
         # present.
-        led["kept_words_out"] = [{"s": float(k["s"]), "e": float(k["e"]),
-                                  "w": str(k["w"])} for k in kept]
+        # ANNOTATE, NOT RECONSTRUCT — same shape as the remap above. This
+        # whitelisted three keys, so a caption gate reading `conf` off
+        # kept_words_out would find nothing no matter what the ingest
+        # measured.
+        led["kept_words_out"] = [dict(k, s=float(k["s"]), e=float(k["e"]),
+                                      w=str(k["w"])) for k in kept]
         with open("/work/captions.srt", "w") as fh:
             for i, (s, e, txt) in enumerate(cues, 1):
                 fh.write(f"{i}\n{_srt_ts(s)} --> {_srt_ts(e)}\n{txt}\n\n")
@@ -10761,6 +12739,10 @@ def edit(source_key: str, brief: str,
         # RULED. The record has to follow the build: a deep copy, per call.
         import copy as _copy
         led["executed_verdicts"] = _copy.deepcopy(vs)
+        # THE FREEZE'S OWN FINGERPRINT, taken at the same instant. Without it
+        # `built_from` cannot distinguish "the build used the first ruling"
+        # from "something rewrote the record of what the build used".
+        led["executed_verdicts_fp"] = verdicts_fingerprint(led["executed_verdicts"])
         led["executed_verdicts_call"] = int(led.get("execute_plan_calls") or 0) + 1
         print("  EXECUTED FROM   : %d ruling(s) — %s"
               % (len(vs), "  ".join(
@@ -11230,6 +13212,13 @@ def edit(source_key: str, brief: str,
             _cap_fps = 30 if _cap_style == "TypewriterReveal" else 15
             _cap_pages = (caption_pages(_cap_words, 3)
                           if (_want_caps and _cap_words) else [])
+            # THE CAPTION FINGERPRINT, taken where the captions are decided.
+            # Burned captions leave no verdict and no manifest entry, so
+            # without this a re-edit cannot tell a restyle from a no-op.
+            _cap_sig_state, _cap_sig = caption_signature(
+                _cap_style, _cap_fps, _cap_pages)
+            led["caption_signature_state"] = _cap_sig_state
+            led["caption_signature"] = _cap_sig
             # CENTRED ON THE SEAM, in the alpha layer's own frame clock.
             _tc_overlays = [
                 {"type": _c2["type"],
@@ -11478,6 +13467,18 @@ def edit(source_key: str, brief: str,
                                        ctrl_t0=_cap_ctrl)
                 cur = "captioned.mp4"
                 led["caption_composited"] = True
+                # WHAT THEY SAY, not that they ran. The flag above is presence;
+                # these are the shape. car_short round 65 had the flag True and
+                # one Cyrillic caption transcribed from engine noise.
+                _cw_n, _cw_s, _cw_d = caption_evidence(_cap_words)
+                led["caption_words_n"] = _cw_n
+                led["caption_scripts"] = _cw_s
+                led["caption_script_dominant"] = _cw_d
+                print("  CAPTION CONTENT : %d word(s), dominant script %s  %s"
+                      % (_cw_n, _cw_d or "NONE",
+                         "   <-- composited with NO WORDS: the flag says "
+                         "captions and the frame has none"
+                         if not _cw_n else ""), flush=True)
             else:
                 # The render succeeded and the composite did not, so the video
                 # has NO captions at all — worse than the fallback, and it must
@@ -12039,7 +14040,12 @@ def edit(source_key: str, brief: str,
             # The 29-name enum is retired with this line, and it was the
             # incumbency mechanism itself.
             _ctype, _dwhy = derive_card_type(hero, str(b.get("text") or ""),
-                                             led.get("vibe") or "")
+                                             led.get("vibe") or "",
+                                             condition=v.get("card_condition"),
+                                             card_props=v.get("card_props"))
+            led.setdefault("card_conditions_named", []).append(
+                {"beat": v.get("beat"), "condition": v.get("card_condition"),
+                 "derived": _ctype})
             if not _ctype:
                 # REFUSING IS A REAL ANSWER. A card nobody can read is the
                 # failure this whole thread began with, and it is worse than no
@@ -12055,13 +14061,24 @@ def edit(source_key: str, brief: str,
                 # DERIVED — the agent ruled a card, the harness tried every
                 # catalogue type and none fit — so it is offered where the need
                 # is proven rather than as a standing option.
+                # WHICH KIND OF REFUSAL. derive_card_type returns None for
+                # two different reasons and only one of them is a catalogue
+                # gap. A hero of six words is the agent writing a sentence into
+                # a card field; the remedy is fewer words, and pointing it at
+                # authoring spends a render round-trip on a copy edit.
+                _too_long = str(_dwhy).startswith("HERO_TOO_LONG")
                 _skips.append({"family": "card", "beat": v.get("beat"),
                                "why": _dwhy,
-                               "code": "no_catalogue_component",
+                               "code": ("hero_too_long" if _too_long
+                                        else "no_catalogue_component"),
                                "hero": str(hero)[:60],
-                               "remedy": "no catalogue component fits this "
-                                         "hero; author_component is how this "
-                                         "beat gets served"})
+                               "remedy": ("shorten card_hero to five words or "
+                                          "fewer and rule the beat again — "
+                                          "PullQuote carries a phrase whole"
+                                          if _too_long else
+                                          "no catalogue component fits this "
+                                          "hero; author_component is how this "
+                                          "beat gets served")})
                 # RENAMED FROM authorable_beats 2026-09-10. Builder-1's harness
                 # uses that name for a DENOMINATOR — beats eligible to carry a
                 # placement at all — and this is a DEFECT COUNT: beats where a
@@ -12070,6 +14087,7 @@ def edit(source_key: str, brief: str,
                 # nearly shipped both.
                 led.setdefault("catalogue_gap_beats", []).append(
                     {"beat": v.get("beat"), "hero": str(hero)[:60],
+                     "kind": "hero_too_long" if _too_long else "catalogue_gap",
                      "why": _dwhy[:120]})
                 continue
             led.setdefault("card_type_derived", []).append(
@@ -12411,17 +14429,17 @@ def edit(source_key: str, brief: str,
         # that read "text well under reference" was reading a step count.
         #
         # zoom and sfx were already correct: those emit one step per ruling.
-        # CUTAWAY WAS BUILT AND THEN DROPPED HERE. Builder-2 found it running
-        # the judgment on rounds 51-53: ruled 4, planned 3, built 1 on three
-        # fixtures, placements with family=cutaway ZERO — execute_plan appends
-        # {"step": "cutaway"} and this table never learned the word, so the
-        # manifest could not represent one. "Cutaway ruled zero" was partly the
-        # instrument. `cut` is deliberately NOT here: it is carried by
-        # keep_spans (smoke_every_step_becomes_a_placement names that carrier
-        # and checks it is non-empty whenever cuts were built).
-        _TYPE = {"text": "overlay_text", "zoom": "emphasis", "sfx": "sfx",
-                 "card": "card", "transition": "transition",
-                 "cutaway": "cutaway"}
+        # THE ONE DECLARATION OF WHAT THIS PIPELINE CAN BUILD. Hoisted to
+        # BUILT_FAMILIES so the grader reads the same set the builder
+        # dispatches on — a hand-copied second list is how "ruled but not
+        # built" gets attributed to the wrong side, and this table is where
+        # cutaway was BUILT and then dropped: ruled 4, planned 3, built 1 on
+        # three fixtures, placements with family=cutaway ZERO, because
+        # execute_plan appends {"step": "cutaway"} and this table had never
+        # learned the word. `cut` is deliberately NOT a member: it is carried
+        # by keep_spans (smoke_every_step_becomes_a_placement names that
+        # carrier and checks it is non-empty whenever cuts were built).
+        _TYPE = dict(BUILT_FAMILIES)
         for _s in steps:
             _k = _s.get("step")
             if _k not in _TYPE:
@@ -13030,6 +15048,8 @@ def edit(source_key: str, brief: str,
         # plan_onto_beats would report it UNPLACEABLE — a hole the user was told
         # we recorded, arriving on the next turn as a defect and then dropped.
         prior_plan, _prior_inserts = inserts_from_plan(prior_plan)
+        prior_plan, _prior_cap_sig = caption_from_plan(prior_plan)
+        led["prior_caption_signature"] = _prior_cap_sig
         if _prior_inserts:
             led["insert_requests"] = list(_prior_inserts)
             led["inserts_restored"] = len(_prior_inserts)
@@ -13038,6 +15058,12 @@ def edit(source_key: str, brief: str,
                   % len(_prior_inserts), flush=True)
         _prior, _prior_probs = plan_onto_beats(prior_plan, _beats)
         led["beat_verdicts"] = list(_prior)
+        # THE PRIOR RULINGS, FROZEN, so fidelity on a re-edit can be judged
+        # against WHAT CHANGED. Without this the re-edit's placements are the
+        # whole prior plan, and a re-edit that delivers NOTHING reads FAITHFUL
+        # because the thing asked for was already there from last time.
+        import copy as _cp8
+        led["prior_verdicts"] = _cp8.deepcopy(list(_prior))
         led["reedit_loaded"] = len(_prior)
         led["reedit_unplaceable"] = _prior_probs
         print(f"  RE-EDIT         : loaded {len(_prior)} of "
@@ -13053,6 +15079,14 @@ def edit(source_key: str, brief: str,
                  f"this run's beats — the previous edit would come back short: "
                  f"{_prior_probs[0].get('why')}")
     led["beat_verdicts"] = []
+    # INITIALISED, NOT setdefault-ONLY. Both of these are written with
+    # `led.setdefault(k, []).append(...)` at the card sites, so on a run that
+    # rules no card the KEY NEVER EXISTS — and an absent key cannot be told
+    # apart from a tree that has none of the wiring. That is exactly what made
+    # round 63 unreadable: I reported both as `null`, and the honest answer was
+    # KEY ABSENT. Present-and-empty is a MEASURED zero; missing is ABSENT.
+    led["card_conditions_named"] = []
+    led["card_props_seen"] = []
     led["component_verdicts"] = []   # legacy field, retained so old runs still parse
 
     _gap_txt = ("\n".join(f"  [{_s:.2f}-{_e:.2f}] {_g2:.2f}s"
@@ -13333,8 +15367,18 @@ def edit(source_key: str, brief: str,
     # for repair — is now enforced where it costs nothing: the dispatch refuses
     # them until execute_plan has run, and says why. Same behaviour, no cache
     # invalidation.
+    # `beat_verdict` IS NO LONGER IN THIS SET, and the distinction is the point:
+    # every other member operates on FILES that do not exist until execute_plan
+    # has run in this container, so "nothing is built yet" is literally true of
+    # them. beat_verdict changes a RULING. On a re-edit the built edit is the
+    # PREVIOUS one, already loaded as the prior plan — so refusing it until
+    # execute_plan runs would force a re-edit to rebuild the entire old edit,
+    # at full render cost, before it could change the one beat the user named.
+    # That is the equal-capability standard broken by an ordering rule written
+    # for a different kind of tool. It is now gated by the schema instead: it is
+    # only offered on a re-edit at all.
     _REPAIR_ONLY = {"build_cut", "build_overlays", "build_zoom", "place_sfx",
-                    "render_components", "author_component", "beat_verdict"}
+                    "render_components", "author_component"}
     # Haiku reaches the same verdicts as Sonnet and pays nine extra turns to
     # read first. The role is judgment; the readers serve an execution job the
     # agent no longer has.
@@ -13368,19 +15412,71 @@ def edit(source_key: str, brief: str,
     # not a property. Filtered ONCE before the loop so the cached prefix stays
     # constant for the whole run; changing the tool list mid-run cost 43,222
     # cache_write tokens on a previous measurement.
+    _READERS = {"read_knowledge", "search_skills"}
     if _judgment_only:
-        _READERS = {"read_knowledge", "search_skills"}
         tools = [t for t in tools if t.get("name") not in _READERS]
-    # RECORDED WHERE IT IS READ. Not "what was requested" — what this container
-    # actually built the tool list with.
-    led["readers_offered"] = not _judgment_only
+    # THE DENOMINATOR FOR THE READER COUNTERS, RECORDED WHERE IT IS DECIDED.
+    # `read_knowledge` has been called 0 times in 37 runs and `skill_searches`
+    # is empty on all of them — and BOTH zeros are this filter, not a finding.
+    # Every one of those runs was Haiku, so the readers were offered in 0 of 37.
+    # "Called zero times" was true and meaningless, and I quoted it in a scope
+    # document as evidence the agent never needs them.
+    #
+    # A counter that has never incremented is a signal or a broken wire and the
+    # two look identical — UNLESS the count of chances is written down beside
+    # it. This is that number.
+    led["readers_offered"] = sorted(
+        {t.get("name") for t in tools} & _READERS)
+    led["readers_withheld"] = sorted(
+        _READERS - {t.get("name") for t in tools})
+    print("  READERS         : offered %s   withheld %s%s"
+          % (led["readers_offered"] or "NONE", led["readers_withheld"] or "none",
+             "   (judgment-only role: a zero from these counters says nothing "
+             "about need)" if _judgment_only else ""), flush=True)
     led["tool_names"] = sorted(t.get("name") for t in tools)
-    print("  READERS        : %s  (model=%s, offer_readers=%s) — "
-          "search_skills %s in the tool list"
-          % ("OFFERED" if not _judgment_only else "WITHHELD", model,
-             offer_readers,
-             "IS" if any(t.get("name") == "search_skills" for t in tools)
-             else "is NOT"), flush=True)
+
+    # ── beat_verdict IS A RE-EDIT TOOL. WITHHELD ON A FIRST EDIT. ───────────
+    # MEASURED over 24 runs in 8 rounds: 47 calls, and 42 of them re-ruled a
+    # beat rule_all_beats had already ruled — 89% discarded by first-wins. That
+    # is the agent reaching for a second ruling surface during a FIRST edit,
+    # where there is nothing to be surgical about, and paying ~4,400 prefix
+    # tokens for the privilege.
+    #
+    # WITHHELD, NOT DISCOURAGED — this lane's own law: a capability in the
+    # schema will be used, and telling a model not to use a tool it has is a
+    # preference, not a property. Filtered ONCE before the loop, like the
+    # readers, so the cached prefix stays constant for the whole run.
+    #
+    # THE SAVING IS CONDITIONAL AND BOTH NUMBERS ARE REPORTED. A first edit
+    # stops carrying the tool; a re-edit still pays for it, and should.
+    _bv_tok = None
+    if not _reedit:
+        _bv = [t for t in tools if t.get("name") == "beat_verdict"]
+        _bv_tok = len(json.dumps(_bv)) // 4 if _bv else 0
+        tools = [t for t in tools if t.get("name") != "beat_verdict"]
+    _tools_tok = len(json.dumps(tools)) // 4
+    led["tool_prefix_tokens"] = _tools_tok
+    led["beat_verdict_offered"] = bool(_reedit)
+    led["beat_verdict_tokens_saved"] = _bv_tok
+    print("  TOOL SURFACE    : %s  ~%d tok%s"
+          % ("RE-EDIT (beat_verdict offered)" if _reedit
+             else "FIRST EDIT (beat_verdict withheld)",
+             _tools_tok,
+             "   saved ~%d by withholding beat_verdict" % _bv_tok
+             if _bv_tok else ""), flush=True)
+
+    # EQUAL CAPABILITY, CHECKED RATHER THAN ASSUMED. Withholding a tool from one
+    # path must not leave that path unable to do something the other can. The
+    # plural ruling surface has to be on BOTH, or a first edit could rule beats
+    # and a re-edit could only touch them one at a time — Zac's standard broken
+    # in the direction this change could actually break it.
+    _names = {t.get("name") for t in tools}
+    if "rule_all_beats" not in _names:
+        raise AssertionError(
+            "rule_all_beats is not offered on this path (%s) — withholding "
+            "beat_verdict is only safe while the plural surface is universal; "
+            "without it this path cannot rule more than one beat at a time"
+            % ("re-edit" if _reedit else "first edit"))
 
 
 
@@ -14132,7 +16228,12 @@ def edit(source_key: str, brief: str,
                     _incoming = tu.input.get("verdicts") or []
                 _seen = {v.get("beat") for v in led["beat_verdicts"]}
                 _added = 0
-                _rejected = []
+                # ONE ADMISSION DOOR. The type boundary, the dedup (with the
+                # re-edit branch) and the half-ruling refusal all live in
+                # admit_verdict, and BOTH ruling surfaces call it. Extracting
+                # the three checks and leaving two call sites to assemble them
+                # in the right order is how a rule ends up enforced on one of
+                # them again — which is exactly what this file just paid for.
                 for _v in _incoming:
                     # ONE ADMISSION, BOTH SURFACES. The type boundary, the
                     # dedup and the half-ruling refusal used to live here as
@@ -14141,10 +16242,8 @@ def edit(source_key: str, brief: str,
                     # admit_verdict.
                     _ok6, _rj6 = admit_verdict(
                         led, _v, _seen, reedit=_reedit,
-                        reedit_targets=_reedit_targets,
-                        can_express=_tool_fields("rule_all_beats"))
+                        reedit_targets=_reedit_targets)
                     if _rj6:
-                        _rejected.append(_rj6)
                         record_rejection(led, _rj6)
                     if _ok6:
                         _added += 1
@@ -14293,16 +16392,16 @@ def edit(source_key: str, brief: str,
                 # the same four. An informed agent repeating an incomplete
                 # ruling is precisely the case this exists for — so the verdict
                 # is DISCARDED, reported still-missing, and must be re-made.
-                # KEYED ON THE TREATMENT, LIKE ITS TWO SIBLINGS. This read
-                # the `sfx` FIELD while `_nocopy` and `_nocard` read the
-                # treatment — so a beat ruled `treatment: ["sfx"]` with no
-                # field set was invisible to the one guard that exists to
-                # report it, and the placement vanished at build time with
-                # nothing said. Found by Builder-2 reading the source on their
-                # lane; confirmed identical here. The odd one out of three.
+                # KEYED ON TREATMENT, like its siblings _nocopy and _nocard.
+                # It read only the `sfx` FIELD, so `treatment: ["sfx"]` with no
+                # field set was never in this list and never stripped — the 25
+                # dropped placements. half_ruling_refusal now refuses these
+                # where the agent still holds the beat; this is defence in
+                # depth for anything arriving by another route.
                 _nosfx = [v.get("beat") for v in led["beat_verdicts"]
-                          if "sfx" in [str(t).lower()
-                                       for t in (v.get("treatment") or [])]
+                          if ("sfx" in [str(t).lower()
+                                        for t in (v.get("treatment") or [])]
+                              or str(v.get("sfx", "no")).lower() == "yes")
                           and not str(v.get("sfx_name") or "").strip()]
                 _nocard = [v.get("beat") for v in led["beat_verdicts"]
                            if "card" in [str(t).lower() for t in (v.get("treatment") or [])]
@@ -14373,16 +16472,16 @@ def edit(source_key: str, brief: str,
                 # Recompute AFTER derivation — a field that was just filled is
                 # no longer missing, and stripping it would discard the floor we
                 # just established.
-                # KEYED ON THE TREATMENT, LIKE ITS TWO SIBLINGS. This read
-                # the `sfx` FIELD while `_nocopy` and `_nocard` read the
-                # treatment — so a beat ruled `treatment: ["sfx"]` with no
-                # field set was invisible to the one guard that exists to
-                # report it, and the placement vanished at build time with
-                # nothing said. Found by Builder-2 reading the source on their
-                # lane; confirmed identical here. The odd one out of three.
+                # KEYED ON TREATMENT, like its siblings _nocopy and _nocard.
+                # It read only the `sfx` FIELD, so `treatment: ["sfx"]` with no
+                # field set was never in this list and never stripped — the 25
+                # dropped placements. half_ruling_refusal now refuses these
+                # where the agent still holds the beat; this is defence in
+                # depth for anything arriving by another route.
                 _nosfx = [v.get("beat") for v in led["beat_verdicts"]
-                          if "sfx" in [str(t).lower()
-                                       for t in (v.get("treatment") or [])]
+                          if ("sfx" in [str(t).lower()
+                                        for t in (v.get("treatment") or [])]
+                              or str(v.get("sfx", "no")).lower() == "yes")
                           and not str(v.get("sfx_name") or "").strip()]
                 _nocard = [v.get("beat") for v in led["beat_verdicts"]
                            if "card" in [str(t).lower() for t in (v.get("treatment") or [])]
@@ -14428,22 +16527,36 @@ def edit(source_key: str, brief: str,
             elif tu.name == "beat_verdict":
                 # THE SECOND RULING SURFACE, NOW ADMITTED THE SAME WAY. This
                 # handler built a four-key dict by hand out of the thirteen
-                # fields its own schema offers, appended it past the dedup, and
-                # answered with a DEDUPED count — so a second ruling of a beat
-                # replaced a complete first ruling with a stub and reported
-                # nothing had happened. admit_verdict is the whole admission;
-                # see its docstring for what each of the three skipped checks
-                # was letting through.
+                # fields its own schema offers and appended it unconditionally,
+                # running none of the three guards: no type boundary, no dedup,
+                # no half-ruling refusal — and no reedit_merge, so on a RE-EDIT
+                # it could change a beat the instruction never named.
+                # "Surgical" was enforced on one surface and asserted on the
+                # other. admit_verdict is the whole admission; see its
+                # docstring for what each skipped check was letting through.
                 led["beat_verdict_calls"] = led.get("beat_verdict_calls", 0) + 1
-                _sv = dict(tu.input or {})
+                # PROJECTED ONTO THE SCHEMA-DERIVED FIELD LIST, not passed
+                # through. admit_verdict projects again internally, so this
+                # changes no behaviour — it keeps ONE vocabulary for "the
+                # fields a ruling has", which is the property Builder-2's
+                # smoke_reruled_visible protects. A hand list drifted once.
+                _sv = {k: tu.input.get(k) for k in VERDICT_FIELDS
+                       if k in (tu.input or {})}
                 _before = led.get("rulings_discarded", 0)
                 _seen1 = {v.get("beat") for v in led["beat_verdicts"]}
                 _okbv, _rjbv = admit_verdict(
                     led, _sv, _seen1, reedit=_reedit,
-                    reedit_targets=_reedit_targets,
-                    can_express=_tool_fields("beat_verdict"))
+                    reedit_targets=_reedit_targets)
                 _discarded = led.get("rulings_discarded", 0) > _before
-                out = {"recorded": bool(_okbv), "ruled": len(_seen1),
+                # RULINGS vs BEATS, never a deduped count, and both read AFTER
+                # admission. `"ruled": len({v["beat"] ...})` told an agent that
+                # had just re-ruled beat 0 "ruled 10 of 10", so it could not
+                # see the contradiction and made it again — four times across
+                # two fixtures on round 63.
+                _bseen = [v.get("beat") for v in led["beat_verdicts"]]
+                out = {"recorded": bool(_okbv),
+                       "rulings": len(_bseen),
+                       "beats_ruled": len(set(_bseen)),
                        "of": len(_beats)}
                 if _rjbv:
                     # REFUSED WHERE IT IS MADE, and the reason travels back in
@@ -14462,12 +16575,21 @@ def edit(source_key: str, brief: str,
                     # read as success.
                     _prior = next((v for v in led["beat_verdicts"]
                                    if v.get("beat") == _sv.get("beat")), {})
+                    out["DISCARDED_already_ruled"] = _sv.get("beat")
                     out["DISCARDED"] = (
-                        f"beat {_sv.get('beat')} is already ruled and first "
-                        f"ruling wins. Nothing was changed and nothing was "
-                        f"stored. The standing ruling is "
+                        f"beat {_sv.get('beat')} is already ruled and the "
+                        f"FIRST ruling stands — this one was discarded, not "
+                        f"merged. Nothing was changed and nothing was stored. "
+                        f"The standing ruling is "
                         f"treatment={_prior.get('treatment')!r} "
-                        f"cut={_prior.get('cut')!r}.")
+                        f"cut={_prior.get('cut')!r}. To change a beat, re-call "
+                        f"rule_all_beats with every field it should keep; a "
+                        f"second ruling cannot carry over what it does not "
+                        f"repeat.")
+                elif not _okbv:
+                    out["fix"] = ("The ruling was not admitted and no reason "
+                                  "was produced — report this rather than "
+                                  "re-ruling blindly.")
             elif tu.name == "cut_verdict":
                 led["cut_verdict"] = {"decision": tu.input.get("decision"),
                                       "why": str(tu.input.get("why") or "")}
@@ -14585,6 +16707,37 @@ def edit(source_key: str, brief: str,
              "so the verdict is unsupportable in either direction. Fix the "
              "control or re-measure the bar; do not read these as clean and do "
              "not read them as defects." % len(_held))
+
+    # RE-RULINGS, MADE VISIBLE. Not bounded here — the merge and the tool that
+    # bypasses it are Builder-1's — but a disagreement the ledger records and
+    # nobody prints is the counter-with-no-consumer class, and this one hides a
+    # latent defect: the build's per-beat lookup is a dict comprehension, so a
+    # second ruling WINS there while the frozen executed copy kept the first.
+    _rr_state, _rr_rows = reruled_beats(led.get("beat_verdicts"),
+                                        led.get("executed_verdicts"),
+                                        led.get("executed_verdicts_fp"))
+    led["reruled_state"] = _rr_state
+    led["reruled_beats"] = _rr_rows
+    led["reruled_count"] = len(_rr_rows)
+    _rr_n = len({v.get("beat") for v in (led.get("beat_verdicts") or [])
+                 if isinstance(v, dict)})
+    print("  RE-RULED BEATS  : %s  %d beat(s) ruled more than once "
+          "(%d ruling(s) over %d beat(s))"
+          % (_rr_state, len(_rr_rows),
+             len(led.get("beat_verdicts") or []), _rr_n), flush=True)
+    for _r in _rr_rows:
+        print("     beat %s: %d rulings, BUILT FROM %s%s"
+              % (_r["beat"], _r["rulings"], _r["built_from"],
+                 "   LOST: " + ", ".join(_r["lost_fields"])
+                 if _r["lost_fields"] else ""), flush=True)
+        for _k, _vals in _r["changed"].items():
+            print("        %-13s %s" % (_k, " -> ".join(repr(_x) for _x in _vals)),
+                  flush=True)
+    if _rr_rows and any(_r["lost_fields"] for _r in _rr_rows):
+        print("     NOTE: a later ruling that drops a field does NOT clear it "
+              "in the frozen executed copy, but DOES win the build's own "
+              "`{beat: v}` lookup — last one in. Inert here only while the "
+              "second execute_plan is refused.", flush=True)
 
     # K6, MEASURED. A rebuild with no measurement since the last one is a
     # render billed for a guess. The rule is hoisted (blind_rebuilds) so the
@@ -14846,6 +16999,7 @@ def edit(source_key: str, brief: str,
         "caption_tracks": _n_of("caption_track"),
         "emphasis": _n_of("emphasis"),
         "sfx": _n_of("sfx"),
+        "cutaway": _n_of("cutaway"),
         "by_remotion": sum(1 for p in _pl if p.get("method") == "remotion"),
         "by_ffmpeg": sum(1 for p in _pl if p.get("method") == "ffmpeg"),
         # COMMAND FACTS, kept because they are about what RAN, not what was
@@ -14903,8 +17057,14 @@ def edit(source_key: str, brief: str,
     # harness's own count of what it BUILT lives in led["execute_plan"]["built"].
     # Naming them apart is the whole point: they were conflated, so the gap
     # between them could not be seen.
-    _fam_declared = {"card": _mix["cards"], "text": _mix["text"],
-                     "sfx": _mix["sfx"], "zoom": _mix.get("emphasis", 0)}
+    # DERIVED FROM BUILT_FAMILIES, not hand-listed. This was the FOURTH closed
+    # family list in the file and the third to lose `cutaway`: round 67 built 4
+    # cutaways and this dict declared 0, so `accounting_unbalanced` fired on a
+    # gap that was entirely the instrument. The builder, the grader and the
+    # manifest now read one declaration, so the next family cannot be built and
+    # counted zero.
+    _fam_declared = {_fam: _n_of(_ptype)
+                     for _fam, _ptype in BUILT_FAMILIES.items()}
     _fam_built = dict((led.get("execute_plan") or {}).get("built") or {})
 
     # ── BUILT = DECLARED, ACROSS THE SEAM ──────────────────────────────────
@@ -15194,14 +17354,117 @@ def edit(source_key: str, brief: str,
     _srcd = float(led.get("source_duration_s") or 0.0)
     _cut_made = bool(led.get("keep_spans")) and _srcd > 0 and _kept < (_srcd - 0.05)
     led["cut_made"] = _cut_made
+    # ONE FIDELITY STANDARD, BOTH PATHS. The question is identical on a
+    # re-edit — did what was asked for land, and did anything land that was not
+    # asked for — so the RULE does not change. The POPULATION does: a re-edit's
+    # placements are the whole prior plan, and "make the captions bigger" would
+    # read FAITHFUL on a run that changed nothing, because the captions were
+    # already there from last time. That is the paid re-edit no-op scored as a
+    # success, and it is the shape `reedit_taxonomy` is about.
+    _fid_pl = led.get("placements") or []
+    # CAPTIONS COUNT AS DELIVERED ONLY IF THEY SAY SOMETHING. The flag is
+    # presence; `caption_words_n` is the shape. A composite that ran over zero
+    # words burns nothing and must not satisfy "just add captions".
+    _cap_words_n = led.get("caption_words_n")
+    _cut_for_fid, _cap_for_fid = _cut_made, (
+        bool(led.get("caption_composited"))
+        and (_cap_words_n is None or _cap_words_n > 0))
+    _rd_state, _rd_beats, _rd_fams = reedit_delta(led.get("prior_verdicts"),
+                                                  led.get("beat_verdicts"))
+    led["reedit_delta_state"] = _rd_state
+    if led.get("prior_verdicts") is not None:
+        led["reedit_delta_beats"] = _rd_beats
+        led["reedit_delta_families"] = _rd_fams
+        print("  RE-EDIT DELTA   : %s  %d beat(s) changed %s"
+              % (_rd_state, len(_rd_beats), _rd_fams or "[]"), flush=True)
+        if _rd_state == "MEASURED":
+            # BY BEAT **AND** FAMILY. Narrowing on the beat alone drags in the
+            # beat's PRE-EXISTING placements: "remove the last clip" changes
+            # beat 2's `cut`, and a sound effect that beat has carried since the
+            # first edit is then attributed to this run and reads OVERREACHED.
+            # The delta knows which families moved; use both coordinates.
+            _rd_set = set(_rd_beats)
+            _fid_pl = [_p for _p in _fid_pl
+                       if _p.get("beat") in _rd_set
+                       and str(_p.get("family") or _p.get("type") or "").lower()
+                       in set(_rd_fams)]
+            _cut_for_fid = _cut_made and "cut" in _rd_fams
+            # CAPTIONS ARE NOT PER-BEAT RULINGS, so the beat delta is blind to
+            # them and must never gate them — gating on it made every genuine
+            # caption re-edit read SHORT, which is worse than the no-op it was
+            # trying to catch. They get their OWN signal: a fingerprint over the
+            # style, the frame rate and the page layout, persisted on the plan
+            # and compared against the prior turn's.
+            _cc_state, _cc_changed, _cc_why = captions_changed(
+                led.get("prior_caption_signature"),
+                led.get("caption_signature_state") or "ABSENT",
+                led.get("caption_signature"))
+            led["captions_changed_state"] = _cc_state
+            led["captions_changed"] = _cc_changed
+            led["captions_changed_why"] = _cc_why
+            print("  CAPTION DELTA   : %s  changed=%s — %s"
+                  % (_cc_state, _cc_changed, _cc_why), flush=True)
+            if _cc_state == "MEASURED":
+                # A caption family is DELIVERED by this run only if this run
+                # actually changed the captions.
+                _cap_for_fid = _cap_for_fid and _cc_changed
+            elif _cc_state == "ABSENT":
+                # UNKNOWABLE, AND SAID SO. A plan written before the
+                # fingerprint existed carries none; answering "unchanged"
+                # would invent a fact and "changed" would excuse a no-op.
+                # Fidelity falls back to caption_composited for this turn only,
+                # and the next turn can answer properly because THIS run writes
+                # a signature.
+                led["reedit_caption_unverifiable"] = True
+                print("  RE-EDIT LIMIT   : %s. Judged on caption_composited "
+                      "alone this turn; the signature this run writes makes "
+                      "the next one answerable." % _cc_why, flush=True)
+            else:                      # REMOVED
+                _cap_for_fid = False
     _fid_state, _fid_missing, _fid_unasked, _fid_why = spec_fidelity(
-        led.get("spec"), led.get("placements") or [],
-        cut_made=_cut_made,
-        captions_made=bool(led.get("caption_composited")))
+        led.get("spec"), _fid_pl,
+        cut_made=_cut_for_fid,
+        captions_made=_cap_for_fid)
     led["fidelity"] = {"state": _fid_state, "missing": _fid_missing,
                        "unasked": _fid_unasked, "why": _fid_why}
     print("  FIDELITY        : %s — %s" % (_fid_state, _fid_why), flush=True)
-    if _fid_state == FIDELITY_SHORT:
+    # ── THE UNSCOPED HALF, WHICH IS MOST OF THE TRAFFIC ────────────────────
+    # 48.2% of users declare no family scope, and every one of the 37 fixture
+    # runs to date is that case — so until now NOTHING judged the majority
+    # shape. "Did what was asked land" has no referent here; what does have one
+    # is whether the run delivered what IT decided.
+    if _fid_state == FIDELITY_UNSCOPED:
+        _co_state, _co_drop, _co_unb, _co_why = unscoped_coherence(
+            led.get("ruled_vs_built"), led.get("placements") or [],
+            cut_made=_cut_made,
+            captions_made=bool(led.get("caption_composited")),
+            beats_ruled=len(led.get("beat_verdicts") or []))
+        led["coherence"] = {"state": _co_state, "dropped": _co_drop,
+                            "unbuildable": _co_unb, "why": _co_why}
+        print("  COHERENCE       : %s — %s" % (_co_state, _co_why), flush=True)
+        if _co_state == VACANT:
+            fail("unscoped_vacant",
+                 "the brief declared no scope and the edit contains nothing — "
+                 "no placement, no cut, no captions")
+        elif _co_state == INCOHERENT:
+            # THE RUN'S OWN RULINGS ARE THE STANDARD. Not a rate, not a floor:
+            # it decided these and did not deliver them.
+            fail("unscoped_incoherent", _co_why)
+        # UNBUILDABLE IS NOT FAILED HERE. A family this pipeline has no builder
+        # for is a capability gap and belongs on the ranked build list, not on
+        # this run's record — failing the run for it would attribute the
+        # pipeline's hole to the agent.
+
+    if _fid_state == FIDELITY_FORBIDDEN:
+        # LOUDEST OF THE FOUR FAILURES. SHORT and OVERREACHED are misjudged
+        # scope; this is an instruction disobeyed. 7.2% of distinct briefs and
+        # 4.2% of users name something the edit must not do, and the pipeline
+        # had never been tested on one.
+        fail("fidelity_forbidden",
+             "the request said NOT to do %s and the edit contains it — the one "
+             "part of the brief the user was explicit about"
+             % _fid_unasked)
+    elif _fid_state == FIDELITY_SHORT:
         fail("fidelity_short",
              "the request asked for %s and the output does not contain it — "
              "the one thing asked for is the one thing missing"
@@ -15275,6 +17538,10 @@ def edit(source_key: str, brief: str,
     # THE UNFILLED HOLES RIDE THE PLAN. The plan is what the server persists and
     # hands back as prior_plan, so anything not in it does not survive the turn.
     _plan = plan_with_inserts(_plan, led.get("insert_requests"))
+    # THE CAPTION FINGERPRINT RIDES THE PLAN, like the unfilled inserts do. The
+    # plan is what the server persists and hands back as prior_plan, so a
+    # signature that is not in it cannot be compared against next turn.
+    _plan = plan_with_caption(_plan, led.get("caption_signature"))
     led["plan"] = _plan
     led["plan_problems"] = _plan_problems
     print(f"  PLAN            : {len(_plan)} entr(ies) keyed by source span"
@@ -16063,12 +18330,41 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     # PRINTED IN THE SAME COMMIT THAT RECORDS IT. A counter that reaches the
     # ledger and no output answers nothing — round 29 ran specifically to learn
     # whether a gate had fired and could not find out.
-    _cps = (r.get("ledger") or {}).get("card_props_seen") or []
+    # BOTH STATES, ALWAYS. `if _cps:` printed nothing on a round that ruled no
+    # card, so "zero cards" and "no instrumentation" read identically in the
+    # log — the same ambiguity the counter exists to resolve.
+    _cpl = (r.get("ledger") or {})
+    _cps = _cpl.get("card_props_seen")
     if _cps:
-        print("  CARD PROPS      : " + "  ".join(
-            f"[{c.get('type')} {'+'.join(c.get('keys') or []) or 'EMPTY'}"
-            f"{' (shorthand)' if c.get('from') != 'card_props' else ''}]"
-            for c in _cps))
+        _shorthand = sum(1 for c in _cps if c.get("from") != "card_props")
+        print("  CARD PROPS      : MEASURED  %d card(s), %d via the 25-type "
+              "prop table, %d via hero/label shorthand  "
+              % (len(_cps), len(_cps) - _shorthand, _shorthand)
+              + "  ".join(
+                  f"[{c.get('type')} {'+'.join(c.get('keys') or []) or 'EMPTY'}"
+                  f"{' (shorthand)' if c.get('from') != 'card_props' else ''}]"
+                  for c in _cps))
+    else:
+        print("  CARD PROPS      : %s  no card carried props this run"
+              % ("MEASURED 0" if isinstance(_cps, list) else "ABSENT"))
+
+    # card_conditions_named WAS WRITTEN AND NEVER PRINTED — the counter with no
+    # consumer, on the counter Zac asked for. It is the number that says whether
+    # the derived condition enum reached the ruling surface at all, so an
+    # unprinted one makes the round that was run to answer that unanswerable.
+    _ccn = _cpl.get("card_conditions_named")
+    if _ccn:
+        _named = sum(1 for c in _ccn if c.get("condition"))
+        _derived = sorted({c.get("derived") for c in _ccn if c.get("derived")})
+        print("  CARD CONDITIONS : MEASURED  %d card beat(s), %d named a "
+              "condition, derived types %s"
+              % (len(_ccn), _named, _derived or "NONE")
+              + "".join("\n     beat %s: condition=%r -> %r"
+                        % (c.get("beat"), c.get("condition"), c.get("derived"))
+                        for c in _ccn))
+    else:
+        print("  CARD CONDITIONS : %s  no card beat reached derive_card_type"
+              % ("MEASURED 0" if isinstance(_ccn, list) else "ABSENT"))
     # ALWAYS PRINTED, both states. A removal nobody can see in the log is a
     # round whose prefix nobody can reconstruct afterwards — and the whole point
     # of the switch is a removal EXPERIMENT, which is worthless if the removal

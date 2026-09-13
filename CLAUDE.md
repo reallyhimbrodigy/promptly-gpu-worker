@@ -1291,3 +1291,256 @@ else's laptop. Same rot, one gets looked at.
   that no longer exists and must fail `0x` rather than land somewhere
   plausible**, because a resolver that lands plausibly is the false green this
   entire family is about.
+
+## Standing rule earned 2026-09-11 (the sixth way a mutation stops mutating)
+
+- **A STALE TARGET: THE ANCHOR MATCHES AND THE PROPERTY MOVED.** (Named by Zac
+  2026-09-11.) Five ways were already recorded — anchor `0x`, a match landing
+  in prose, a vacuous operand, a no-op in the branch where the values are
+  already equal, and a mutation orphaned by a refactor. This is the sixth and
+  it is the quietest: **the anchor resolves EXACTLY, the edit applies, and it
+  no longer touches the thing the leg tests.**
+
+  A leg asserted that a census names `06_emphasis_zoom` as the largest
+  instructable gap. Its mutation had been re-pointed at a table row while the
+  leg was later tightened to read the gap SENTENCE — so mutation and leg ended
+  up aimed at different lines in the same file, and the mutant passed with the
+  sentence fully intact. Nothing was stale about the anchor; the TARGET moved
+  out from under it.
+
+  **When a leg moves, its mutation moves with it** — and the tell is a mutant
+  that passes while the property looks obviously broken by the diff. Earlier
+  the same day, in the same file: `"insert_requests" in SRC`, `'hero_too_long'
+  in SRC`, `"route_demand" in SRC`, `"UNVALIDATED" in src`, `'card_props' in
+  json.dumps(t)` matching `_card_props_unused`, and a hybrid message leg
+  accepting `"can create"` from a sentence that said the opposite. **Six legs
+  in one stretch satisfied by a sentence they did not mean.** The general form:
+  *a leg that tests for the PRESENCE of words is satisfied by any sentence
+  containing them, and documents and code both grow sentences.*
+
+  `smoke_legs_are_unambiguous` closes the half that counting can close — a
+  literal owned by more than one site. The other half is this one, and it needs
+  the mutation and the leg to be written and re-read together.
+
+- **A HEADING SWEEP UNDERSTATES A CORPUS IN A WAY IT CANNOT SELF-REPORT.** I
+  reported that two of six `zoom_arc` values had "no guidance anywhere". The
+  guidance exists, stated outright, MID-PARAGRAPH: *"build/breather claims
+  exist for exactly this job, and offer nothing else"* — the mask-zoom rule.
+  `knowledge_reach` extracts headings, so it could not see it, and I published
+  its blind spot as a fact about the corpus.
+
+  Every "the documents say nothing about X" conclusion from a structural sweep
+  carries that caveat, and the count it produces is a FLOOR rather than a
+  figure. Say which shape was searched, not just what was not found — the same
+  discipline as *sample the bucket you intend to measure*.
+
+  The corroboration worth keeping: `ZOOM_ARC_HOMES` maps `build` and `breather`
+  to exactly `('SnapReframe', 'StepZoom')` — the two small sub-second types the
+  prose names — derived from the components, independently of the catalogue.
+  **Two derivations agreeing is the strongest evidence available that a rule is
+  real and neither was invented**, and the smoke now asserts they keep
+  agreeing, because a drift would mean one is wrong with nothing saying which.
+
+## Standing rules earned 2026-09-11 (two reporting forms)
+
+- **A FUNNEL REPORTED AS ONE NUMBER HIDES WHICH STAGE DID THE WORK.** (Third
+  instance in one file, so it is the standing form now.) I wrote that a
+  241-sentence corpus sweep "became 159 by dropping the old pipeline's schema"
+  and never measured which filter produced the drop. Measured:
+
+      names NO lane enum value at all     66   <- the actual exclusion
+      names a foreign schema field          6   <- what I attributed 82 to
+      already reachable                    10
+
+  So "this corpus is craft written against a dead schema" was wrong by an order
+  of magnitude, and the real finding was better than the one it replaced: 66
+  rules name families this lane does not rule on, which is a product question
+  rather than a translation problem. **State each stage's count, or the
+  conclusion attaches to the wrong cause** — and the cause is what someone acts
+  on.
+
+  Same shape as the three earlier corrections in that file: a
+  document-to-field MAPPING reported as an audit (27 instructable became 7), a
+  heading extractor's blind spot reported as an absence in the corpus ("no
+  guidance anywhere" for two arc values that had it mid-paragraph), and a
+  field-mapping table reported as a translation plan ("five have targets"
+  became one clearly new after reading the six sentences). **The generalisation:
+  reading the population is not the same as classifying it from a distance, and
+  every one of these was a distance claim.**
+
+- **A FLOOR ON A SUM HIDES WHICH CONTRIBUTOR VANISHED.** A leg asserted five
+  wired-claim markers across two documents. Once eight existed, dropping the
+  zoom marker left six across two and the leg passed **while `zoom_arc` lost its
+  craft**. The field that loses its guidance is the one nobody sees go.
+
+  This is the stale-target class one level up: there the mutation and the leg
+  drifted apart, here the leg and the PROPERTY drifted apart because the
+  property is per-contributor and the check was per-total. Floors are now
+  per-document, and the same sweep over this repo's other smokes found the shape
+  in two more places — `figure_note`'s two call sites (the brief and the
+  unruled-beat list are different surfaces, and `>= 2` lets either cover for the
+  other) and `smoke_red_proofs_guarded`'s `len(_harnesses) >= 10`, where one red
+  proof disappearing is exactly what should be noticed and ten others keep it
+  green.
+
+  **When a check counts things that are individually load-bearing, name them.**
+
+
+## Standing rule earned 2026-09-11 (the seventh way a mutation misleads)
+
+- **A RED THAT IS NOT ABOUT THE PROPERTY.** (Named by Zac 2026-09-11.) The six
+  recorded ways all end in a mutation that fails to BITE — anchor `0x`, a match
+  landing in prose, a vacuous operand, a no-op where the values already agree,
+  an orphan left by a refactor, and the stale target whose anchor still resolves.
+  Every one of them shows up as a **false green**. The seventh runs the other
+  way: **the harness goes RED for a reason that has nothing to do with the thing
+  under test**, and a red that is not about the property is exactly as wrong as a
+  green that is not.
+
+  Both instances came from the same red proof, in one sitting:
+  * deleting the prior-fingerprint guard made `prior_sig.get("fp")` raise on
+    `None`, so the app **crashed** and the gate never reached its leg;
+  * swapping `print(` for `_np = (` left `flush=True` inside a tuple, so the
+    file **stopped parsing**.
+
+  Both printed `[RED]`. Neither exercised the leg named beside it. The proof
+  would have been filed as evidence that two properties were enforced when
+  nothing had tested either.
+
+  **Assert the leg's own words, not just a non-zero exit.** Every mutation
+  carries the phrase its target leg prints, and a red whose output does not
+  contain that phrase is reported as NOT RED. That check is what caught both —
+  `rc=1 phrase=False` is the signature. And when a mutation does crash, the fix
+  is to mutate the ANSWER or the LITERAL rather than the guard or the statement:
+  the point is to make the property false, not the file invalid.
+
+  Corollary already in force and worth restating here: **run the unmutated gate
+  in the same sandbox first and require green.** That catches the other
+  direction — a red produced by a broken sandbox rather than by the mutation —
+  and it has now fired twice for real (a red proof that was itself an
+  unrecorded `red_proof_*.py`, and a worktree at a HEAD that predated the
+  change).
+
+
+## Standing rule earned 2026-09-11 (a set named for the schedule, not the property)
+
+- **A SET WHOSE NAME DESCRIBES *WHEN* ITS MEMBERS RUN, NOT *WHAT* THEY TOUCH,
+  HOLDS CORRECTLY UNTIL ONE MEMBER'S SCHEDULE CHANGES — AND NOTHING IN THE NAME
+  TELLS YOU WHICH MEMBER THAT IS.** (Named by Zac 2026-09-11.) This is distinct
+  from the seven ways a mutation misleads: those are all failures of an
+  INSTRUMENT. This one is a failure of a CATEGORY, and it survives every check
+  because **the set was never wrong — only about to be.**
+
+  `_REPAIR_ONLY = {build_cut, build_overlays, build_zoom, place_sfx,
+  render_components, author_component, beat_verdict}` refused every member until
+  `execute_plan` had run, on the rule that a repair tool needs something built to
+  repair. True of six of them: they operate on FILES that do not exist until
+  execute_plan runs in this container. False of the seventh: `beat_verdict`
+  changes a RULING, and on a re-edit the thing it repairs is the PREVIOUS edit,
+  already loaded as the prior plan.
+
+  The set was named for the schedule ("only after the build") when the property
+  was the material ("operates on rendered files"). While every member happened
+  to share both, the name was indistinguishable from the property.
+
+  **IT WAS LATENT UNTIL THE TOOL WAS PROMOTED TO THE JOB IT WAS FOR.** It sat
+  harmlessly for as long as a re-edit's real work went through `rule_all_beats`
+  and the singular tool was mostly first-edit fidgeting. Ruling it "the surgical
+  instrument for re-edits" is what would have fired it: a tool promoted to a job
+  while an ordering rule still said it could not run until a render had
+  happened. **A latent break that only fires when the thing is promoted to the
+  job it is for** is the shape to watch for — the promotion looks like the safe
+  part.
+
+  **AND IT WOULD HAVE SURFACED IN THE WORST POSSIBLE FORM.** The symptom is a
+  re-edit that renders twice: once to satisfy the ordering rule, once to deliver
+  the change. That reads as a SLOW RE-EDIT — a performance problem, filed
+  against latency, investigated in the render path — when it is a capability
+  failure in the tool surface. Nothing would have pointed at the set.
+
+  **How to apply.** When withholding, gating or ordering a group of tools, write
+  down the PROPERTY that justifies the grouping, not the schedule that currently
+  correlates with it — then check each member against the property individually.
+  And when promoting anything to a new role, re-check every rule that constrains
+  it: the rules were written for the old role and none of them announce that.
+
+  Found only because Zac said to check that direction. My own equal-capability
+  check had stopped at "is `rule_all_beats` still offered on both paths" — which
+  it was, and which passes cleanly while the surgical tool is unreachable until
+  after a full rebuild.
+
+
+## Standing rule earned 2026-09-11 (absence checked, staleness reported)
+
+- **CHECKING THAT MY SYMBOLS ARE ABSENT FROM ANOTHER LANE'S TREE SAYS NOTHING
+  ABOUT WHETHER THEIR FIX IS PRESENT IN IT.** (Named by c6, 2026-09-11.) I ran
+  `git show <mounted-commit>:agentic_editor_app.py` and checked four of MY OWN
+  symbols — `card_conditions_named`, `DERIVED_VERDICT_FIELDS`,
+  `unscoped_coherence`, `FIDELITY_FORBIDDEN`. All four genuinely absent, all
+  four correctly reported. Then I wrote a FIFTH sentence — "the mounted tree
+  still has the field-keyed `_nosfx`, so sfx placements will drop silently
+  again" — **which I never tested.** It was false: the mount carried the peer's
+  treatment-keyed fix at both sites plus their derivation.
+
+  **The two questions need different evidence and only one of them is cheap:**
+
+  | claim | evidence needed |
+  |---|---|
+  | "X is absent from the mount" | grep the mount. Needs nothing else. |
+  | "the mount has the OLD version of a thing another lane fixed" | their commits, their fix's shape, and a check for the FIX rather than for my symbols |
+
+  I answered the cheap question four times and then reported on the expensive
+  one. **The four real checks are what made the fifth claim persuasive** — to me
+  and nearly to a peer relaunching a round on it.
+
+  This is the fifth instance of one family in this file and the first
+  cross-lane one: a document-to-field MAPPING reported as an audit (27
+  instructable became 7), a heading extractor's blind spot reported as a corpus
+  absence, a field-mapping table reported as a translation plan ("five have
+  targets" became one), a loose vocab matcher reported as a rule population
+  ("159" unreproducible), and now a set of absence checks reported as a
+  staleness finding. **Every one was a distance claim dressed in a real
+  measurement, and in every one the measurement was correct.**
+
+  **How to apply.** State which of the two questions each sentence answers. When
+  the claim is about another lane's code, check for THEIR construct by name —
+  and when a peer's tree is the subject, their report of it outranks my
+  inference from mine, because the checkout is a claim about the past one lane
+  over.
+
+
+## Standing rule earned 2026-09-12 (a ledger is a claim about the tree that made it)
+
+- **EVERY NUMBER I REPORTED FROM A ROUND THIS SESSION CAME FROM ANOTHER LANE'S
+  TREE.** Checked after a peer asked which of two identical-looking zeros mine
+  was: `mount_sha.txt` on rounds 58, 59, 60, 61, 62, 63, 64 and 65 all resolve
+  to `lane/agentic-editor`. **No round has ever mounted lane/duration-producer.**
+  Rounds 51-57 predate the format and resolve to nothing.
+
+  So the ledgers are evidence about the tree that produced them, and they are
+  evidence about MY tree only where I separately confirmed the same code by
+  reading my own file. The two classes must be labelled differently:
+
+  | claim | what it rests on | status |
+  |---|---|---|
+  | "the field-keyed `_nosfx` is a bug" | I read it in my own source | MINE |
+  | "25 of 75 sfx placements dropped" | their ledgers | THEIRS |
+  | "`card_hero` says it is the ONLY card input" | my own source | MINE |
+  | "0 cards came from the prop table on every round" | their ledgers | THEIRS |
+  | "1 of 81 cut beats describes a removal" | reference_corpus | LANE-INDEPENDENT |
+
+  **AND IT CUTS THE OTHER WAY TOO.** I called `cutaway` "retired" on this lane
+  and cited "30 ruled / 0 built across 37 runs" as the evidence. The retirement
+  is real and I verified it three ways — absent from `_TREATMENT_FAMILIES`,
+  absent from `VERDICT_FIELDS` (no `cutaway_from_s`), absent from
+  `BUILT_FAMILIES`, with a gate asserting it stays out. But the 30/0 was
+  measured on a lane where cutaway IS rulable and the builder was BROKEN (an
+  unsubstituted `{IN}` read as a second scale input). **I used their broken
+  builder as evidence for my deliberate removal**, and 0-built looks identical
+  either way — which is the DROPPED vs UNBUILDABLE distinction I built, turned
+  back on me by the peer who needed it.
+
+  **How to apply.** Read `mount_sha.txt` before quoting a round, and say which
+  tree a number describes. A fix on an unmounted lane is unexercised no matter
+  how many rounds have run — "committed" is not "observed", and a ledger from a
+  branch you do not own is somebody else's observation.

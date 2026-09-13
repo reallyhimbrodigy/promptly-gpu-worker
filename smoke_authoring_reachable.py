@@ -70,8 +70,21 @@ check("no treatment value means 'the catalogue has none'",
       "changes — that would be a product decision, not a fix")
 
 # ── the fix: the skip carries a CODE, the hero and a remedy ─────────────────
+# THE KEY AND ITS VALUE, NOT THE LITERAL PAIR. Same correction as the branch
+# leg above: `code` is now computed (hero_too_long vs no_catalogue_component),
+# so the exact string `"code": "no_catalogue_component"` no longer appears and
+# the leg failed on a change that added a distinction.
+_skip_emits = [n for n in ast.walk(tree)
+               if isinstance(n, ast.Call)
+               and getattr(n.func, "attr", "") == "append"
+               and getattr(n.func.value, "id", "") == "_skips"
+               and n.args and isinstance(n.args[0], ast.Dict)]
+_coded = [n for n in _skip_emits
+          if any(isinstance(k, ast.Constant) and k.value == "code"
+                 and "no_catalogue_component" in ast.unparse(v)
+                 for k, v in zip(n.args[0].keys, n.args[0].values))]
 check("a card the catalogue cannot serve is coded, not just counted",
-      '"code": "no_catalogue_component"' in src,
+      bool(_coded),
       "a skip with only a `why` is a count; the agent needs the name of the "
       "condition to act on it")
 check("the report carries the HERO, so the agent has the material",
@@ -97,9 +110,44 @@ _dc = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
        and getattr(n.func, "id", "") == "derive_card_type"]
 check(f"derive_card_type is called ({len(_dc)}) — the determination exists",
       len(_dc) >= 1)
-check("the routing sits on the None branch of that call",
-      src.index('"code": "no_catalogue_component"') > src.index("if not _ctype:"),
+# THE BRANCH, NOT THE SPELLING. This compared the byte offsets of the literal
+# `"code": "no_catalogue_component"` against `if not _ctype:`. The code now
+# emits that value from a CONDITIONAL — `"code": ("hero_too_long" if _too_long
+# else "no_catalogue_component")` — because derive_card_type returns None for
+# two different reasons and only one is a catalogue gap. The literal vanished
+# and this leg crashed with ValueError: substring not found, on a change that
+# made the routing MORE precise. An offset comparison over source text is not
+# a structural claim; ask the AST where the emit sits.
+_emit = [n for n in _skip_emits
+         if "no_catalogue_component" in ast.unparse(n.args[0])]
+check("the authoring remedy is emitted from a card skip, not offered standing",
+      bool(_emit),
       "the remedy must attach to the proven failure, not to every card")
+# AND IT MUST BE INSIDE THE None BRANCH. An emit that sits outside it would
+# route every card to authoring, which is the failure this leg exists for.
+_none_branch = [n for n in ast.walk(tree) if isinstance(n, ast.If)
+                and "_ctype" in ast.unparse(n.test)
+                and any("no_catalogue_component" in ast.unparse(c)
+                        for c in n.body)]
+check("and that emit sits on the branch where derive_card_type returned None",
+      bool(_none_branch),
+      "the remedy is reachable without the determination having failed")
+# THE TWO REASONS STAY DISTINGUISHED. A copy fault routed to authoring spends a
+# render round-trip on a hero that is six words long.
+# THE BRANCH, NOT THE WORD. `hero_too_long` and `HERO_TOO_LONG` each appear
+# twice in the app — in the skip, the tally and the code field — so presence
+# says nothing about whether the DISTINCTION is actually made, and
+# smoke_legs_are_unambiguous rejected the leg for exactly that. Read the
+# conditional that produces the code instead.
+_two_codes = [n for n in _skip_emits
+              if any(isinstance(k, ast.Constant) and k.value == "code"
+                     and isinstance(v, ast.IfExp)
+                     and "hero_too_long" in ast.unparse(v)
+                     and "no_catalogue_component" in ast.unparse(v)
+                     for k, v in zip(n.args[0].keys, n.args[0].values))]
+check("a copy fault is NOT routed to authoring — the code is CHOSEN between "
+      "the two reasons derive_card_type returns None", bool(_two_codes),
+      "offering authoring for a too-long hero spends a render on a copy edit")
 
 # ── REASON 3, now closed: SYSTEM routes to it ───────────────────────────────
 _sys = src[src.index("SYSTEM = "):src.index("_KNOWLEDGE_SYSTEM")]

@@ -69,14 +69,36 @@ for lbl, extra in (
               f"predicate: admitted={ok} stored sfx={rec.get('sfx')!r} rj={rj}")
         fail += 1
 
-# 2. NO NAME IS REFUSED, NOT DROPPED.
+# 2. NO NAME IS **ADMITTED**, BECAUSE A DERIVER IS WAITING FOR IT.
+#    THIS LEG USED TO ASSERT THE OPPOSITE and the reversal is the point. I had
+#    half_ruling_refusal refuse a nameless sfx, reasoning that WHICH sound
+#    cannot be derived from timing. It can: `_derive_sfx_name` fills it from
+#    the beat's role, and the refusal runs BEFORE any beat is in hand, so it
+#    pre-empted a live deriver and turned "a sound here, you pick" — the one
+#    thing the sfx field says that the treatment cannot — into an
+#    unsatisfiable demand. That is the refused-forever shape: dropped-once
+#    costs a placement, refused-forever costs the run.
+#
+#    The nameless case is caught AFTER derivation instead, by the second
+#    `_nosfx` pass, which is why that pass says "Recompute AFTER derivation".
 ok, rj, rec, led = admit({"treatment": ["sfx"]})
-if ok or not rj or "sfx_name" not in str(rj.get("reason")):
-    print(f"  *** sfx with no name was admitted rather than refused: "
-          f"ok={ok} rj={rj}")
+if not ok or rj:
+    print(f"  *** sfx with no name was refused rather than admitted for "
+          f"derivation: ok={ok} rj={rj}")
     fail += 1
-if led["beat_verdicts"]:
-    print("  *** a refused sfx ruling was stored anyway")
+if not led["beat_verdicts"]:
+    print("  *** the ruling was not stored, so _derive_sfx_name never sees it")
+    fail += 1
+if str(rec.get("sfx") or "").lower() != "yes":
+    print(f"  *** the sfx field was not derived from the treatment: "
+          f"{rec.get('sfx')!r} — the build gates on this field")
+    fail += 1
+# AND THE POST-DERIVATION PASS MUST STILL EXIST. Admitting it here is only safe
+# while something downstream reports what is still nameless.
+_src0 = open(os.path.join(HERE, "agentic_editor_app.py"), encoding="utf-8").read()
+if "Recompute AFTER derivation" not in _src0:
+    print("  *** nothing recomputes the nameless-sfx list after derivation, so "
+          "admitting a nameless ruling now loses it silently")
     fail += 1
 
 # 3. THE CONTRADICTION IS NAMED.

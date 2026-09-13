@@ -135,6 +135,44 @@ _ri = SRC.index("led.get(\"_reel_key\") == _ckey")
 _ei = SRC.index("rc = render_components(_cards)")
 ok(_ri < _ei, "the cache check runs after the render it is meant to avoid")
 
+# ── THE REMAP ANNOTATES, IT DOES NOT RECONSTRUCT ───────────────────────────
+# A peer lost a run to this exact shape: their ASR ingest measured per-word
+# confidence correctly (85 words, median 0.999) and the output-clock remap
+# REBUILT each word as {w, s, e}, dropping the field. Their caption gate then
+# read no confidence, returned ABSENT, and refused captions on the clearest
+# speech in the corpus. Third copy of one shape on their lane; mine had the
+# same two sites plus an ingest that never captured the field at all.
+#
+# Nothing on this lane reads confidence, which is what made it a MERGE hazard
+# rather than a bug: their gate merges in, my whitelist survives, and the gate
+# refuses captions on every run. So the property is not "confidence is
+# carried" — it is that the remap moves the CLOCK and preserves everything
+# else, whatever the ingest attached and whoever reads it later.
+_w_in = [{"w": "hello", "s": 0.0, "e": 0.5, "conf": 0.999, "spk": 1},
+         {"w": "world", "s": 2.0, "e": 2.4, "conf": 0.95, "spk": 1}]
+# LOADED THE WAY THIS FILE LOADS EVERYTHING ELSE — by AST, not by import, so
+# the check drives the shipped source without the module needing to import.
+_rm_node = next((_n for _n in TREE.body
+                 if isinstance(_n, ast.FunctionDef) and _n.name == "remap_words"),
+                None)
+ok(_rm_node is not None, "remap_words is not at module level any more")
+_rm_ns = {}
+if _rm_node is not None:
+    exec(compile(ast.Module([_rm_node], []), "<s>", "exec"), _rm_ns)
+_remap = _rm_ns.get("remap_words", lambda *_a, **_k: [])
+_w_out = _remap([[0.0, 1.0], [2.0, 3.0]], _w_in)
+ok(len(_w_out) == 2, f"remap dropped words: {_w_out}")
+ok(all("conf" in _k and "spk" in _k for _k in _w_out),
+   f"the remap RECONSTRUCTED its input and dropped fields: {_w_out}")
+ok([round(_k["s"], 3) for _k in _w_out] == [0.0, 1.0],
+   f"the remap stopped moving the clock, which is its actual job: {_w_out}")
+# .get(), NOT [] — indexing raises when the key is gone, and the traceback
+# pre-empts the clean failure above it: the harness then reports red for a
+# CRASH rather than for the property, which is red-for-the-wrong-reason in the
+# leg written to catch a dropped field.
+ok(len(_w_out) > 1 and _w_out[1].get("conf") == 0.95,
+   "a preserved field must keep its VALUE, not merely its key")
+
 if FAIL:
     print("FAIL smoke_pack_reel:")
     for f in FAIL:

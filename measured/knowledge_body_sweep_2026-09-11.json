@@ -1,0 +1,2114 @@
+[
+ {
+  "doc": "00_job_and_arc.md",
+  "sent": "The whole genre lives on a phone screen held eighteen inches from a face, and the person who hit record is handing you their take; what you return is the version they wish they'd made.",
+  "vocab": [
+   "turn"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "00_job_and_arc.md",
+  "sent": "\", the payoff is the loudest thing in the edit, and the person stays the star throughout.",
+  "vocab": [
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "00_job_and_arc.md",
+  "sent": "A transition is a spent resource: it slows the cut it sits on and spends the viewer's attention, so it appears only where the video genuinely turns \u2014 a movement boundary, an act shift, the walk into the payoff \u2014 and its character names that turn.",
+  "vocab": [
+   "payoff",
+   "transition",
+   "turn"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "00_job_and_arc.md",
+  "sent": "One to three transitions is the natural budget of a lean edit; most boundaries play straight, and that IS the polish.",
+  "vocab": [
+   "transition"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "00_job_and_arc.md",
+  "sent": "** Stacked events bury each other; an empty window is the footage breathing.",
+  "vocab": [
+   "breath"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "00_job_and_arc.md",
+  "sent": "The transcript and signal annotations are supporting evidence; the watched video is the source of truth.",
+  "vocab": [
+   "evidence"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "00_job_and_arc.md",
+  "sent": "\u2022 **Cleanup requests** ('edit out the dead space', 'cut the retakes/filler', 'clean it up', 'tighten it', 'just make it postable') \u2192 the request IS the edit: cutting works at maximum aggression (see YOUR CUT PASS), and the decoration layer drops to the lean floor \u2014 captions run, 1-3 earned emphasis beats, transitions and MGs only where a why writes itself.",
+  "vocab": [
+   "transition"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "00_job_and_arc.md",
+  "sent": "Cleaning is done with the knife, and the money moments still get dressed: a payoff number, a price, a named product, a step list each earn their one graphic even in the leanest cut \u2014 the cleanup removes what has no moment and protects what does.",
+  "vocab": [
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "00_job_and_arc.md",
+  "sent": "Tok shop video', 'make it a UGC ad', 'for Reels') \u2192 the named format sets the GRAMMAR \u2014 for UGC/shop formats: lean runtime, hard cuts, kinetic word-synced captions, product-evidence B-roll only where it extends, pace carried by cutting and caption cadence \u2014 never a commission to deploy the full catalog; product-evidence graphics are shop grammar \u2014 the spec, the price, and the name earn their cards.",
+  "vocab": [
+   "card",
+   "evidence"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "00_job_and_arc.md",
+  "sent": "quickness is the texture you want; it reads as momentum.",
+  "vocab": [
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "00_job_and_arc.md",
+  "sent": "Within any window the craft is the same one the whole prompt turns on: one dominant element owning that beat, chosen for what that exact moment is doing.",
+  "vocab": [
+   "turn"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "00_job_and_arc.md",
+  "sent": "A genuine peak \u2192 a zoom candidate.",
+  "vocab": [
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "00_job_and_arc.md",
+  "sent": "Zooms, MGs, and overlays choose their own beats \u2014 they move to an adjacent window or drop.",
+  "vocab": [
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "00_job_and_arc.md",
+  "sent": "The silence is the treatment; the next peak hits harder because the breather refilled attention.",
+  "vocab": [
+   "breath",
+   "breather",
+   "treatment"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "00_job_and_arc.md",
+  "sent": "A 3+ second segment you're tempted to mark breather may be BUILD wearing a disguise \u2014 re-read the dialogue before labeling it: build that names referents wants its carrier layer, while a lean stretch whose mine came back empty is honestly speaker-only, not a breather.",
+  "vocab": [
+   "breath",
+   "breather",
+   "build"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "00_job_and_arc.md",
+  "sent": "It is the only window allowed two; the hook has to establish format and grip simultaneously, and the overlay lives in a band the face doesn't.",
+  "vocab": [
+   "hook"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "00_job_and_arc.md",
+  "sent": "** A transition firing at a cut boundary plus a zoom landing on the adjacent peak word is one composed event, not a stack \u2014 the transition is the doorway into the beat.",
+  "vocab": [
+   "transition",
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "00_job_and_arc.md",
+  "sent": "Likewise, a zoom plus a reveal MG anchored CLEAR of the face on the same beat compose (the camera commits to the face while the evidence lands above it \u2014 a payoff zoom + a StatCard at upper_third_safe is the canonical case).",
+  "vocab": [
+   "StatCard",
+   "card",
+   "evidence",
+   "payoff",
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "Protected words (hook / payoff / close / key_moments) are never cut.",
+  "vocab": [
+   "close",
+   "hook",
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "** Under a cleanup-request vibe this pass works HARDEST on the three redundancy classes; under 'keep every pause / don't cut anything' emit [].",
+  "vocab": [
+   "keep"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "Out-of-order thinking \u2014 picking a zoom before naming the arc \u2014 produces decisions that don't reference the spine.",
+  "vocab": [
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "Screen regions the source already uses for text belong to the source: your overlays and graphics claim the clear regions.",
+  "vocab": [
+   "claim",
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "** Emit `video_plan` IN FIELD ORDER: what_happens \u2192 hook_word_index \u2192 payoff_word_index \u2192 close_word_index \u2192 key_moments \u2192 story_shape \u2192 arc_segments \u2192 movements \u2192 editorial_vision.",
+  "vocab": [
+   "close",
+   "hook",
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "On a trivia video the hook is the question; on a story video it's the moment the premise lands.",
+  "vocab": [
+   "hook",
+   "question"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "A hook grips \u2014 a claim, a stake, a reveal.",
+  "vocab": [
+   "claim",
+   "hook"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "The refractory floor enforces this after the plan \u2014 of any two zooms within 2s, the higher arc-ranked beat (payoff > mid_peak > other) KEEPS its zoom and the lower one downgrades (it rides its caption and sound instead) \u2014 so the spacing you plan in this list is the spacing that survives, and a zoom you crowd against a stronger one is a zoom you spend for nothing.",
+  "vocab": [
+   "keep",
+   "mid_peak",
+   "payoff",
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "**key_moments and emphasis_moments are 1:1** \u2014 this list is the ground truth for what gets a zoom.",
+  "vocab": [
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "To add a zoom, expand this list first; only zoom peaks you can justify here.",
+  "vocab": [
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "\u2022 **story_shape** \u2014 one sentence: how the video moves hook \u2192 setup \u2192 development \u2192 payoff \u2192 close.",
+  "vocab": [
+   "close",
+   "hook",
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "The CLOSE lands \u2014 the payoff line is the video's reason to exist, and usually its second hit.",
+  "vocab": [
+   "close",
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "The face carries the hook \u2014 B-roll and heavy MGs enter after it (exception: when the hook IS a visual claim \u2014 \"look at this thing in my backyard\" \u2014 the B-roll is the hook).",
+  "vocab": [
+   "claim",
+   "hook"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "\" Treatment: this is where the carrier layer lives \u2014 B-roll on the concrete nouns, MGs on the off-camera referents, the process instruments on their beats (a Timeline or StepDivider marking stages, a RankedList or DropCard carrying an enumerated framework, a ProgressBar tracking a value toward a target); boundaries inside build usually play straight, and a transition there marks a genuine turn.",
+  "vocab": [
+   "DropCard",
+   "ProgressBar",
+   "RankedList",
+   "StepDivider",
+   "Timeline",
+   "build",
+   "card",
+   "transition",
+   "treatment",
+   "turn"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "Zooms belong to peaks \u2014 build stretches run flat, and that flatness is the contrast a peak's zoom lands against.",
+  "vocab": [
+   "build",
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "h, slow ramp, the deepest scale of the video \u2014 and usually the video's second hit: the payoff line is the video's reason to exist, and a committing SOUND lives here \u2014 but WHICH sound is the vibe's call, not automatic: a punchy/viral payoff takes the boom (its sharp punch); a corporate/clean/cinematic/professional payoff commits with the push and a SWELL (transition-sfx) \u2014 a boom FIGHTS those vibes.",
+  "vocab": [
+   "payoff",
+   "transition"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "(A payoff sent bare is a deliberate claim, never a default.",
+  "vocab": [
+   "claim",
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "The payoff word belongs to the speaker's face \u2014 the biggest face moment in the format; the cutaway lane closes before it, and the camera holds the person while it lands.",
+  "vocab": [
+   "close",
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "**The payoff is the FINAL committed move.",
+  "vocab": [
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "** It holds and resolves cleanly to the close \u2014 the payoff's zoom is the last one through the close, with one exception: a deliberate callback beat separated by real time (\u22651.",
+  "vocab": [
+   "close",
+   "payoff",
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "The close rides the payoff's resolution \u2014 the settle IS the close's motion.",
+  "vocab": [
+   "close",
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "The map names the character IF a turn earns a transition at that shift \u2014 the map is an offer, and the earned turn is what redeems it.",
+  "vocab": [
+   "transition",
+   "turn"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "ts are structured (SlideOver, StepPush) \u00b7 peak \u2192 peak is sharp (ShutterFlash, CardSwipe) \u00b7 build \u2192 payoff accelerates HARD (on a cut boundary: ZoomThrough, the most committed transition in the video; on a tight boundary the same acceleration lands as a ShutterFlash overlay plus a zoom punch on the first word) \u00b7 payoff \u2192 close is calm (CrossfadeZoom or none) \u00b7 breather \u2192 anything is minimal or none.",
+  "vocab": [
+   "breath",
+   "breather",
+   "build",
+   "card",
+   "close",
+   "none",
+   "payoff",
+   "transition",
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "Arc-position and vibe are ORTHOGONAL: the arc shift names the JOB (accelerate, turn, settle) and the vibe picks the REGISTER it arrives in \u2014 a corporate build\u2192payoff still accelerates, but with the clean acceleration (StepPush / a SlideOver into the commit), not the kinetic ZoomThrough a viral build\u2192payoff takes.",
+  "vocab": [
+   "build",
+   "payoff",
+   "turn",
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "When the close consciously echoes the hook \u2014 parallel zoom, callback MG content, echoed caption emphasis \u2014 the loop closes satisfyingly and earns the replay.",
+  "vocab": [
+   "close",
+   "hook",
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "\u2022 The audio under an overlay is the speaker continuing \u2014 don't cut, transition, or crossfade across it.",
+  "vocab": [
+   "transition"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "\u2022 Don't place your MGs or text overlays during an overlay window \u2014 decoration on decoration dilutes both.",
+  "vocab": [
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "The tell: a real shot change replaces the underlying camera (different angle/room/pose/lighting); an overlay edge keeps the underlying frame identical and only toggles a layer.",
+  "vocab": [
+   "keep"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "** Every time reference is a word index \u2014 the schema's only time fields; Python derives all timestamps from them.",
+  "vocab": [
+   "Stamp"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "** During any MG or B-roll window, the pipeline force-moves captions to the collision-free zone, frame-precisely \u2014 those windows are the pipeline's to own, so your caption_position_changes cover the rest of the timeline.",
+  "vocab": [
+   "Timeline"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "Manual changes exist for exactly two cases (text_overlay windows and face-position windows); full procedure in CAPTIONS.",
+  "vocab": [
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "** zoom_effect and motion_graphic are required fields on every emphasis_moment \u2014 emit null only when the moment genuinely has no zoom/MG.",
+  "vocab": [
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "By default every emphasis carries a zoom; null is the exception.",
+  "vocab": [
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "The camera is the default instrument and the zoom punctuates the moment that earned it; when the camera is held still, a committing sound and a held caption carry that same weight across.",
+  "vocab": [
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "motion_graphics \u2014 VISUAL CLAIMS.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "**MEASURED 2026-08-04: transitions fire on only 4.",
+  "vocab": [
+   "transition"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "01_cut_pass.md",
+  "sent": "If the zoom is the punctuation, an MG on top is two effects fighting for one moment.",
+  "vocab": [
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "02_intent_standard.md",
+  "sent": "That question is the whole standard.",
+  "vocab": [
+   "question"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "03_captions.md",
+  "sent": "The footage's surfaces pick the palette's contrast: keyword colors that sit near the scene's dominant tones read as texture, and the strong choice separates from what the frame is made of.",
+  "vocab": [
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "03_captions.md",
+  "sent": "**Keywords:** 5 of 9 styles highlight words in `caption_keywords` with their signature treatment; 4 ignore keywords (the animation IS the effect).",
+  "vocab": [
+   "treatment"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "03_captions.md",
+  "sent": "Nothing downstream reads the field on these four styles (the renderer passes it only to the caption component, and theirs discards it), so words listed there are written and thrown away.",
+  "vocab": [
+   "card"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "03_captions.md",
+  "sent": "Default is bottom at word 0; bottom is the resting state, and every move away from it gets a matching move back when the trigger ends.",
+  "vocab": [
+   "bottom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "03_captions.md",
+  "sent": "So for the span a takeover graphic owns, the captions step aside and let it carry the words, and they return the moment the speaker's face is the frame again.",
+  "vocab": [
+   "turn"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "03_captions.md",
+  "sent": "This is the one place in the video captions go quiet on purpose \u2014 everywhere the face leads, they run.",
+  "vocab": [
+   "purpose"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "04_text_overlays.md",
+  "sent": "A video with clear structural turns wants an overlay at each one; a video that runs as one continuous thought lets the captions carry it.",
+  "vocab": [
+   "turn"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "04_text_overlays.md",
+  "sent": "Geometry: captions sit at bottom, the face sits in the upper-middle band, so the upper third is the natural overlay home.",
+  "vocab": [
+   "bottom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "04_text_overlays.md",
+  "sent": "Emit it as a motion_graphic instead when the three items ARE the referent the speaker is pointing at off-camera \u2014 three things on a list they are reading, three notifications, three names.",
+  "vocab": [
+   "Notification"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "The placement test is one question: **what specifically is the speaker referencing?",
+  "vocab": [
+   "question"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Arc placement: **build** is where informational MGs live \u2014 StatCard, ProgressBar, StickyNotes, Notification, AnnotationArrow \u2014 because build is where the speaker hands the viewer facts, and a fact the eye can read lands twice.",
+  "vocab": [
+   "AnnotationArrow",
+   "Notification",
+   "ProgressBar",
+   "StatCard",
+   "StickyNotes",
+   "build",
+   "card"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "**hook** belongs to the face when the face is the claim, and to the graphic when the claim is a thing \u2014 a shocking number in the first two seconds is the hook.",
+  "vocab": [
+   "claim",
+   "hook"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "**breather** is where stillness does the work; the held frame is the placed event.",
+  "vocab": [
+   "breath",
+   "breather"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "**close** is where a hook MG returns evolved \u2014 the same component, the number now different \u2014 and the callback closes the loop the hook opened.",
+  "vocab": [
+   "close",
+   "hook",
+   "turn"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "\u2022 TOP-PINNED \u2014 Notification, StickyNotes, DropBanner, DropCard: ALWAYS render top band regardless of anchor (metaphor depends on it).",
+  "vocab": [
+   "DropBanner",
+   "DropCard",
+   "Notification",
+   "StickyNotes",
+   "card"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "upper_third_safe works when face clearly center-or-lower; card touching face from above \u2192 use lower_third_safe with captions flipped top, or B-roll window.",
+  "vocab": [
+   "card"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Anchor preference, MG: 1) **upper_third_safe** \u2014 default \u00b7 2) **center** \u2014 only under THE ANCHOR LAW \u00b7 3) **lower_third_safe \u2014 LAST RESORT ONLY** (bottom MG forces captions off their lower-third home to top, scatters frame; genuinely footer-like content only, when upper and center both taken).",
+  "vocab": [
+   "bottom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Plainer treatment landing the same moment with more confidence \u2014 caption held a beat longer, clean emphasis, speaker's own face given the frame \u2014 is the more produced choice.",
+  "vocab": [
+   "treatment"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "**Every transition, overlay, and motion graphic carries a `why` \u2014 \u226412 words naming the specific moment that asked for it** ('the 55\u00b0 spec is the payoff number', 'pivot from problem into the demo').",
+  "vocab": [
+   "payoff",
+   "transition"
+  ],
+  "reachable": true
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Text echoing the speaker's wording \u2192 viewer reads screen and voice as one thing, moment lands twice; drift into paraphrase or generic stock label \u2192 screen and voice split, viewer feels the seam.",
+  "vocab": [
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Where a number is the moment, give its caps label the clearest reading of what that number means in the speaker's terms \u2014 price of $0 reads most plainly as the cost being nothing, so a $0 StatCard labels the cost: prefix \"$\", value 0, label \"COST\" (or the speaker's exact word \"FREE\", carried as the label with the number left bare).",
+  "vocab": [
+   "StatCard",
+   "card"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"The HEADLINE NUMBER the speaker just stated, full size.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "A StatCard is a quoted line \u2014 the number or claim comes verbatim from the dialogue.",
+  "vocab": [
+   "StatCard",
+   "card",
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "**ProgressBar** (SMALL) \u2014 horizontal bar, gray track, white fill, optional gold eyebrow label (#D4A12A); fill expands 0 \u2192 target with the number counting up; milestone ticks light as crossed.",
+  "vocab": [
+   "ProgressBar"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"Here is the quantitative ARC \u2014 watch it advance.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Static numbers \u2192 StatCard.",
+  "vocab": [
+   "StatCard",
+   "card"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"Watch these values race \u2014 the biggest wins.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "**FIGHTS:** one bar toward a goal \u2192 ProgressBar; a single headline number \u2192 StatCard.",
+  "vocab": [
+   "ProgressBar",
+   "StatCard",
+   "card"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "**RankedList** (MEDIUM) \u2014 a clean ordered Top-N: numbered badges + labels reveal top\u2192bottom, each badge popping a beat before its label wipes in, a hairline rule under each row, #1 subtly highlighted.",
+  "vocab": [
+   "RankedList",
+   "bottom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"The ranked list, in order.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Scattered hand-written notes \u2192 StickyNotes; unordered keyword tags \u2192 PillCluster.",
+  "vocab": [
+   "PillCluster",
+   "StickyNotes"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"Three parallel items worth pinning.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Emit it HERE, as a motion_graphic, when the three items ARE the referent the speaker points at off-camera; emit the text_overlay instead when the three items MARK STRUCTURE.",
+  "vocab": [
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"Here are the tags for this idea.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Ordered 1-2-3 takeaways \u2192 RankedList; scattered hand-written notes \u2192 StickyNotes; a continuous scrolling ticker \u2192 PillMarquee.",
+  "vocab": [
+   "PillMarquee",
+   "RankedList",
+   "StickyNotes"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"A living stream of tags for this topic.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "\" **FITS:** MOMENT SHAPE \u2014 use as ambient texture when the speaker rattles off MANY related keywords or hashtags and you want a continuous ticker feel, the STREAM itself the texture, rather than a tidy group (\"mindset, focus, discipline, habits, growth\u2026\") \u2014 6+ tags read best.",
+  "vocab": [
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "**FIGHTS:** a small static popped-in group of 2\u20138 tags \u2192 PillCluster; an ordered ranked list \u2192 RankedList.",
+  "vocab": [
+   "PillCluster",
+   "RankedList"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "**DropBanner** (TOP-PINNED) \u2014 a full-width banner that drops from the top with a bounce, opens on a numbered-circle intro (connected 1-2-3 rings), then scrolls through one captioned point per beat, each point's words lighting grey\u2192black as if spoken.",
+  "vocab": [
+   "DropBanner"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"Here's the framework, one point at a time.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "\" **FITS:** MOMENT SHAPE \u2014 use for an explainer/listicle stretch where you walk through 2\u20133 named points that live UNDER A STATED HEADER (\"The 3-part hook framework\") and you want a clean edge-to-edge banner carrying the structure while you talk.",
+  "vocab": [
+   "hook"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "**FIGHTS:** the same framework as a contained floating-card version \u2192 DropCard; ordered stages of a journey with no header \u2192 Timeline; scattered notes \u2192 StickyNotes; one ordered list revealed at once \u2192 RankedList.",
+  "vocab": [
+   "DropCard",
+   "RankedList",
+   "StickyNotes",
+   "Timeline",
+   "card"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "**DropCard** (TOP-PINNED) \u2014 the floating-card sibling of DropBanner: a rounded card inset from the edges drops in near the top with a numbered dashed stepper (a short label under each circle), then scrolls one captioned point per beat with words lighting grey\u2192black.",
+  "vocab": [
+   "DropBanner",
+   "DropCard",
+   "card"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"Here's the framework, on a clean card.",
+  "vocab": [
+   "card",
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "\" Use exactly where DropBanner fits but you want a contained card over the footage rather than an edge-to-edge banner \u2014 same 2\u20133 named points, with step labels (\"Hook / Tension / Payoff\").",
+  "vocab": [
+   "DropBanner",
+   "card",
+   "hook",
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Edge-to-edge banner \u2192 DropBanner.",
+  "vocab": [
+   "DropBanner"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Also answers here: Timeline (see WHEN TIME OR SEQUENCE IS THE STORY).",
+  "vocab": [
+   "Timeline",
+   "WHEN TIME OR SEQUENCE IS THE STORY"
+  ],
+  "reachable": true
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"What they just said, as the whole screen.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "\" Use when one spoken sentence is the punchline and deserves the full frame (\"most people quit right before the breakthrough\") \u2014 pass the line as text and the 1\u20132 hit words as keywords.",
+  "vocab": [
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Framed/attributed quotes \u2192 EditorialQuote; the running transcript \u2192 a caption style.",
+  "vocab": [
+   "EditorialQuote"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Also answers here: Stamp (see WHEN A CLAIM GETS A VERDICT OR STAMP) \u00b7 DropCard (see WHEN STEPS OR ITEMS ARE ENUMERATED).",
+  "vocab": [
+   "DropCard",
+   "Stamp",
+   "WHEN A CLAIM GETS A VERDICT OR STAMP",
+   "WHEN STEPS OR ITEMS ARE ENUMERATED",
+   "card",
+   "claim"
+  ],
+  "reachable": true
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"This specific tweet exists.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Platform cross-check: Instagram \u2192 InstagramComment, multi-message \u2192 ChatThread, TikTok-native content wears TikTokComment \u2014 platform-match the card.",
+  "vocab": [
+   "ChatThread",
+   "InstagramComment",
+   "TikTokComment",
+   "card"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "**FITS:** any vibe \u2014 a REAL quoted tweet in the story is the gate; the card texture leans viral/casual/commentary.",
+  "vocab": [
+   "card",
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "**FIGHTS:** as non-diegetic decoration where no tweet is referenced; the social texture only *discourages* in corporate/cinematic, it never blocks a genuine reference.",
+  "vocab": [
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"This IG comment exists \u2014 receipts.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"This TikTok comment exists.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"The EXACT text message \u2014 see the actual SMS.",
+  "vocab": [
+   "claim",
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Phone events \u2192 Notification; exchanges \u2192 ChatThread; face-to-face quotes belong to the speaker's own delivery.",
+  "vocab": [
+   "ChatThread",
+   "Notification"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "**FITS:** any vibe \u2014 a real quoted text message is the gate; leans casual/viral/storytelling.",
+  "vocab": [
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "**FIGHTS:** as decoration; a consumer-chat texture only *discourages* in formal-corporate/cinematic when no message is quoted.",
+  "vocab": [
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"This is the literal exchange \u2014 both sides.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Single message \u2192 IMessageBubble; phone event \u2192 Notification.",
+  "vocab": [
+   "IMessageBubble",
+   "Notification"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"This phone event actually happened \u2014 here's the banner.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "**FITS:** any vibe \u2014 a real phone event (paid/texted/called) is the gate; leans casual/viral/product.",
+  "vocab": [
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"Someone notable said this.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "The speaker's OWN sentence with no marks or name \u2192 PullQuote.",
+  "vocab": [
+   "PullQuote"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"This is RAW \u2014 caught, unfiltered.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"Watch this get dragged into place.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "A static targeting box on a spot \u2192 Reticle; an arrow pointing in from elsewhere \u2192 AnnotationArrow.",
+  "vocab": [
+   "AnnotationArrow",
+   "Reticle"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"Stamp it \u2014 this is OFFICIAL.",
+  "vocab": [
+   "Stamp",
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "An app banner \u2192 Notification.",
+  "vocab": [
+   "Notification"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "**Timeline** (MEDIUM) \u2014 a vertical rail of numbered station-nodes with a label card beside each; an accent fill travels node\u2192node and a comet head rides it, each station popping active as the fill docks.",
+  "vocab": [
+   "Timeline",
+   "card"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"Here's the PROCESS, step by step.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "**FIGHTS:** the same stages carrying TIME labels, or a scenic winding-path version \u2192 TimelineRoadmap; the script announcing its running position \u2192 StepDivider; a single quantity advancing toward a target \u2192 ProgressBar; unordered parallel items \u2192 StickyNotes or RankedList.",
+  "vocab": [
+   "ProgressBar",
+   "RankedList",
+   "StepDivider",
+   "StickyNotes",
+   "Timeline",
+   "TimelineRoadmap"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"Here's the journey, stage by stage.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "**FIGHTS:** the same ordered stages with NO dates \u2192 Timeline (a straight node-to-node process rail); a single advancing quantity \u2192 ProgressBar.",
+  "vocab": [
+   "ProgressBar",
+   "Timeline"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"We're on step N of the process.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "\" **FITS:** MOMENT SHAPE \u2014 use when the script advances through a NUMBERED sequence and ANNOUNCES its position in it, so you want each beat marked with that running count (\"Step two: build the offer\") \u2014 pass step and totalSteps so the bar tracks.",
+  "vocab": [
+   "build"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "**FIGHTS:** the whole multi-step process shown at once on one rail \u2192 Timeline; a one-off chapter/part header with no running count \u2192 SectionDivider.",
+  "vocab": [
+   "SectionDivider",
+   "Timeline"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"A new section starts here.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "An attributed framed card \u2192 EditorialQuote; the speaker's huge sentence \u2192 PullQuote; a numbered running step \u2192 StepDivider.",
+  "vocab": [
+   "EditorialQuote",
+   "PullQuote",
+   "StepDivider",
+   "card"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"Look at THIS thing on screen.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"Lock onto THIS exact spot.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Full-frame recording chrome \u2192 RecordingFrame; an arrow pointing in from elsewhere \u2192 AnnotationArrow.",
+  "vocab": [
+   "AnnotationArrow",
+   "RecordingFrame"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Also answers here: MouseDrag (see WHEN THE SCREEN OR APP IS THE SUBJECT).",
+  "vocab": [
+   "MouseDrag",
+   "WHEN THE SCREEN OR APP IS THE SUBJECT"
+  ],
+  "reachable": true
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "**EvidenceCard** \u2014 a STILL OF THEIR OWN FRAME, held up as evidence for the line they just said, tilted like a print on a surface with the claim behind it and a caption overlapping in front.",
+  "vocab": [
+   "EvidenceCard",
+   "card",
+   "claim",
+   "evidence"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"here is the thing I just described.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "When the sentence's evidence is visible on camera and gone in half a second, this is the only instrument that holds it still.",
+  "vocab": [
+   "evidence"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Needs `claim` (the line it evidences); `caption` optional.",
+  "vocab": [
+   "claim",
+   "evidence"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "**FITS:** demo, review, reaction, teach, walkthrough, any claim the footage itself can settle.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"this is what it looks like on the device.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "\" **THE TRIGGER NOTHING ELSE SERVES: the claim is about what a SCREEN looks like, and the screen is on camera.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "05_motion_graphics.md",
+  "sent": "Claim: \"this is the thing, and it is funny/blunt/obvious.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "\"Free\", \"professional\", \"done\" can each be semantically central and still earn NO zoom if the delivery just states them.",
+  "vocab": [
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "The payoff must be unmistakably the biggest move; every other beat yields to it.",
+  "vocab": [
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "EMPHASIS zooms map 1:1 to key_moments \u2014 they are the ledger of the video's loudest beats, and every one carries its moment.",
+  "vocab": [
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "A mask zoom CLAIMS the arc position of the word it sits on \u2014 build/breather claims exist for exactly this job, and offer nothing else.",
+  "vocab": [
+   "breath",
+   "breather",
+   "build",
+   "claim",
+   "zoom"
+  ],
+  "reachable": true
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "Pick each emphasis by the AUDIENCE REACTION it earns with sound on: laugh = punchline, gasp = revelation, nod = statement, empathy = reaction, lean-in = question.",
+  "vocab": [
+   "question"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "CH camera is the vibe's register, not automatic (see THE VIBE SCOPES THE ZOOM'S REGISTER): weight for the revelation (LetterboxPush when the revelation IS the payoff; at a mid-peak a punchy vibe takes the snap pair \u2014 SnapReframe or StepZoom \u2014 while a calm/corporate vibe takes a small SmoothPush), and a quicker move for the reaction \u2014 the snap in a punchy vibe, a small deliberate push in a calm one.",
+  "vocab": [
+   "payoff",
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "**Zoom personality by arc position** \u2014 the arc position names the JOB the move must do; the VIBE picks the REGISTER it does it in (punchy vs calm), exactly as the vibe scopes a caption style or a sound.",
+  "vocab": [
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "\u2022 hook \u2192 GRIP, instant \u2014 the thumb is mid-swipe and the move is what stops it.",
+  "vocab": [
+   "hook"
+  ],
+  "reachable": true
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "A hard snap on a corporate hook is the wrong pick, the same way a boom would be.",
+  "vocab": [
+   "hook"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "\u2022 mid_peak \u2192 PUNCTUATION \u2014 sized to its moment exactly; a real peak, not THE peak.",
+  "vocab": [
+   "mid_peak"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "\u2022 payoff \u2192 COMMITMENT: the slowest and deepest move of the video, holds to the end.",
+  "vocab": [
+   "payoff"
+  ],
+  "reachable": true
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "This is the one place the moment outranks \"what feels punchy\": even a viral payoff commits.",
+  "vocab": [
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "\u2022 close \u2192 CALLBACK: echo the hook's personality at lower intensity; for a zoom-free hook, a confident lock-in.",
+  "vocab": [
+   "close",
+   "hook",
+   "zoom"
+  ],
+  "reachable": true
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "5s of the payoff word rides the payoff's resolution instead \u2014 validation keeps the payoff of any peak pair inside 2s, so the resolution IS the close's motion there.",
+  "vocab": [
+   "close",
+   "keep",
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "\u2022 build / breather \u2192 the camera holds; the ONLY zoom sayable there is the MASK \u2014 the small eye-carry on the first word after a splice (snap pair, under a second), serving the boundary, not the beat.",
+  "vocab": [
+   "breath",
+   "breather",
+   "build",
+   "zoom"
+  ],
+  "reachable": true
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "This carries the intent to instruments you already own; the peak set stays exactly {_peak_set_ref} in `key_moments`, build/breather words stay clear, and only the routing changes when the camera is the one tool that's quiet.",
+  "vocab": [
+   "breath",
+   "breather",
+   "build"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "For each peak independently: \"what camera move would a real editor pick if this were the ONLY zoom in the video?",
+  "vocab": [
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "**For the payoff**, the move is the slow committed push that begins gently and RESOLVES on the next cut \u2014 the lean-in mirrors how a listener leans toward something interesting; the cut snaps attention back.",
+  "vocab": [
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "That push \u2192 cut release is the rhythm of pro short-form editing, and it is what makes the payoff read as a composed commitment rather than a scattered punch.",
+  "vocab": [
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "On tight-cut footage (most boundaries play as hard splices with no handle room), the cut itself IS the release \u2014 a slow push landing INTO a tight cut is the canonical move for the payoff, and what would otherwise feel like a jump cut becomes the engine of the pulse.",
+  "vocab": [
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "List 2-3 words ONLY for a genuine building phrase (it becomes a StagedPush; each word lands per-stage in reading order).",
+  "vocab": [
+   "build"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "\"zoom_effect\": {{ \"arc_position\": <the arc position this zoom serves \u2014 your CLAIM, same vocabulary as arc_segments>, \"type\": <a type that position offers> }} | null, // word-anchored; the pipeline times it.",
+  "vocab": [
+   "claim",
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "A build/breather claim offers ONLY the mask form \u2014 the small eye-carry on the first word after a splice; arc punctuation there is unsayable.",
+  "vocab": [
+   "breath",
+   "breather",
+   "build",
+   "claim"
+  ],
+  "reachable": true
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "Emit originX/originY ONLY when zooming a NON-face element (a prop, a gesture, a whiteboard); emit durationMs/scale only when a specific beat genuinely wants a non-default feel (rare).",
+  "vocab": [
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "**Per-clip zoom spacing:** the camera must fully play each move (in \u2192 hold \u2192 out) before the next, so emphasis zooms sharing a clip must sit \u2265 the type's natural duration apart (space the anchor words).",
+  "vocab": [
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "Specialty: only when a detail AND its context genuinely matter simultaneously.",
+  "vocab": [
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "Premium-production claim.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "**WHEN NOT \u2014 misuse reads as a defect:** NOT on scattered non-consecutive words (a step on random words looks broken); NOT when there is no genuine BUILD (three flat equal-weight words don't earn it); NOT more than once in close succession (gimmicky \u2014 it owns its stretch and suppresses other zooms during its run); NOT on calm/corporate/cinematic/educational beats.",
+  "vocab": [
+   "build",
+   "close",
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "If the moment has only ONE emphasis word, use a NORMAL zoom (SmoothPush/SnapReframe), never this.",
+  "vocab": [
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "3 consecutive building words \u2192 3 stages; 2 \u2192 2 stages.",
+  "vocab": [
+   "build"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "06_emphasis_zoom.md",
+  "sent": "**FIGHTS:** corporate, calm, cinematic, educational, and ANY non-building moment \u2014 the escalating push over-dramatizes a composed beat and looks unprofessional on words that don't build.",
+  "vocab": [
+   "build"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "07_sound_effects.md",
+  "sent": "Read for them first \u2014 a video whose hook and payoff both ride bare is making a strong claim, and it should be a deliberate one.",
+  "vocab": [
+   "claim",
+   "hook",
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "07_sound_effects.md",
+  "sent": "The graphics, zooms, and transitions this plan adds are the edit's answer to those same moments \u2014 when a sound and a component land on the same word, each earned it from the footage independently: the graphic renders the fact, the sound punctuates the delivery.",
+  "vocab": [
+   "transition",
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "07_sound_effects.md",
+  "sent": "**THE MOMENT:** the video's single heaviest claim \u2014 the payoff line the whole video was built to deliver, or the one stat that reframes everything before it.",
+  "vocab": [
+   "claim",
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "07_sound_effects.md",
+  "sent": "**FIGHTS:** corporate, clean, professional, educational; and cinematic/story climaxes \u2014 a boom PUNCHES (sharp attack) where a cinematic climax SWELLS, so a story climax reaches for transition-sfx or a swell, never boom's punch.",
+  "vocab": [
+   "transition"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "07_sound_effects.md",
+  "sent": "**THE MOMENT:** the speech itself claims SPEED \u2014 a stated how-fast (\"in under five minutes,\" \"instantly,\" \"before your coffee's cold\") or a rapid-fire run of items delivered at a clip.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "07_sound_effects.md",
+  "sent": "**WHAT IT DOES:** the pace the words claim becomes audible; the ear feels the rush.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "07_sound_effects.md",
+  "sent": "**THE MOMENT:** the video's single largest act turn, where a full transition renders \u2014 this is the sound of that turn itself.",
+  "vocab": [
+   "transition",
+   "turn"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "07_sound_effects.md",
+  "sent": "**FIGHTS:** nothing tonally; reserved for the ONE largest turn, not scattered.",
+  "vocab": [
+   "turn"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "07_sound_effects.md",
+  "sent": "**THE MOMENT:** a message, text, or notification is quoted, shown, or reenacted in the content \u2014 the sound IS the notification the story references.",
+  "vocab": [
+   "Notification",
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "07_sound_effects.md",
+  "sent": "**FITS:** any vibe \u2014 a message/notification quoted or shown in the content is the gate; the chime suits casual/viral/tech/product.",
+  "vocab": [
+   "Notification"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "07_sound_effects.md",
+  "sent": "**THE MOMENT:** the speaker voices building suspicion \u2014 something doesn't add up and they're saying so before the answer arrives (\"but something felt off,\" \"turns out he never worked there\").",
+  "vocab": [
+   "build",
+   "turn"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "08_broll.md",
+  "sent": "** A second Gemini call sees the candidate clips' thumbnails plus the dialogue line AND this `reason` as the required content for the cutaway, and keeps only clips that visually satisfy it \u2014 vibe-match alone falls short, so the `reason` you write is the contract the picker holds clips to.",
+  "vocab": [
+   "keep"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "08_broll.md",
+  "sent": "FIRST apply the Opening gate in Placement rules \u2014 entries begin after the first ~3s and after the hook segment, whatever mode the beat is; the opening belongs to the face.",
+  "vocab": [
+   "hook"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "08_broll.md",
+  "sent": "**App-input beats hold on the speaker \u2014 the downstream picker answers NONE for them short of a clip showing the actual app screen, so the hold is the move that survives.",
+  "vocab": [
+   "none"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "08_broll.md",
+  "sent": "The trap is forcing the beat into mode (1) and grabbing the literal object the WORD rhymes with \u2014 \"quality\" \u2192 a camera lens, \"value\" \u2192 a stack of cash, \"powerful\" \u2192 a roaring engine, \"results\" \u2192 a finish-line tape \u2014 none of which is what the speaker meant; each is noun-rhyme clutter.",
+  "vocab": [
+   "none"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "08_broll.md",
+  "sent": "**Abstract-attribute beats hold on the speaker \u2014 the picker's coincidental-noun-match rule resolves them to NONE downstream, so the hold is the read that ships.",
+  "vocab": [
+   "none"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "08_broll.md",
+  "sent": "** The speaker delivering the claim IS the visual \u2014 the claim lives in the words, not in any object on screen.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "08_broll.md",
+  "sent": "When the source itself is the visual evidence \u2014 a screen recording of the thing working, a product demo, an on-screen interface, the speaker's own captured result \u2014 that real footage already is the cutaway the beat wants, and it is more credible than anything Pexels returns because the viewer can see it is the actual thing.",
+  "vocab": [
+   "evidence",
+   "turn"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "08_broll.md",
+  "sent": "Reach for the cutaway that opens the meaning: the scale behind the number, the place behind the name, the stakes behind the claim \u2014 the thing the words point at.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "08_broll.md",
+  "sent": "Start from the VERB; add subject and setting (concrete noun + motion + mood + production tier); one subject doing one thing; context words only to disambiguate (\"cinematic lighting\" to filter cartoons).",
+  "vocab": [
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "08_broll.md",
+  "sent": "Apply this pattern to EVERY emitting keyword \u2014 and keep the register honest: \"I built it in my garage\" wants \"real hands building at a cluttered home workbench, natural window light, sharp documentary close-up\" \u2014 the reason-field's content contract is what holds the picker to that register over a polished cinematic shop.",
+  "vocab": [
+   "build",
+   "close",
+   "keep"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "08_broll.md",
+  "sent": "E of that trap: a named place, landmark, city, real object, or real event the dialogue points at (\"Ahmedabad\", \"the Golden Gate Bridge\", \"Times Square\", \"a Rolex watch\") is ONE searchable thing with a POPULATED stock pool \u2014 emit it PRECISELY, by name, and it is often the single most valuable cutaway in the video: the place behind the name, the object behind the claim, the landmark the story visits.",
+  "vocab": [
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "08_broll.md",
+  "sent": "The broadening rule applies ONLY to a GENERIC subject that has no name: keep THAT broad (a countdown timer, a hundred-dollar bill, a doorstep package \u2014 not \"a glowing digital stopwatch at 00:25 in a parking garage\") and pile the look/quality adjectives on top of it.",
+  "vocab": [
+   "keep"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "08_broll.md",
+  "sent": "Named real entity \u2192 emit as-is; unnamed generic \u2192 keep broad; composite stack of constraints \u2192 the real NONE trap, avoid.",
+  "vocab": [
+   "keep",
+   "none"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "08_broll.md",
+  "sent": "If a keyword does over-specify and returns nothing, NONE\u2192speaker catches it as a clean safe hold \u2014 the downside of slightly-too-tight is a fallback, never a bad clip \u2014 but the GOAL is the premium pool, not the hold.",
+  "vocab": [
+   "none",
+   "turn"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "08_broll.md",
+  "sent": "The window matches the phrase \u2014 it opens where the phrase opens and closes where it closes, the full thought and only the thought.",
+  "vocab": [
+   "close"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "08_broll.md",
+  "sent": "\u2022 Opening gate (check BEFORE you construct any keyword): do NOT GENERATE a `broll_clips` entry whose window opens in the first ~3 seconds of output, or anywhere inside the hook segment \u2014 whichever extends later.",
+  "vocab": [
+   "hook"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "08_broll.md",
+  "sent": "(Not about clip index: a long first clip can still carry B-roll in its later build words; and the hook IS the exception only when the hook itself is a visual claim \u2014 then the B-roll is the hook.",
+  "vocab": [
+   "build",
+   "claim",
+   "hook"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "08_broll.md",
+  "sent": "\u2022 Arc placement: **build** is where B-roll lives \u2014 the concrete nouns named during build are your cutaway candidates, and most of the video's B-roll belongs there.",
+  "vocab": [
+   "build"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "08_broll.md",
+  "sent": "**hook** \u2014 the face carries it (when the hook IS a visual claim, the B-roll is the hook).",
+  "vocab": [
+   "claim",
+   "hook"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "08_broll.md",
+  "sent": "**payoff** \u2014 the payoff word belongs entirely to the face.",
+  "vocab": [
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "08_broll.md",
+  "sent": "**close** \u2014 a deliberate callback to a hook-era cutaway is the one move that fits.",
+  "vocab": [
+   "close",
+   "hook"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "09_seam_treatments_transitions_tight_.md",
+  "sent": "Same-scene splices need nothing from you: the hard cut owns them, and their energy goes where it belongs \u2014 a mask-zoom on the first word back, a caption that leans in, an SFX that lands the beat.",
+  "vocab": [
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "11_thumbnail.md",
+  "sent": "The mine surfaced a StatCard referent on the score; it stayed unplaced \u2014 mid-hook, the person is the star and the why wouldn't write.",
+  "vocab": [
+   "StatCard",
+   "card",
+   "hook"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "11_thumbnail.md",
+  "sent": "Captions run bottom the whole way; the payoff belongs to the face.",
+  "vocab": [
+   "bottom",
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "11_thumbnail.md",
+  "sent": "A PillCluster renders the three features as the speaker lists them (\"the trio on screen as the trio is spoken\"), the demo walk-in earns the video's one transition \u2014 ZoomThrough on a 1.",
+  "vocab": [
+   "PillCluster",
+   "transition",
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "11_thumbnail.md",
+  "sent": "These are the mechanics the render depends on \u2014 the physics of the frame, the timeline, and the pipeline.",
+  "vocab": [
+   "Timeline"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "11_thumbnail.md",
+  "sent": "Peaks only \u2014 build and breather words run flat, and that flatness is what gives each peak its contrast.",
+  "vocab": [
+   "breath",
+   "breather",
+   "build"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "11_thumbnail.md",
+  "sent": "Claim each zoom's arc_position honestly \u2014 the peak set is judged by it.",
+  "vocab": [
+   "claim",
+   "zoom"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "11_thumbnail.md",
+  "sent": "\u2022 broll_clips: build is where B-roll lives \u2014 the concrete nouns named during build are the cutaway candidates.",
+  "vocab": [
+   "build"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "11_thumbnail.md",
+  "sent": "A breather takes a quiet, perfectly-matched cutaway when the stillness wants a picture rather than a held frame.",
+  "vocab": [
+   "breath",
+   "breather"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "11_thumbnail.md",
+  "sent": "Windows open after the first ~3s of output and after the hook segment; mid-peak and payoff words stay on the face; the close word holds on the speaker (callback B-roll earlier in the close segment fits); the pipeline drops any B-roll overlapping an MG or overlay window, so clear windows are the ones that ship.",
+  "vocab": [
+   "close",
+   "hook",
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "11_thumbnail.md",
+  "sent": "Build and peak stretches are MG territory \u2014 the hook belongs to the face, and breathers keep their stillness.",
+  "vocab": [
+   "breath",
+   "breather",
+   "build",
+   "hook",
+   "keep"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "11_thumbnail.md",
+  "sent": "payoff's landing are the usual two (see THE SOUNDS).",
+  "vocab": [
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "11_thumbnail.md",
+  "sent": "staying alive \u2014 the build is the motion, and the gap is only apparent.",
+  "vocab": [
+   "build"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "11_thumbnail.md",
+  "sent": "5s, total \u2264 ~15% of runtime, placed before the payoff or after a reveal \u2014 the placement is what makes the label true; a low-energy stretch earns pacing work instead.",
+  "vocab": [
+   "payoff"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "13_placement_findings.md",
+  "sent": "**Text RIDES the speaker, at the CLAIM and the EVIDENCE.",
+  "vocab": [
+   "claim",
+   "evidence",
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "13_placement_findings.md",
+  "sent": "Text is the dominant family and emphasis/SFX are the rare ones.",
+  "vocab": [
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "14_card_text_placement_rules.md",
+  "sent": "Scoped to CARDS and TEXT because those are the families confirmed reachable.",
+  "vocab": [
+   "card",
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "14_card_text_placement_rules.md",
+  "sent": "**FIGHTS:** the CLAIM \u2014 only 2 of 30 claim beats carry a card (6.",
+  "vocab": [
+   "card",
+   "claim"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "14_card_text_placement_rules.md",
+  "sent": "**Card almost never runs alone: 39 of 40 (97.",
+  "vocab": [
+   "card"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "14_card_text_placement_rules.md",
+  "sent": "**FITS:** the CLAIM, absolutely \u2014 **30 of 30 claim beats carry text (100%)**.",
+  "vocab": [
+   "claim",
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "14_card_text_placement_rules.md",
+  "sent": "That is the only place text is genuinely wrong.",
+  "vocab": [
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "14_card_text_placement_rules.md",
+  "sent": "**Text is the default, and its absence is the decision.",
+  "vocab": [
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "14_card_text_placement_rules.md",
+  "sent": "that follows the claim/hook beats being front-loaded.",
+  "vocab": [
+   "claim",
+   "hook"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "14_card_text_placement_rules.md",
+  "sent": "On a CLAIM beat: text 100%, card 6.",
+  "vocab": [
+   "card",
+   "claim",
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "15_ffmpeg_placement_recipes.md",
+  "sent": "Text riding the speaker at a claim.",
+  "vocab": [
+   "claim",
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "15_ffmpeg_placement_recipes.md",
+  "sent": "NEVER hardcode an x \u2014 text width varies.",
+  "vocab": [
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "15_ffmpeg_placement_recipes.md",
+  "sent": "drawbox first, drawtext second \u2014 order is the z-order.",
+  "vocab": [
+   "text"
+  ],
+  "reachable": false
+ },
+ {
+  "doc": "15_ffmpeg_placement_recipes.md",
+  "sent": "motion is the entire reason to use a component instead of drawtext.",
+  "vocab": [
+   "text"
+  ],
+  "reachable": false
+ }
+]
