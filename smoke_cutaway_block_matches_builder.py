@@ -62,16 +62,20 @@ check("the block states no rate, frequency or count target",
       "a rate in the prompt is a demand, not a grade")
 
 # ------------------------------------------------- drive the shipped function
-_ns = {}
-for _n in tree.body:
-    if isinstance(_n, ast.FunctionDef) and _n.name in ("cutaway_plan", "source_to_output"):
-        exec(compile(ast.Module([_n], []), "<c>", "exec"), _ns)
-    if isinstance(_n, ast.Assign) and any(
-            getattr(t, "id", "").startswith("_CUTAWAY_") for t in _n.targets):
-        exec(compile(ast.Module([_n], []), "<c>", "exec"), _ns)
+# IMPORTED, NOT REBUILT. This exec'd a NAMED LIST of functions into a bare
+# namespace, so the day cutaway_plan started calling a new helper
+# (`beat_visual_diff`, the arm that refuses a cutaway to the same shot) it died
+# with `NameError: beat_visual_diff is not defined` from inside the subject —
+# a missing FIXTURE presented as a defect in the code under test. A hand-listed
+# dependency set is a second vocabulary that rots the first time the real one
+# grows, and the list cannot know what it is missing.
+import modal_stub                                                # noqa: E402
+modal_stub.install()
+import agentic_editor_app as _APP                                 # noqa: E402
+_ns = vars(_APP)
 check("cutaway_plan and source_to_output are module-level and drivable",
-      "cutaway_plan" in _ns and "source_to_output" in _ns)
-if "cutaway_plan" not in _ns:
+      callable(_ns.get("cutaway_plan")) and callable(_ns.get("source_to_output")))
+if not callable(_ns.get("cutaway_plan")):
     print("\nCUTAWAY-BLOCK: FAIL"); sys.exit(1)
 _plan = _ns["cutaway_plan"]
 

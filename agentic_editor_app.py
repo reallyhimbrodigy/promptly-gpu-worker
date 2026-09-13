@@ -34,6 +34,7 @@ NEVER GET BUILT:
   ./run_modal.sh agentic_editor_app.py --source <s3-key> --brief "..."
 """
 import hashlib
+import collections
 import json
 import ast
 import os
@@ -1895,6 +1896,12 @@ def derive_rubric(declared, mode="full_edit", beat_source="transcript"):
 # contract for three rounds while this was a ledger note and the gate called
 # those rounds green.
 CONTRACT_FAILURES = frozenset({
+    # THE REFUSAL AND THE OUTPUT MUST AGREE. `caption_state` REFUSED with the
+    # caption composited anyway is not a caption bug, it is a gate with no
+    # consumer — and it shipped `ОЙ` on round 70's car_short while the same
+    # ledger printed the refusal. Checked against the FINISHED run, because the
+    # build-side wiring and the delivered frame are two different claims.
+    "caption_refused_but_composited",
     "wrong_resolution",        # not 1080x1920
     # The video stream ending before the AUDIO. Three of five round-43 fixtures.
     # The two healthy ones had no overlay pass, or an overlay that happened to
@@ -8141,6 +8148,116 @@ def extract_figure(phrase):
     return (_fig, _rest)
 
 
+def variety_census(steps, placements=None):
+    """(state, {axis: {"distinct": n, "values": {...}}}) — HOW MUCH THE OUTPUT
+    REPEATS ITSELF. PURE.
+
+    ZAC'S MEASURE, 2026-09-12: "across five fixtures, how many distinct
+    components, positions, sizes and cases appear. If it's one of each, it's a
+    template regardless of what any rate says."
+
+    It is the right instrument because every RATE can be inside 20% while the
+    output is the same object repeated. Round 70 scored text WITHIN 20% of the
+    reference rate and placed eighteen identical full-width ALL-CAPS lines.
+
+    MEASURED ON ROUND 70, five fixtures:
+        components   1 distinct   (StatCard x2)
+        positions    0 expressible — 18 text placements carry NO position field
+                     at all, and both cards sent no anchor
+        case        18 of 20 ALLCAPS
+    One component, one case, no position. A template.
+
+    ABSENT when there is nothing placed: a run that placed nothing is not a
+    maximally repetitive run, it is a run this question does not apply to.
+    """
+    _rows = []
+    for _s in (steps or []):
+        _st = str((_s or {}).get("step") or "")
+        for _it in ((_s or {}).get("items") or [{}]):
+            _rows.append((_st, _it if isinstance(_it, dict) else {}))
+    if not _rows:
+        return ("ABSENT", {})
+    _ax = {"component": collections.Counter(), "position": collections.Counter(),
+           "case": collections.Counter(), "family": collections.Counter()}
+    for _st, _it in _rows:
+        _ax["family"][_st] += 1
+        if _st == "card":
+            _ax["component"][str(_it.get("type") or "(untyped)")] += 1
+        if _st in ("card", "text"):
+            # NO FIELD IS ITS OWN VALUE, not an omission. "(no position field)"
+            # counting as a distinct position would read as variety; it is the
+            # opposite, and naming it is how the census shows a template.
+            _ax["position"][str(_it.get("anchor") or "(no position field)")] += 1
+            _c = str(_it.get("content") or "")
+            if _c:
+                _ax["case"][("ALLCAPS" if _c.isupper()
+                             else "lower" if _c.islower() else "Mixed")] += 1
+    return ("MEASURED",
+            {_k: {"distinct": len(_v), "values": dict(_v.most_common(8))}
+             for _k, _v in _ax.items()})
+
+
+def card_anchor(verdict, subject_replaced=False):
+    """(anchor, why) — WHICH BAND a card takes. PURE, so a test can drive it.
+
+    THE DEFECT. Cards were emitted with NO anchor at all, so
+    `resolveMGPosition` fell back to the component default — centre. On a 9:16
+    talking head the centre band is the SPEAKER'S FACE, so every card landed on
+    it. Round 70's talking_head shipped a 10 across his eyes and mouth at 3.4s
+    and again at 12.5s. Zac named it, Builder-2 named it, two watches found it,
+    and the reason nothing caught it is that "no anchor" and "a deliberate
+    centre anchor" are the same bytes on the wire.
+
+    ASKED OF THE CORPUS, NOT INVENTED — the standing rule. Of 463 annotated
+    reference placements, 95 are card-like (a counter, a stat, a figure, a
+    price) and 87 of those answer `over_subject`:
+
+        no_subject_visible   43   10 videos      49%
+        over_body            20    7 videos      23%
+        clear_of_subject     17    8 videos      20%
+        over_face             7    4 videos       8%
+
+    So the corpus does NOT say "never over the face" — it says a card is
+    overwhelmingly placed where the face is not, and lands on it in 8% of cases.
+    Corpus-wide the picture is sharper still: of the 38 over_face placements,
+    23 are `dominant` or `full_frame` — colour washes, fiery transitions, a
+    logo over a frozen darkened frame. Those cover EVERYTHING by nature, and
+    the frame is treated so the face is no longer competing. A region card on
+    untreated footage is the other thing entirely, and that is what we ship.
+
+    THE GEOMETRY IS THE LANE'S OWN, already written into the text_content
+    teaching: "captions sit at the bottom and the face in the upper-middle
+    band, so that is the one free band". This applies the same three-band model
+    the overlay text has used all along; the card simply never asked.
+
+      subject replaced   the beat carries a cutaway, so the speaker is not on
+                         screen for it — the corpus's largest bucket. Centre is
+                         admissible and is the strongest position.
+      beat has text      the upper third is taken by the label. The card goes
+                         low, over the BODY — the corpus's second answer, and
+                         in a 9:16 talking head the torso is the lower half.
+      otherwise          the upper third, the free band by the lane's own
+                         stated geometry.
+
+    NEVER RETURNS None. An absent anchor is what produced the defect, and a
+    function that can return "no opinion" reintroduces it the first time a
+    branch is added without one.
+    """
+    _tr = [str(_t).lower() for _t in ((verdict or {}).get("treatment") or [])]
+    if subject_replaced:
+        return ("center",
+                "the beat carries a cutaway, so the speaker is not on screen — "
+                "no_subject_visible is 43 of 87 answered card placements in the "
+                "corpus, the largest bucket")
+    if "text" in _tr:
+        return ("bottom",
+                "an overlay label owns the upper third on this beat, so the "
+                "card sits low over the body — over_body is 20 of 87")
+    return ("top",
+            "captions own the bottom and the face the upper-middle, so the "
+            "upper third is the free band (the lane's own overlay geometry)")
+
+
 def derive_card_props(mg_type, hero, label=""):
     """The props THIS component reads, filled from the phrase. Never a guess.
 
@@ -9339,6 +9456,21 @@ def _desc_tokens(b):
     return {w for w in _w if len(w) > 2 and w not in _stop}
 
 
+def beat_visual_diff(bi, bj):
+    """(state, diff) — how different two beats LOOK, by their descriptions. PURE.
+
+    The same Jaccard distance `cutaway_candidates` already ranks candidates by,
+    pulled out so the PLAN can ask the question the CANDIDATE FINDER was asking
+    all along. Returns a state because "these two beats look alike" and "neither
+    beat carries a description" are different answers: the first is a reason to
+    refuse a cutaway, the second is a reason this check cannot speak.
+    """
+    _ti, _tj = _desc_tokens(bi or {}), _desc_tokens(bj or {})
+    if not _ti or not _tj:
+        return ("ABSENT", None)
+    return ("MEASURED", 1.0 - (len(_ti & _tj) / (len(_ti | _tj) or 1)))
+
+
 def cutaway_candidates(beats, min_diff=_CUTAWAY_MIN_DIFF, k=3, min_gap_s=1.0):
     """({beat: [candidate,...]}, state, why) — PURE. Every candidate is a beat.
 
@@ -9388,7 +9520,8 @@ def cutaway_candidates(beats, min_diff=_CUTAWAY_MIN_DIFF, k=3, min_gap_s=1.0):
 
 
 def cutaway_plan(rulings, keep_spans, source_duration_s, beats=None,
-                 min_s=_CUTAWAY_MIN_S, max_s=_CUTAWAY_MAX_S):
+                 min_s=_CUTAWAY_MIN_S, max_s=_CUTAWAY_MAX_S,
+                 min_diff=_CUTAWAY_MIN_DIFF):
     """(plans, rejects) — resolve cutaway rulings to extract+overlay geometry. PURE.
 
     WHY CUTAWAY EXISTS AT ALL. It is 72 of the 153 annotated reference beats —
@@ -9485,7 +9618,52 @@ def cutaway_plan(rulings, keep_spans, source_duration_s, beats=None,
                                    f"own footage ({_bs:.2f}-{_be:.2f}s) — that "
                                    f"shows the same picture"})
             continue
+        # ── AND IT MUST ACTUALLY LOOK DIFFERENT ────────────────────────
+        # THE ARM THAT SHIPPED THE DEFECT ZAC CALLED A DESYNC. Round 70's
+        # talking_head cut beat 4 (out 9.71-11.60) away to source 5.84-7.73 —
+        # the SAME speaker, same room, same framing, mid-sentence. Nothing is
+        # actually out of sync: the cutaway is an overlay, frames went 609->609
+        # and the audio is untouched. It READS as a desync because the picture
+        # is a talking face forming different words than the narration over it,
+        # which is the most legible lip-sync error there is.
+        #
+        # THE MEASURE ALREADY EXISTED AND THE PLAN NEVER ASKED IT.
+        # `cutaway_candidates` ranks every candidate by exactly this distance
+        # and reported "7 of 7 beats have a candidate at diff>=0.55" on the same
+        # run. The agent's free-text `cutaway_from_s` was bounds-checked and
+        # adjacency-checked and never difference-checked, so it could name a
+        # moment the candidate finder would never have offered.
+        #
+        # THE CORPUS SETTLES WHAT A CUTAWAY IS, with a denominator: of 60
+        # cutaway-like reference treatments, 40 answer `over_subject` —
+        # no_subject_visible 34, clear_of_subject 4, over_body 2, and OVER_FACE
+        # ZERO. Zac never cuts away to his own talking face. What his cutaways
+        # show is a screen recording, a hand counting cash, a photo, an export
+        # panel, a rainy street.
+        #
+        # ABSENT IS NOT A REFUSAL. With no descriptions there is nothing to
+        # compare, and refusing there would delete the family on every run where
+        # vision did not arrive — the retired-path trap. It is recorded instead.
+        _src_beat = next((_o for _o in (beats or [])
+                          if isinstance(_o, dict)
+                          and float(_o.get("t_start") or 0) <= f0
+                          < float(_o.get("t_end") or 0)), None)
+        _dstate, _dval = beat_visual_diff(b, _src_beat) if _src_beat else (
+            "ABSENT", None)
+        if _dstate == "MEASURED" and _dval < min_diff:
+            rejects.append({"beat": bi,
+                            "why": f"cutaway_from_s {f0:.2f} looks like this "
+                                   f"beat (difference {_dval:.2f} < {min_diff}) "
+                                   f"— cutting to the same shot puts the "
+                                   f"speaker's lips on other words, which reads "
+                                   f"as broken sync. Of 40 answered reference "
+                                   f"cutaways, 34 show no subject at all and "
+                                   f"ZERO are over a face."})
+            continue
         plans.append({"beat": bi, "src_t0": round(f0, 3),
+                      "look_diff": (round(_dval, 3)
+                                    if _dval is not None else None),
+                      "look_diff_state": _dstate,
                       "src_t1": round(f0 + want, 3),
                       "out_t0": o0, "out_t1": round(o0 + want, 4),
                       "duration_s": round(want, 3)})
@@ -11003,6 +11181,78 @@ def _assert_tool_schemas_are_valid() -> None:
             "before a tool runs: " + "; ".join(_faults[:8]))
 
 
+def _assert_every_card_carries_a_band(module_src: str) -> None:
+    """No card reaches the renderer without an anchor. NO ANCHOR == THE FACE.
+
+    THE DEFECT THIS FREEZES. `resolveMGPosition` falls back to the component
+    default when `anchor` is absent, and for StatCard that default is centre —
+    the speaker's face on a 9:16 talking head. Round 70 shipped a `10` across
+    his eyes at 3.4s and again at 12.5s, and nothing caught it because AN
+    ABSENT ANCHOR AND A DELIBERATE CENTRE ANCHOR ARE THE SAME BYTES ON THE
+    WIRE. There is no value to inspect; the defect is a missing key.
+
+    So this asserts the PRODUCER exists rather than checking a value: the card
+    item and its props must both be built with an anchor, and `card_anchor`
+    must be what supplies it. A hand-written "center" at the call site would
+    satisfy a value check and reintroduce the defect exactly.
+    """
+    import ast as _ast
+    if not module_src:
+        raise AssertionError(
+            "_assert_every_card_carries_a_band got no module source: the check "
+            "is ABSENT, not passing")
+    _t = _ast.parse(module_src)
+    if not any(isinstance(_n, _ast.FunctionDef) and _n.name == "card_anchor"
+               for _n in _t.body):
+        raise AssertionError(
+            "card_anchor is gone — the band is being chosen somewhere else or "
+            "not at all, and 'not at all' renders on the speaker's face")
+    _calls = [_n for _n in _ast.walk(_t)
+              if isinstance(_n, _ast.Call)
+              and getattr(_n.func, "id", "") == "card_anchor"]
+    if not _calls:
+        raise AssertionError(
+            "card_anchor is defined and never called — a band chooser nothing "
+            "consults is the defect with a function beside it")
+    # AND THE CHOICE MUST REACH THE RENDERER. The props dict is what crosses
+    # into Remotion; an anchor computed and not merged is a decision thrown
+    # away, which this file has shipped twice in other families.
+    #
+    # ASKED OF THE AST, OUTSIDE THIS FUNCTION. The first version searched
+    # `module_src` for the literal assignment text — and this function's OWN
+    # BODY contains that literal, so the check was satisfied by its own source
+    # and passed on both mutants that deleted the real thing. Its RED proof is
+    # what caught it: two of three arms exited 0. A presence test whose
+    # population includes the test is the same shape as the docstring that
+    # satisfied smoke_cutaway_graph_parses three times.
+    _self = {id(_n) for _n in _ast.walk(next(
+        _f for _f in _t.body if isinstance(_f, _ast.FunctionDef)
+        and _f.name == "_assert_every_card_carries_a_band"))}
+    _merged = [_n for _n in _ast.walk(_t)
+               if isinstance(_n, _ast.Call) and id(_n) not in _self
+               and getattr(_n.func, "id", "") == "dict"
+               and any(_k.arg == "anchor" for _k in (_n.keywords or []))]
+    if not _merged:
+        raise AssertionError(
+            "the chosen anchor is not merged into the card props — it is "
+            "computed and discarded, and the component falls back to centre")
+    # SCOPED TO THE CARD ITEM, not to any dict with an "anchor" key. v1 matched
+    # the LEDGER row too — `{"beat":…, "anchor": _canch, "why":…}` — so deleting
+    # the anchor from the item the renderer reads still passed. The population
+    # has to be the append that builds the render item.
+    _carried = [_n for _n in _ast.walk(_t)
+                if isinstance(_n, _ast.Call) and id(_n) not in _self
+                and getattr(_n.func, "attr", "") == "append"
+                and getattr(getattr(_n.func, "value", None), "id", "") == "_cards"
+                and _n.args and isinstance(_n.args[0], _ast.Dict)
+                and any(isinstance(_k, _ast.Constant) and _k.value == "anchor"
+                        for _k in _n.args[0].keys)]
+    if not _carried:
+        raise AssertionError(
+            "the card item does not carry its anchor, so the manifest cannot "
+            "say which band was chosen and a wrong band is unreadable")
+
+
 def _assert_one_knowledge_resolver(module_src: str) -> None:
     """No reader builds a knowledge path of its own. LOCAL-GREEN IS NOT PROOF.
 
@@ -11452,6 +11702,10 @@ _SYNCED_VERDICT_DESCRIPTIONS = _sync_verdict_descriptions()
 # EVERY TOOL SCHEMA IS LEGAL. One null enum refuses the whole request; round 69
 # lost five arms to it and the ledger could only say "model_call_failed".
 _assert_tool_schemas_are_valid()
+# EVERY CARD CARRIES A BAND. An absent anchor renders on the speaker's face and
+# is indistinguishable from a deliberate centre.
+_assert_every_card_carries_a_band(open(__file__).read()
+                                  if os.path.exists(__file__) else "")
 _assert_one_knowledge_resolver(open(__file__).read()
                                if os.path.exists(__file__) else "")
 _assert_no_shadowed_definitions(open(__file__).read()
@@ -13438,7 +13692,36 @@ def edit(source_key: str, brief: str,
             "chosen": [dict(c) for c in _tr_choices],
         }
 
-        _want_caps = bool(words)
+        # THE REFUSAL HAD NO CONSUMER, AND THE VIDEO IS THE PROOF.
+        # `caption_confidence_state` returned REFUSED on round 70's car_short —
+        # "median word confidence 0.352 is below the 0.60 floor over 2 word(s),
+        # all tagged ['de']" — it was ledgered, it was PRINTED, and the caption
+        # was built and composited anyway. `ОЙ` is on screen at 00:06 of
+        # 70-car_short.mp4, which is the exact round-65 defect the gate was
+        # written to stop, shipping on the round that reported catching it.
+        #
+        # WHY IT WAS INVISIBLE. The SRT path honours the gate — `cues` stays
+        # empty when the state is not MEASURED — so half the caption machinery
+        # obeyed. The Remotion path asked a DIFFERENT QUESTION: `bool(words)`,
+        # "did anybody say anything", which is the question the gate exists to
+        # answer better. Two consumers, one honouring the verdict and one
+        # re-deriving a weaker version of it, and the ledger showed the verdict.
+        #
+        # I READ THE LEDGER LINE AND CALLED IT A SAVE. The frame says otherwise.
+        # A gate that measures correctly, reports correctly and changes nothing
+        # is this file's governing failure, and it reached the one instrument
+        # written against that failure.
+        #
+        # kept_words_out STAYS POPULATED. The zoom staging reads it for word
+        # onsets and has nothing to do with captions; emptying it would fix this
+        # by breaking something else, which is how a retired path takes a
+        # side-benefit with it.
+        _cap_gate = str(led.get("caption_state") or "")
+        _want_caps = bool(words) and _cap_gate == "MEASURED"
+        if words and not _want_caps:
+            print("  CAPTIONS WITHHELD: the confidence gate returned %s, so no "
+                  "caption layer is built — not merely no cues written"
+                  % (_cap_gate or "NO STATE"), flush=True)
         _cap_words = led.get("kept_words_out") or []
         _cap_pages, _cap_style = [], None
         _tc_overlays = []
@@ -13731,6 +14014,18 @@ def edit(source_key: str, brief: str,
                                        ctrl_t0=_cap_ctrl)
                 cur = "captioned.mp4"
                 led["caption_composited"] = True
+                # THE INVARIANT, ASSERTED WHERE THE COMPOSITE ACTUALLY HAPPENS.
+                # Wiring `_want_caps` to the gate fixes the path I found; this
+                # fires if ANY other path reaches the composite with the gate
+                # refusing — which is the shape that just cost a round, and the
+                # reason the fix alone is not the check.
+                if str(led.get("caption_state") or "") != "MEASURED":
+                    fail("caption_refused_but_composited",
+                         "caption_state=%s (%s) and the caption layer was "
+                         "composited anyway — the gate measured, reported and "
+                         "changed nothing"
+                         % (led.get("caption_state"),
+                            str(led.get("caption_state_why") or "")[:120]))
                 # WHAT THEY SAY, not that they ran. The flag above is presence;
                 # these are the shape. car_short round 65 had the flag True and
                 # one Cyrillic caption transcribed from engine noise.
@@ -14480,7 +14775,21 @@ def edit(source_key: str, brief: str,
                  "keys": sorted(_cprops.keys()),
                  "from": "card_props" if isinstance(v.get("card_props"), dict)
                          and v.get("card_props") else "hero/label shorthand"})
+            # THE BAND, CHOSEN AND RECORDED. Until now no anchor was sent at
+            # all, so every card took the component default — centre, which on
+            # a 9:16 talking head is the speaker's face. Set AFTER
+            # coerce_mg_props so the numeric coercion never sees it, and
+            # ledgered with its reason so a wrong band is a readable choice
+            # rather than an invisible default.
+            _cw_on_beat = "cutaway" in [str(_t).lower()
+                                        for _t in (v.get("treatment") or [])]
+            _canch, _canch_why = card_anchor(v, subject_replaced=_cw_on_beat)
+            _cprops = dict(_cprops, anchor=_canch)
+            led.setdefault("card_anchor", []).append(
+                {"beat": v.get("beat"), "type": _ctype, "anchor": _canch,
+                 "why": _canch_why})
             _cards.append({"t_start": round(_mg_at, 2), "type": _ctype,
+                           "anchor": _canch,
                            "beat": v.get("beat"),
                            "duration_s": min(2.5, b["t_end"] - b["t_start"]),
                            "hero": hero, "label": str(v.get("card_label") or "")[:60],
@@ -14488,7 +14797,38 @@ def edit(source_key: str, brief: str,
                            "anchor_s": round(at, 2),
                            "attack_ms": (_mg_attack or {}).get(_ctype, 150),
                            "head_clamped": _mg_clamped})
-        # PRINTED IN THE COMMIT THAT ADDS IT.
+        # PRINTED IN THE COMMIT THAT ADDS IT — the lane's own rule, and the
+        # reason RULING PASSES sat dead for seven rounds is that nobody could
+        # see it.
+        # THE TEMPLATE GAUGE, PRINTED IN THE COMMIT THAT ADDS IT. Every rate can
+        # sit inside 20% while the output is one object repeated; this is the
+        # number that says so.
+        _vc_state, _vc = variety_census(steps)
+        led["variety_census"] = {"state": _vc_state, "axes": _vc}
+        if _vc_state == "MEASURED":
+            print("  VARIETY         : "
+                  + "  ".join("%s %d" % (_k, _v["distinct"])
+                              for _k, _v in sorted(_vc.items()))
+                  + "   (1 of each = a template, whatever the rates say)",
+                  flush=True)
+            for _k, _v in sorted(_vc.items()):
+                print("                    %-10s %s" % (_k, _v["values"]),
+                      flush=True)
+        else:
+            print("  VARIETY         : ABSENT — nothing was placed, so there is "
+                  "no repetition to measure (not: maximally repetitive)",
+                  flush=True)
+        _ca = led.get("card_anchor") or []
+        if _ca:
+            print("  CARD ANCHOR     : %s"
+                  % ", ".join("beat %s %s->%s" % (_r.get("beat"), _r.get("type"),
+                                                  _r.get("anchor"))
+                              for _r in _ca), flush=True)
+            for _r in _ca:
+                print("                    %s" % _r.get("why"), flush=True)
+        elif led.get("beat_verdicts"):
+            print("  CARD ANCHOR     : ABSENT — no card was placed this run "
+                  "(not: a card was placed with no band chosen)", flush=True)
         _cvf = led.get("card_vs_figure") or []
         _cvf_m = [c for c in _cvf if c["state"] == "MEASURED"]
         # CAVEAT (Builder-1, 2026-09-10): after f5ffe09 the anchor IS figure_t,
@@ -15456,16 +15796,10 @@ def edit(source_key: str, brief: str,
               "beat(s) %s — the agent named the family and the build gates on "
               "a separate field; these would have been silently skipped"
               % (len(_sfd), sorted(set(_sfd))[:8]), flush=True)
-    _rd6 = led.get("rulings_discarded", 0)
-    print("  RULING PASSES   : %d rule_all_beats call(s), %d refused; "
-          "%d beat_verdict call(s); "
-          "%d verdict(s) DISCARDED by first-wins%s"
-          % (led.get("rule_all_calls", 0),
-             led.get("refused_second_ruling", 0),
-             led.get("beat_verdict_calls", 0), _rd6,
-             ("  beats %s" % sorted(set(led.get("rulings_discarded_beats")
-                                        or []))[:8]) if _rd6 else ""),
-          flush=True)
+    # (RULING PASSES printed here. It was ~1,000 lines ABOVE the loop that
+    #  writes every counter it names, so all four fields were structurally zero
+    #  on every run — byte-identical on rounds 64, 65, 66, 67, 69 and 70. Moved
+    #  below the loop; see the print for what each zero was hiding.)
     print(f"  CUTAWAY CANDS   : {_cw_state}  {_cw_why}", flush=True)
 
     # BUILT AS A PLAIN STRING, not inline in the prompt expression. The first
@@ -16985,6 +17319,35 @@ def edit(source_key: str, brief: str,
     led["reruled_count"] = len(_rr_rows)
     _rr_n = len({v.get("beat") for v in (led.get("beat_verdicts") or [])
                  if isinstance(v, dict)})
+    # ── RULING PASSES, NOW BELOW ITS OWN PRODUCERS ─────────────────────────
+    # THIS LINE WAS DEAD FOR SEVEN ROUNDS. It sat ~1,000 lines above the agent
+    # loop, so `rule_all_calls`, `refused_second_ruling` and `beat_verdict_calls`
+    # — all written inside that loop — were read before a single one could be
+    # incremented. Byte-identical output on rounds 64, 65, 66, 67, 69 and 70:
+    # "0 rule_all_beats call(s), 0 refused; 0 beat_verdict call(s); 0 verdict(s)
+    # DISCARDED". Round 70's talking_head stored SEVEN verdicts with
+    # rule_all_calls=1 while this line said zero, on the same page.
+    #
+    # `rulings_discarded` is the fourth and it needed a different argument.
+    # Builder-2's scanner correctly did NOT flag it — its only write is inside
+    # `admit_verdict`, a different function, so line order within `edit` says
+    # nothing about it. But there is no write to it above the print in ANY
+    # function, and both admit_verdict CALL SITES are below the old print too,
+    # so on a per-run ledger its zero was structurally guaranteed as well. Line
+    # order inside one function cannot see a write that happens one frame down
+    # — CLAUDE.md's own rule about the closure scan, in the reporting layer.
+    #
+    # Counted where they are DECIDED, printed where they can be TRUE.
+    _rd6 = led.get("rulings_discarded", 0)
+    print("  RULING PASSES   : %d rule_all_beats call(s), %d refused; "
+          "%d beat_verdict call(s); "
+          "%d verdict(s) DISCARDED by first-wins%s"
+          % (led.get("rule_all_calls", 0),
+             led.get("refused_second_ruling", 0),
+             led.get("beat_verdict_calls", 0), _rd6,
+             ("  beats %s" % sorted(set(led.get("rulings_discarded_beats")
+                                        or []))[:8]) if _rd6 else ""),
+          flush=True)
     print("  RE-RULED BEATS  : %s  %d beat(s) ruled more than once "
           "(%d ruling(s) over %d beat(s))"
           % (_rr_state, len(_rr_rows),
@@ -17230,6 +17593,25 @@ def edit(source_key: str, brief: str,
                  f"NOTHING: {_rs.get('queries_tried')}. The mount is known good "
                  f"(282 files); this is a query/corpus misfit. CLI flags are not "
                  f"in there — they are in C4 and recipe 15.")
+        # AN INPUT REACHED THROUGH A WITHHELD TOOL IS UNREACHABLE, NOT UNREAD.
+        # Round 70 named rules/remotion_catalogue/remotion_skills/asset_library
+        # on every arm; two of those are reached ONLY through read_knowledge and
+        # search_skills, which the judgment-only role removes before the loop.
+        # Reporting them as untouched marks the arm do-not-compare on a zero the
+        # harness caused. The remaining ones are the real finding and are still
+        # reported.
+        _via = {"rules": "read_knowledge", "remotion_catalogue": "read_knowledge",
+                "remotion_skills": "search_skills"}
+        _off = set(led.get("readers_offered") or [])
+        _blocked = sorted(_i for _i in _unread
+                          if _via.get(_i) and _via[_i] not in _off)
+        if _blocked:
+            fail("unreachable_tool_withheld",
+                 f"{_blocked} are reached only through "
+                 f"{sorted({_via[_i] for _i in _blocked})}, which this run "
+                 f"WITHHELD — unreachable, not unread, and not the agent's "
+                 f"doing")
+            _unread = [_i for _i in _unread if _i not in set(_blocked)]
         if _unread:
             fail("required_input_unread",
                  f"{_unread} mounted but never touched (rules read: "
@@ -17583,13 +17965,35 @@ def edit(source_key: str, brief: str,
              f"declared — the manifest is the instrument now, so an undeclared "
              f"placement is an unmeasured one.")
 
-    if use_knowledge and not led["knowledge_reads"]:
+    # ZERO CALLS OUT OF ZERO CHANCES IS NOT A FINDING, and this fired on every
+    # arm of round 70 blaming the agent for not calling a tool it was never
+    # given. `readers_offered` — the denominator — sits TWO KEYS AWAY in the
+    # same ledger, written at the filter that removes the readers on the
+    # judgment-only role. The fact was recorded correctly and the consumer did
+    # not read it, which is the same shape as the RULING PASSES print above and
+    # as `tool_names`.
+    #
+    # A HARNESS FAULT, NAMED SEPARATELY, rather than the finding suppressed —
+    # Builder-2's shape, taken rather than re-invented. "The arm asked for
+    # knowledge and the harness withheld the tool" is a real problem and a
+    # DIFFERENT one from "the agent had the tool and ignored it"; collapsing
+    # them is what made the zero unreadable for 37 runs.
+    _readers_on = list(led.get("readers_offered") or [])
+    if use_knowledge and not _readers_on:
+        fail("knowledge_arm_readers_withheld",
+             "use_knowledge=True but read_knowledge was WITHHELD from this run "
+             "(%s) — the arm cannot be a knowledge arm, and that is the "
+             "harness's doing, not the agent's. A zero from the reader counters "
+             "says nothing about need."
+             % (", ".join(led.get("readers_withheld") or []) or "no readers"))
+    elif use_knowledge and not led["knowledge_reads"]:
         # The knowledge arm that never opened a file is NOT an arm. Without this
         # the A/B could report "no effect" when the real finding is "the tool was
         # never called" — the two are indistinguishable in the output alone.
         fail("knowledge_never_read",
-             "use_knowledge=True but the agent called read_knowledge zero times "
-             "— this arm is not a knowledge arm and must not be compared as one")
+             "use_knowledge=True, read_knowledge WAS offered (%s), and the agent "
+             "called it zero times — this arm is not a knowledge arm and must "
+             "not be compared as one" % ", ".join(_readers_on))
     # THE GATE'S OWN COST, INTO THE LEDGER IT IS PRINTED FROM. Written here,
     # after every stage, so it counts the whole run rather than whatever had
     # accumulated at some earlier point.
