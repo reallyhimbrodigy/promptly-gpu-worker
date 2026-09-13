@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""No undefined name, no use-before-assignment, no duplicate dict key.
+"""No undefined name, no BRANCH-BOUND read, no duplicate dict key.
+
+THE DOCSTRING USED TO SAY "no use-before-assignment" AND PYFLAKES DOES NOT
+DELIVER THAT. Verified by running it on the exact shape that collected 5/5
+ok=False on round 66 — a name assigned only inside the `else:` arm of a
+conditional, read unconditionally below it. `python3 -m pyflakes` exits 0.
+It sees a name never assigned; it does not see one assigned on only some
+paths. A peer lost a whole round to it with 108 green smokes and four
+import-time certs, because nothing in that lane calls `edit()`.
+
+So this gate now runs `branch_bound_reads` from the app beside pyflakes, and
+the docstring says what the gate actually does.
 
 WHY THIS EXISTS, and it is the second time the class has been named here.
 CLAUDE.md already records that "pyflakes caught a definition placed after its
@@ -94,6 +105,31 @@ for _f in FILES:
           "which it is:\n         " + "\n         ".join(_unknown[:6]))
 
 print()
+# ── THE CLASS PYFLAKES CANNOT SEE ─────────────────────────────────────────
+# Driven from the app so the check exercises the SHIPPED rule, not a copy.
+import modal_stub                                              # noqa: E402,F401
+import agentic_editor_app as _AA_BB                             # noqa: E402
+_bb = _AA_BB.branch_bound_reads(pathlib.Path("agentic_editor_app.py").read_text())
+check("no local is assigned in ONE arm of a conditional and read below it — "
+      "the shape that collected 5/5 ok=False on round 66 and that pyflakes "
+      "exits 0 on",
+      not _bb,
+      "; ".join("%s(): %s stored line %d, read line %d" % _r for _r in _bb))
+
+# AND THE RULE ITSELF MUST STILL DISCRIMINATE. A checker that flags nothing
+# is indistinguishable from one that is switched off, so drive it on the
+# shape it exists for and on the correct idiom it must not flag.
+_DANGER = "def f(x):\n    if x:\n        y = 1\n    return y\n"
+_GUARD  = "def f(x):\n    if x:\n        y = 1\n    else:\n        return 0\n    return y\n"
+_BOTH   = "def f(x):\n    if x:\n        y = 1\n    else:\n        y = 2\n    return y\n"
+check("it fires on a name bound in only one arm and read below",
+      bool(_AA_BB.branch_bound_reads(_DANGER)))
+check("it does NOT fire on the early-return guard — a checker that cries "
+      "wolf on a correct idiom gets switched off, and then the class returns",
+      not _AA_BB.branch_bound_reads(_GUARD))
+check("and not when both arms assign, which is always bound",
+      not _AA_BB.branch_bound_reads(_BOTH))
+
 if fails:
     print("NO-UNDEFINED-NAMES: FAIL")
     for _f in fails:

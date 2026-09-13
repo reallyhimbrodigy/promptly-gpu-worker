@@ -8567,6 +8567,112 @@ def overlay_covisible(placements, beats, caption_words, min_token=3):
 
 
 
+def branch_bound_reads(module_src):
+    """[(func, name, store_line, read_line)] — a local assigned ONLY inside one
+    arm of a conditional and read outside it. PURE.
+
+    THE CLASS PYFLAKES DOES NOT SEE, and it has now cost this project a round.
+    Round 66 collected 5/5 ok=False on a NameError in `edit()`: a name assigned
+    only inside the `else:` arm of a cutaway conditional, read unconditionally
+    by the BEATS block below it. 108 green smokes and four import-time certs
+    missed it because nothing in that lane CALLS edit().
+
+    My own gate missed it too, and worse: `smoke_no_undefined_names` is a
+    pyflakes wrapper whose docstring claims "no use-before-assignment".
+    Verified against the exact shape — pyflakes exits 0. It sees a name that is
+    never assigned; it does not see one assigned on only some paths. The
+    docstring was an overclaim and this function is what it claimed to be.
+
+    CONSERVATIVE ON PURPOSE. It flags only the unambiguous shape: every
+    assignment to the name sits inside ONE arm of a single `if`, the sibling
+    arm assigns it nowhere, and the name is read at a shallower level after
+    that `if`. A name assigned in BOTH arms is always bound and is not flagged;
+    a name assigned before the `if` is not flagged. A checker that cried wolf
+    here would be turned off, and then the class comes back.
+    """
+    import ast as _ast
+    _t = _ast.parse(module_src)
+    _out = []
+    for _fn in _ast.walk(_t):
+        if not isinstance(_fn, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+            continue
+        # every If directly in this function body (not nested in another stmt)
+        for _i, _st in enumerate(_fn.body):
+            if not isinstance(_st, _ast.If):
+                continue
+            def _stores(_nodes):
+                _s = {}
+                for _n in _nodes:
+                    for _x in _ast.walk(_n):
+                        if isinstance(_x, _ast.Name) and isinstance(_x.ctx, _ast.Store):
+                            _s.setdefault(_x.id, _x.lineno)
+                return _s
+            _in_body, _in_else = _stores(_st.body), _stores(_st.orelse)
+
+            def _terminates(_arm):
+                """Does this arm leave the function, so the read below is
+                unreachable from it?
+
+                THE EARLY-RETURN GUARD IS THE COMMON CORRECT SHAPE and the
+                first real file I ran this on flagged one:
+                `if ff and exists(ff): filt = ... else: return {"error": ...}`
+                then reads `filt`. That read cannot happen unless the body ran.
+                Without this arm the checker cries wolf on a correct idiom, and
+                a checker that cries wolf gets turned off — and then the class
+                it was written for comes back.
+
+                An EMPTY arm does not terminate: `if x: y = 1` with no else
+                falls through with y unbound, which is the dangerous case.
+                """
+                if not _arm:
+                    return False
+                _last = _arm[-1]
+                if isinstance(_last, (_ast.Return, _ast.Raise, _ast.Continue,
+                                      _ast.Break)):
+                    return True
+                if isinstance(_last, _ast.Expr) and isinstance(_last.value, _ast.Call):
+                    return "exit" in _ast.unparse(_last.value.func)
+                return False
+
+            # assigned in exactly one arm, AND the other arm falls through
+            _only = {}
+            for _k, _v in _in_body.items():
+                if _k not in _in_else and not _terminates(_st.orelse):
+                    _only[_k] = _v
+            for _k, _v in _in_else.items():
+                if _k not in _in_body and not _terminates(_st.body):
+                    _only[_k] = _v
+            if not _only:
+                continue
+            # not bound anywhere else in the function outside this If
+            _elsewhere = set()
+            for _j, _other in enumerate(_fn.body):
+                if _j == _i:
+                    continue
+                for _x in _ast.walk(_other):
+                    if isinstance(_x, _ast.Name) and isinstance(_x.ctx, _ast.Store):
+                        _elsewhere.add(_x.id)
+            for _a in _fn.args.posonlyargs + _fn.args.args + _fn.args.kwonlyargs:
+                _elsewhere.add(_a.arg)
+            if _fn.args.vararg:
+                _elsewhere.add(_fn.args.vararg.arg)
+            if _fn.args.kwarg:
+                _elsewhere.add(_fn.args.kwarg.arg)
+            # read AFTER the If, at function-body level
+            for _later in _fn.body[_i + 1:]:
+                for _x in _ast.walk(_later):
+                    if (isinstance(_x, _ast.Name) and isinstance(_x.ctx, _ast.Load)
+                            and _x.id in _only and _x.id not in _elsewhere):
+                        _out.append((_fn.name, _x.id, _only[_x.id], _x.lineno))
+    # one row per (func, name)
+    _seen, _uniq = set(), []
+    for _r in _out:
+        if (_r[0], _r[1]) in _seen:
+            continue
+        _seen.add((_r[0], _r[1]))
+        _uniq.append(_r)
+    return _uniq
+
 def caption_evidence(words):
     """(n, scripts, dominant) — WHAT the captions say, not that they happened.
 
