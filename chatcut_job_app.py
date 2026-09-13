@@ -43,6 +43,51 @@ IMG = (
         "apt-get install -y nodejs",
         "npm install -g @anthropic-ai/claude-code",
     )
+    # THE CHATCUT PLUGIN, BAKED IN. Its MCP server carries a MANDATORY
+    # precondition: invoke chatcut:chatcut-plugin-basics-claude before the
+    # first ChatCut tool call, and if it is unavailable, STOP. The first
+    # end-to-end run proved the agent obeys that literally — it refused to
+    # touch a single tool and said so, which is the correct behaviour and a
+    # harness gap, not a finding. The skills ship with the image.
+    .add_local_dir(os.path.expanduser(
+        "~/.claude/plugins/cache/chatcut-inc/chatcut/1.10.12"),
+        "/root/.claude/plugins/cache/chatcut-inc/chatcut/1.10.12", copy=True)
+    # THE REGISTRATION IS REWRITTEN FOR THE CONTAINER. The local
+    # installed_plugins.json points installPath at /Users/zaclibman/... which
+    # does not exist here; copying it verbatim would register a plugin at a
+    # missing path and the skills would be silently absent again.
+    # THE MARKETPLACE, AND THIS IS THE PIECE THAT WAS MISSING. A plugin
+    # resolves THROUGH its marketplace: the cache, installed_plugins.json and
+    # enabledPlugins are all necessary and none of them is sufficient. Three
+    # runs had every one of those in place and still got "Unknown skill",
+    # because .claude-plugin/marketplace.json was not in the container. A
+    # diagnostic container settled it — only built-in skills were listed —
+    # rather than a fourth guess. .git is excluded: 228M -> 115M.
+    .add_local_dir("/tmp/cc_marketplace",
+                   "/root/.claude/plugins/marketplaces/chatcut-inc", copy=True)
+    .run_commands(
+        "mkdir -p /root/.claude/plugins",
+        """cat > /root/.claude/plugins/known_marketplaces.json <<'JSON'
+{"chatcut-inc":{"source":{"source":"git",
+  "url":"https://github.com/ChatCut-Inc/agent-plugin.git","ref":"main"},
+  "installLocation":"/root/.claude/plugins/marketplaces/chatcut-inc"}}
+JSON""",
+        # ENABLED, NOT MERELY PRESENT. The cache plus installed_plugins.json
+        # registers the plugin; `enabledPlugins` is what makes its SKILLS
+        # resolvable. Without it the agent gets "Unknown skill" and — correctly
+        # — refuses to touch a ChatCut tool. Two runs proved that: the plugin
+        # was on disk both times and the skill was still absent.
+        """cat > /root/.claude/settings.json <<'JSON'
+{"enabledPlugins":{"chatcut@chatcut-inc":true},
+ "extraKnownMarketplaces":{"chatcut-inc":{"source":{"source":"git",
+   "url":"https://github.com/ChatCut-Inc/agent-plugin.git","ref":"main"}}}}
+JSON""",
+        """cat > /root/.claude/plugins/installed_plugins.json <<'JSON'
+{"version":2,"plugins":{"chatcut@chatcut-inc":[{"scope":"user",
+"installPath":"/root/.claude/plugins/cache/chatcut-inc/chatcut/1.10.12",
+"version":"1.10.12"}]}}
+JSON""",
+    )
     .add_local_dir(os.path.join(_HERE, "knowledge"), "/craft/knowledge",
                    copy=True)
     .add_local_file(os.path.join(_HERE, "control_distributions.json"),
@@ -50,6 +95,14 @@ IMG = (
     .add_local_file(os.path.join(_HERE, "reference_index.json"),
                     "/craft/reference_index.json", copy=True)
 )
+
+
+# THE LIVE TOKEN STORE. A Modal Secret is immutable from inside a function, so
+# a rotating refresh token written only to a log is lost the moment the
+# container exits — and the NEXT job fails with a credential that looks expired
+# rather than superseded. The Dict is seeded from the Secret once and is the
+# source of truth afterwards.
+TOKENS = modal.Dict.from_name("chatcut-tokens", create_if_missing=True)
 
 
 def _access_token():
@@ -61,8 +114,10 @@ def _access_token():
     other, surfacing only as intermittent auth failure under load. We report the
     rotation so the Secret can be updated; we never pretend it did not happen.
     """
-    rt = os.environ.get("CHATCUT_REFRESH_TOKEN")
+    # THE DICT WINS over the Secret: it holds the most recent rotation. The
+    # Secret is the seed, used only until the first rotation happens.
     cid = os.environ.get("CHATCUT_CLIENT_ID")
+    rt = TOKENS.get("refresh_token") or os.environ.get("CHATCUT_REFRESH_TOKEN")
     if not rt or not cid:
         raise RuntimeError(
             "CHATCUT_REFRESH_TOKEN / CHATCUT_CLIENT_ID are ABSENT from the "
@@ -86,9 +141,16 @@ def _access_token():
             f"stored refresh token is rejected. Re-run chatcut_oauth.py and "
             f"update the Secret.")
     if tok.get("refresh_token") and tok["refresh_token"] != rt:
-        print("  TOKEN ROTATED: ChatCut issued a new refresh token. Update the "
-              "Modal Secret or the NEXT job may fail. Concurrent containers "
-              "sharing the old value will now race.", flush=True)
+        # PERSISTED, NOT ANNOUNCED. Round 1 of this job proved ChatCut DOES
+        # rotate on use: the warning fired, the new value was dropped, and the
+        # stored credential was dead from that moment. A warning about a
+        # credential you then discard is the absence-as-success shape wearing a
+        # log line.
+        TOKENS["refresh_token"] = tok["refresh_token"]
+        print("  TOKEN ROTATED   : persisted the new refresh token to the "
+              "chatcut-tokens Dict. Concurrent containers sharing one token "
+              "still race — serialise jobs or give each its own grant.",
+              flush=True)
     if not tok.get("access_token"):
         raise RuntimeError("refresh returned no access_token — ABSENT")
     return tok["access_token"]
@@ -201,8 +263,27 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5"):
     mark("preflight")
 
     os.makedirs("/work", exist_ok=True)
-    subprocess.run(["curl", "-sS", "-o", "/work/source.mp4", clip_url],
+    # -L, AND THEN PROVE IT IS A VIDEO. Without -L an S3 presign against the
+    # wrong region answers 301 and curl writes the 483-byte REDIRECT BODY to
+    # source.mp4 — exit 0, a file exists, and the agent is handed XML. Caught
+    # on the first staging attempt. ffprobe is the difference between "a file
+    # arrived" and "the clip arrived", which is the same distinction as
+    # MEASURED vs ABSENT everywhere else in this lane.
+    subprocess.run(["curl", "-fsSL", "-o", "/work/source.mp4", clip_url],
                    check=True, timeout=300)
+    _p = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+         "stream=codec_type", "-show_entries", "format=duration",
+         "-of", "default=nw=1", "/work/source.mp4"],
+        capture_output=True, text=True, timeout=60)
+    if _p.returncode != 0 or "video" not in _p.stdout:
+        _sz = os.path.getsize("/work/source.mp4") if os.path.exists("/work/source.mp4") else 0
+        raise RuntimeError(
+            f"the downloaded clip is not a decodable video ({_sz} bytes): "
+            f"{(_p.stderr or _p.stdout)[:200]} — refusing to hand the agent a "
+            f"redirect body or an error page")
+    print(f"  SOURCE          : MEASURED  {_p.stdout.strip().splitlines()[-1]}",
+          flush=True)
     mark("download")
 
     # THE MCP SERVER, CONFIGURED WITH A BEARER WE ALREADY PROVED WORKS. The
@@ -223,7 +304,13 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5"):
     r = subprocess.run(
         ["claude", "-p", prompt, "--output-format", "json",
          "--mcp-config", "/work/mcp.json",
-         "--permission-mode", "bypassPermissions",
+         # NOT bypassPermissions. It maps to --dangerously-skip-permissions,
+         # which REFUSES to run as root, and every Modal container is root:
+         # "cannot be used with root/sudo privileges for security reasons".
+         # An explicit allowlist is the right mechanism anyway — the agent
+         # should have exactly the ChatCut tools and the local file tools, and
+         # nothing it was never meant to reach.
+         "--allowedTools", "mcp__chatcut__*,Bash,Read,Write,Glob,Grep",
          "--model", model],
         cwd="/work", capture_output=True, text=True, timeout=1500)
     mark("agent")
