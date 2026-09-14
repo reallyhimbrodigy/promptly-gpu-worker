@@ -287,6 +287,16 @@ CUT_FIELD_TEACH = (
     # 125.7 on the run that did not. Every word of the hook survived and
     # the viewer still met something else first. A rule that names one
     # route to a loss teaches that the other routes are fine.
+    # THE OTHER EDGE, AND I MISSED IT BY LOOKING AT WHAT WAS REMOVED.
+    # I reported the 840s run as handling the tail correctly because it
+    # trimmed 4.4s of app chrome. It then ENDED ON ITS OWN DARK CARD,
+    # luma 25-26 — dead screen by another route. Three of four measured
+    # arms end on dead screen, so this is not one model being careless:
+    # nothing in the documents said the ending is a decision.
+    "AN EDIT ENDS ON THE LAST THING WORTH SEEING. Leftover app chrome, a "
+    "dark frame, a held card after the point has landed — all the same "
+    "loss. If something closes the video it is there because it EARNS "
+    "the ending, not because the source stopped. "
     "AND A PROTECTED POSITION CAN BE BURIED AS WELL AS CUT: nothing is "
     "placed in FRONT of the hook. A title card, a logo or a black frame "
     "before it delivers the same loss by a different route. Anything you "

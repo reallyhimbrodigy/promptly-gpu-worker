@@ -42,6 +42,37 @@ app = open("agentic_editor_app.py", encoding="utf-8").read()
 check("the ruling field carries the same rule",
       "BURIED AS WELL AS CUT" in app.upper())
 
+# ── THE OTHER EDGE ──────────────────────────────────────────────────────────
+# Same shape, same reason. Three of four measured arms ended on dead screen —
+# leftover app chrome twice, and once a deliberate dark card held after the
+# point had landed. Nothing in either lane said the ending is a DECISION.
+check("the craft document says an edit ends on the last thing worth seeing",
+      "LAST THING WORTH SEEING" in doc.upper())
+check("and names the routes — chrome, a dark frame, a held card",
+      all(w in doc.lower() for w in ("chrome", "dark frame", "held card")))
+check("the ruling field carries the ending rule too",
+      "LAST THING WORTH SEEING" in app.upper())
+check("and both lanes say the ending is EARNED, not inherited from the source",
+      "earns the ending" in doc.lower() and "earns" in app.lower())
+
+# ── AND THE TAIL CHECK STAYS A REPORT ───────────────────────────────────────
+# Deliberate, and the smoke pins it: luma cannot tell a branded close card from
+# leftover app UI, and gating on it would be the corpus-gate failure — a
+# threshold that learns one population and rejects real work. The CLI must
+# exit 0 on a DEAD tail and non-zero only on a BURIED opening.
+import subprocess
+D_ = os.path.expanduser("~/Desktop/Promptly Reports/chatcut-spike")
+_src = os.path.join(D_, "SOURCE-original-25s.mp4")
+_dead = os.path.join(D_, "haiku-edit.mp4")
+if os.path.exists(_src) and os.path.exists(_dead):
+    _r = subprocess.run([sys.executable, "opening_not_buried.py", _src, _dead],
+                        capture_output=True, text=True, timeout=180)
+    check("a DEAD tail is reported, not gated — exit 0",
+          _r.returncode == 0 and "TAIL  DEAD" in _r.stdout,
+          f"rc={_r.returncode}")
+    check("and the tail verdict is still PRINTED, so a report is not silence",
+          "TAIL" in _r.stdout)
+
 # ── 2. THE CHECKER STILL DISCRIMINATES ──────────────────────────────────────
 # A checker that flags nothing is indistinguishable from one switched off, so
 # drive it on the two REAL renders: one that buried the hook and one that did
