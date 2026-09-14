@@ -358,7 +358,7 @@ HOW TO WORK — THE LOOP, AND IT IS A LOOP ON PURPOSE
   turns. Tile them into ONE image and read that:
 
     ffmpeg -v error -i /work/source.mp4 -vf \
-      "select='not(mod(n\,NN))',scale=240:-1,tile=5x3" -frames:v 1 /tmp/sheet.png
+      "select='not(mod(n\\,NN))',scale=240:-1,tile=5x3" -frames:v 1 /tmp/sheet.png
 
   One sheet across the whole clip tells you the shots, the burned-in graphics
   and the free bands. Go to individual frames only for a moment the sheet
@@ -506,6 +506,36 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
             f"redirect body or an error page")
     print(f"  SOURCE          : MEASURED  {_p.stdout.strip().splitlines()[-1]}",
           flush=True)
+    # THE CONTACT SHEET IS BUILT BY THE HARNESS, NOT ASKED FOR IN THE PROMPT.
+    # The Haiku arm inspected ZERO source frames and kept 4.4s of TikTok app
+    # chrome that both Sonnet arms found and trimmed. Telling a model to look
+    # is a preference; putting the picture in front of it is a property. This
+    # also removes the ffmpeg turns the Sonnet arms spent building sheets by
+    # hand — the work happens once, in a subprocess, for free.
+    _dur = 0.0
+    for _ln in _p.stdout.splitlines():
+        if _ln.startswith("duration="):
+            _dur = float(_ln.split("=", 1)[1] or 0)
+    _n = 20
+    _step = max(1, int(_dur * 30 / _n)) if _dur else 30
+    _sheet = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", "/work/source.mp4", "-vf",
+         f"select='not(mod(n\\,{_step}))',scale=240:-1,tile=5x4",
+         "-frames:v", "1", "/work/source_sheet.png", "-y"],
+        capture_output=True, text=True, timeout=180)
+    _has_sheet = os.path.exists("/work/source_sheet.png") and \
+        os.path.getsize("/work/source_sheet.png") > 5000
+    if not _has_sheet:
+        # ABSENT IS FATAL HERE. The whole point of this arm is that the agent
+        # cannot skip looking; a missing sheet would silently return it to the
+        # arm that missed the tail, and the run would look like a fair test.
+        raise RuntimeError(
+            f"could not build the source contact sheet "
+            f"({(_sheet.stderr or '')[:160]}) — refusing to run, because the "
+            f"visual pass is the property under test")
+    print(f"  CONTACT SHEET   : MEASURED  /work/source_sheet.png "
+          f"({os.path.getsize('/work/source_sheet.png')//1024} KB, "
+          f"20 frames over {_dur:.1f}s)", flush=True)
     mark("download")
 
     # THE MCP SERVER, CONFIGURED WITH A BEARER WE ALREADY PROVED WORKS. The
@@ -561,6 +591,13 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     prompt = (
         f"THE CLIP: /work/source.mp4\n"
         f"THE BRIEF: {brief}\n\n"
+        f"BEFORE ANY CUT DECISION, read /work/source_sheet.png — a 20-frame "
+        f"contact sheet of the whole source, already built for you. It shows "
+        f"the shots, the burned-in graphics, the free bands, and anything at "
+        f"the head or TAIL that is not content. Do not extract your own frames "
+        f"until the sheet leaves a specific question open.\n"
+        f"BEFORE RENDER, call preview_timeline with viewerFrameCount to see the "
+        f"composed result. Both of these are checked after the run.\n\n"
         f"The ChatCut tool schemas are DEFERRED. Fetch them in ONE call before "
         f"you start:\n  ToolSearch query=\"select:{_sel}\"\n"
         f"The craft is already in your context — do not read /craft unless you "
@@ -610,6 +647,28 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
            "system_prompt_chars": led_prompt_chars,
            "shape": shape,
            "stderr_tail": (r.stderr or "")[-2000:]}
+    # THE GATE. Suggested-in-the-prompt is a preference; checked-in-the-harness
+    # is a property. A run that reached submit_export without ever looking at
+    # the source sheet or the composed timeline is reported as a FAILED visual
+    # pass, whatever it rendered — because that is exactly the run that kept
+    # the dead tail and exited 0.
+    _calls = (shape or {}).get("calls") or []
+    _saw_sheet = any("source_sheet" in (c.get("in") or "") for c in _calls)
+    _prev_i = [i for i, c in enumerate(_calls)
+               if c["tool"].endswith("preview_timeline")]
+    _exp_i = [i for i, c in enumerate(_calls)
+              if c["tool"].endswith("submit_export")]
+    _looked_before_render = bool(_prev_i) and (
+        not _exp_i or min(_prev_i) < max(_exp_i))
+    out["visual_pass"] = {
+        "read_source_sheet": _saw_sheet,
+        "previewed_before_render": _looked_before_render,
+        "state": ("MEASURED" if (_saw_sheet and _looked_before_render)
+                  else "FAILED"),
+    }
+    print("  VISUAL PASS     : %s  sheet=%s  preview_before_render=%s"
+          % (out["visual_pass"]["state"], _saw_sheet, _looked_before_render),
+          flush=True)
     out["wall_s"] = round(time.time() - t0, 2)
     RESULTS[run_id] = out
     print(f"  RESULT PERSISTED: chatcut-results[{run_id}]", flush=True)
