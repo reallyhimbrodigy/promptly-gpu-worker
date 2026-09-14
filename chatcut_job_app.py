@@ -471,7 +471,7 @@ def build_system_prompt():
               secrets=[modal.Secret.from_name("chatcut-oauth"),
                        modal.Secret.from_name("anthropic-api-key")])
 def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
-         run_id: str = "latest"):
+         run_id: str = "latest", use_hands: bool = True):
     t0 = time.time()
     marks = {}
 
@@ -571,12 +571,18 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         f"decided, the export and its polling. Keep every JUDGMENT yourself: "
         f"what to cut, where things go, how large, what they say, and whether "
         f"the composed frames are right. Hand it decided parameters, never a "
-        f"choice.\n")
+        f"choice.\n"
+        f"DELEGATE SYNCHRONOUSLY AND WAIT FOR THE RESULT. Do not run `hands` "
+        f"in the background and do not start the same work yourself while it "
+        f"is out — the first attempt at this split launched the import in the "
+        f"background, raced it with a second upload from the main agent, and "
+        f"the job failed without ever exporting. One task out, one result "
+        f"back, then the next.\n")
     led_prompt_chars = len(sys_prompt)
     r = subprocess.run(
         ["claude", "-p", prompt,
          "--append-system-prompt-file", "/work/system.md",
-         "--agents", json.dumps(agents),
+         *(["--agents", json.dumps(agents)] if use_hands else []),
          # STREAM-JSON, because `json` returns only the final result and the
          # ordered tool calls are then unrecoverable. That gap is what made the
          # first run's 93 turns a number instead of a diagnosis.
@@ -612,7 +618,8 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
 
 @app.local_entrypoint()
 def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
-         run_id: str = "", wait: bool = False):
+         run_id: str = "", wait: bool = False,
+         model: str = "claude-sonnet-5", use_hands: bool = True):
     if not clip_url:
         raise SystemExit("pass --clip-url")
     rid = run_id or f"run-{int(time.time())}"
@@ -621,6 +628,7 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
         return
     # SPAWN, DO NOT WAIT. The result lands in the chatcut-results Dict, so the
     # answer survives a client that is signalled, disconnected, or simply gone.
-    call = edit.spawn(clip_url, brief, run_id=rid)
+    call = edit.spawn(clip_url, brief, model=model, run_id=rid,
+                      use_hands=use_hands)
     print(f"SPAWNED run_id={rid} call={call.object_id}")
     print(f"read it with:  modal run chatcut_read_result.py --run-id {rid}")
