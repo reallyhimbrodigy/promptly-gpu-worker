@@ -5,6 +5,7 @@ const useContext = React.useContext;
 const useState = React.useState;
 const useRef = React.useRef;
 const useEffect = React.useEffect;
+const createContext = React.createContext;
 
 // src/motion-graphics/AnnotationArrow/AnnotationArrow.tsx
 // [ported] import removed — ChatCut injects these: react

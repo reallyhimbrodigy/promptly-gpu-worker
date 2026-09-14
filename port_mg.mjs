@@ -26,7 +26,37 @@ if (!entry) { console.error("usage: port_mg.mjs <Component.tsx> <outDir>"); proc
 // ChatCut pre-injects these. They must NOT be bundled and must NOT be imported.
 const INJECTED = new Set(["react", "remotion"]);
 
+// GOOGLE FONTS DO NOT CROSS. fonts.ts calls loadFont() at MODULE SCOPE for a
+// dozen families, and bundling drags in the @remotion/google-fonts SDK, which
+// reaches into remotion/no-react internals ChatCut does not inject. 30 of 33
+// blobs carried NoReactInternals and would have crashed at render while the
+// build-time checker said ok:true on all 34.
+//
+// ChatCut loads fonts its own way: search_fonts returns a canonical family name
+// and the cloud renderer fetches it. So each loadFont becomes a shim returning
+// just the family name — the component keeps its fontFamily string, which is
+// the only part that ever reached the DOM.
+const fontShim = {
+  name: "google-fonts-shim",
+  setup(b) {
+    b.onResolve({ filter: /^@remotion\/google-fonts\// }, (a) => ({
+      path: a.path, namespace: "gfont",
+    }));
+    b.onLoad({ filter: /.*/, namespace: "gfont" }, (a) => {
+      const fam = a.path.split("/").pop();
+      return {
+        contents: `export const loadFont = () => ({ fontFamily: ${JSON.stringify(fam)} });
+export const getAvailableWeights = () => [];
+export const getInfo = () => ({ fontFamily: ${JSON.stringify(fam)} });
+export default { loadFont };`,
+        loader: "js",
+      };
+    });
+  },
+};
+
 const res = await build({
+  plugins: [fontShim],
   entryPoints: [entry],
   bundle: true,
   format: "esm",
@@ -69,8 +99,18 @@ for (const [alias, base] of suffixed) preludeLines.push(`const ${alias} = ${base
 // EVERY React hook the components actually reach for. useId was missing and
 // exactly two of thirty-four needed it — which is why the port is run over all
 // of them rather than proven on one and assumed.
+// EVERY React NAMED EXPORT, not just the hooks. The first list had useX only
+// and the differ caught `createContext` undefined — same class as the useId
+// miss, one level wider. A hand-kept list of "the ones we use" is a second
+// vocabulary that drifts the day a component reaches for another; this is
+// React's actual surface, filtered to what the bundle references.
 for (const hook of ["useContext", "useMemo", "useState", "useRef", "useEffect",
-                    "useCallback", "useId", "useReducer", "useLayoutEffect"]) {
+                    "useCallback", "useId", "useReducer", "useLayoutEffect",
+                    "useImperativeHandle", "useDeferredValue", "useTransition",
+                    "useSyncExternalStore", "useInsertionEffect",
+                    "createContext", "createElement", "cloneElement", "memo",
+                    "forwardRef", "Fragment", "Children", "isValidElement",
+                    "createRef", "lazy", "Suspense", "StrictMode"]) {
   const re = new RegExp(`\\b${hook}\\d*\\s*\\(`);
   if (re.test(code)) {
     for (const m of [...new Set([...code.matchAll(new RegExp(`\\b(${hook}\\d*)\\s*\\(`, "g"))].map(x => x[1]))]) {
