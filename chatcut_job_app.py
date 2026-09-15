@@ -173,6 +173,15 @@ JSON""",
                     "/root/burned_text.py", copy=True)
     .add_local_file(os.path.join(_HERE, "face_bands.py"),
                     "/root/face_bands.py", copy=True)
+    # THE MEASURED BANDS THEMSELVES. verify_chain reads sheet/rows.json
+    # relative to its own directory, and that file was never mounted — so in
+    # the container `measured_bands()` returned {} and EVERY band fell through
+    # to the whole frame. HOP 6 then reported the card at 0.150-1.150 (off the
+    # bottom of a 0-1 frame) and every placement as occupying all three bands,
+    # which is why it failed five of them. A clean zero from a reader that
+    # found no input, for the fourth time today.
+    .add_local_file(os.path.join(_HERE, "sheet", "rows.json"),
+                    "/root/sheet/rows.json", copy=True)
     .add_local_file(os.path.join(_HERE, "reference_index.json"),
                     "/craft/reference_index.json", copy=True)
 )

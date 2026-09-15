@@ -57,8 +57,16 @@ def measured_bands(rows_path=None):
                                   "sheet", "rows.json")
     try:
         rows = json.load(open(p, encoding="utf-8"))
-    except Exception:                                            # noqa: BLE001
-        return {}
+    except Exception as e:                                       # noqa: BLE001
+        # ABSENT IS NOT AN EMPTY TABLE. Returning {} sent every caller to the
+        # whole-frame fallback, which reads as "this placement occupies
+        # everything" — a band model that cannot load quietly becoming a band
+        # model that condemns every placement. Raise, so the hop reports
+        # UNCHECKED and names the file it could not read.
+        raise RuntimeError(
+            "measured bands are UNAVAILABLE: %s could not be read (%s). Every "
+            "band would fall back to the whole frame and every placement would "
+            "read as occupying all of it." % (p, e))
     out = {}
     for name, v in rows.items():
         if v.get("state") != "MEASURED":
@@ -283,6 +291,10 @@ def band_of(row, meas):
     if base is None and (row.get("overrides") or {}).get("value") is not None:
         base = meas.get("StatCard", (0.0, 1.0))
     if base is None:
+        # An unknown position claims the WHOLE FRAME deliberately — an unknown
+        # must not read as "somewhere harmless". But it is only reachable when
+        # the component is genuinely absent from the measured set, not when the
+        # set failed to load: measured_bands() raises for that now.
         base = BANDS.get(row.get("band"), (0.0, 1.0))
     dy = float((row.get("overrides") or {}).get("offsetY") or 0) / 1920.0
     return (base[0] + dy, base[1] + dy)
