@@ -2839,14 +2839,14 @@ HOW TO WORK — FOUR STEPS, NOT FOURTEEN
 Do not orchestrate. There is no shell, and the per-step tools exist for repair,
 not for building the edit one command at a time.
 
-SOFT MODIFIERS ARE QUANTITIES, AND RESOLVING THEM IS YOUR JOB.
+SOFT MODIFIERS ARE JUDGEMENT, NOT ARITHMETIC.
 Requests almost never carry numbers. "Subtle overlays", "few cuts", "fast
-paced", "clean and minimal" — each of those is a RATE, and you set it in
-`set_spec.targets` as a per-25s number. "Subtle", "few", "minimal" and "light"
-mean FEWER THAN USUAL. They do not mean none. If you genuinely intend zero of
-something the request named, say so in `why` — that is a real decision, but it
-is a different one and it has to be stated rather than arrived at by placing
-nothing.
+paced", "clean and minimal" — you honour those BEAT BY BEAT, by ruling fewer
+beats worth a placement, not by computing a rate first and then filling it.
+"Subtle", "few", "minimal" and "light" mean FEWER THAN USUAL. They do not mean
+none. If you genuinely intend zero of something the request named, say so in
+`why` — that is a real decision, but it is a different one and it has to be
+stated rather than arrived at by placing nothing.
 4. VERIFY with `inspect_output`: it probes the file AND transcribes it, and
    tells you which intended words are MISSING from the result.
 5. If words are missing or the output is wrong, FIX IT AND RUN AGAIN. Say
@@ -3349,8 +3349,9 @@ KNOWLEDGE_TOOLS = [{
         "unsure.\n\n"
         "  full_edit       — the request describes a VIBE ('punchy and direct', "
         "'clean and professional', 'like a movie trailer'). The vibe is the "
-        "spec: derive the whole edit from it, and derive your own density "
-        "targets from it rather than reaching for corpus averages.\n"
+        "spec: derive the whole edit from it. DENSITY IS NOT YOUR DECISION — "
+        "there is no rate to set. Rule each beat on its own merits and the "
+        "count is whatever the beats deserved.\n"
         "  targeted_change — the request names a specific change ('add zooms and "
         "light transitions', 'make the captions bigger', 'shorten the intro'). "
         "List the families it asks for. If they asked for zooms, the output has "
@@ -3458,18 +3459,6 @@ KNOWLEDGE_TOOLS = [{
                               "is the one part of the brief the user was "
                               "explicit about, and it is the cheapest thing in "
                               "the world to honour."},
-            "targets": {"type": "object",
-                        "description": (
-                            "RESOLVE THE SOFT MODIFIERS. A request rarely gives "
-                            "numbers — it says 'subtle overlays', 'few cuts', "
-                            "'fast paced', 'clean'. Those are QUANTITIES, and "
-                            "they are your call to make: give a per-25s rate for "
-                            "each family the request implies. 'Subtle' and 'few' "
-                            "and 'minimal' mean FEWER THAN USUAL, never NONE — "
-                            "if you intend zero of something the request asked "
-                            "for, that is a different decision and you must say "
-                            "so in `why`. Families you do not name fall back to "
-                            "the corpus rate.")},
             "beats": {"type": "array", "items": {"type": "integer"},
                       "description": "optional: the beat indices the request names"},
             "why": {"type": "string",
@@ -7798,6 +7787,21 @@ def zoom_filtergraph(t_start, t_end, strength, fps=30):
             f"d=1:s=1080x1920:fps={int(fps)}[outv]")
 
 
+# ── THE DENSITY GRADERS ARE GONE, WITH THE FIELD THEY GRADED ────────────────
+# `family_regimes`, `spec_implies_nothing` and `spec_shortfall` all read
+# `spec.targets` DIRECTLY — five per-25s numbers the AGENT derived, which cost
+# turn 1 14,611 of the run's 15,891 output tokens against 1,051 for all
+# fourteen rulings. None of them refused anything; the code said so: "Both are
+# retired by the ruling (2026-09-07) ... Neither refuses anything." A self-set
+# bar that cost more than every decision in the run and changed no placement.
+#
+# DENSITY GRADING ITSELF SURVIVES, because `derive_rubric` never needed the
+# agent: called with None it returns the corpus rate for every family and marks
+# each "corpus". `led["rubric"]` is still populated on every run. What went is
+# grading against a number the thing being graded invented.
+#
+# `rate_regime` stays — it classifies a rate against a duration and the round
+# aggregate uses it on the corpus rubric.
 def rate_regime(rate, dur_s):
     """Which of the three regimes this family falls in at this duration.
 
@@ -7822,137 +7826,10 @@ def rate_regime(rate, dur_s):
     return REGIME_OUT_OF_SCOPE
 
 
-def family_regimes(targets, dur_s):
-    """{family: {regime, rate, expected}} — the whole spec, classified.
-
-    `expected` is the CONTINUOUS target, kept unrounded on purpose: it is what
-    the round-level aggregate sums. Rounding per fixture and then summing is
-    what made the per-run numbers meaningless in the first place.
-    """
-    out = {}
-    for fam, rate in (targets or {}).items():
-        if not isinstance(rate, (int, float)) or isinstance(rate, bool) or rate <= 0:
-            continue
-        out[str(fam)] = {
-            "regime": rate_regime(rate, dur_s),
-            "rate": float(rate),
-            "expected": round(float(rate) * max(0.0, float(dur_s or 0)) / 25.0, 3),
-        }
-    return out
 
 
-def spec_implies_nothing(targets, n_beats, dur_s):
-    """True when the spec, resolved against THIS source, asks for zero placements
-    in every family — an agent that has set itself a bar it cannot fail.
-
-    MEASURED, round 24 screen_recording. The spec set text=0.4, card=0.1 and
-    zoom=0.2 per 25s. Over a 20s source those imply round(0.32)=0, round(0.08)=0
-    and round(0.16)=0. `spec_shortfall` then found gap=0 and over=0 for all
-    three and returned {} — correctly, by its own arithmetic — so the run built
-    NOTHING, reported `CONTRACT VIOLATIONS: 0 — none`, and was refused only by
-    the passthrough backstop. `spec_family_built_zero` fired three times and has
-    no power to fail a round.
-
-    THIS IS NOT THE max(1, ...) FLOOR RETURNING. That ruling stands and is
-    right: a rate is a rate, and 0.2/25s over 20s IS zero — forcing it to one
-    made the gate invent work the brief never asked for. Per-family zero is
-    legitimate (text and sfx are 0.00/25s on the measured no-speech corpus).
-    What cannot be legitimate is EVERY family at zero: that is not a modest
-    spec, it is the absence of one. The check is on the TOTAL, which is why it
-    does not re-impose a floor on any individual family.
-
-    PURE AND MODULE-LEVEL so a smoke reads the shipped arithmetic. A local copy
-    of this logic let two mutations pass green before spec_shortfall was hoisted
-    out of the dispatch for exactly this reason.
-    """
-    if not targets:
-        return False        # no spec at all is a different failure, not this one
-    dur_25 = max(0.001, float(dur_s or 0)) / 25.0
-    total = 0
-    saw_rate = False
-    for _fam, rate in (targets or {}).items():
-        if not isinstance(rate, (int, float)) or isinstance(rate, bool) or rate <= 0:
-            continue
-        saw_rate = True
-        total += min(int(n_beats), int(round(float(rate) * dur_25)))
-    return bool(saw_rate) and total <= 0
 
 
-def spec_shortfall(targets, ruled, n_beats, dur_s):
-    """Which families fall below the spec's own floor, and by how much.
-
-    PURE AND MODULE-LEVEL so it can be tested without a container — the same
-    reason pack_reel and remap_words are. It was inline in the dispatch, and a
-    smoke could only REPLAY it: I wrote a local copy of the arithmetic, mutated
-    the shipped code, and the test stayed green because it was never reading the
-    shipped code at all. Two mutations passed that way before this refactor.
-
-    A GRADING INSTRUMENT, NOT A FLOOR (ruling, 2026-09-07). This answers
-    "is the result in the plausible range?" AFTER the fact. It is ledgered and
-    reported; it refuses nothing, fails no round, and never reaches the agent.
-    The `reasons` parameter is gone with the demand — an excuse channel needs
-    something to be excused from.
-
-    CAPPED AT THE BEAT COUNT. A rate is per-25s and a source has a fixed number
-    of beats; one family lands at most once per beat. text=10/25s over 38.5s
-    implies 15, and on an 11-beat source that is unreachable by construction.
-    """
-    dur_25 = max(0.001, float(dur_s or 0)) / 25.0
-    out = {}
-    for fam, rate in (targets or {}).items():
-        if not isinstance(rate, (int, float)) or isinstance(rate, bool) or rate <= 0:
-            continue
-        # NO max(1, ...) FLOOR. A rate is a rate: 0.2/25s over a 20s source is
-        # 0.16 placements, and the correct answer is ZERO. Forcing it to one made
-        # the gate invent work the brief never asked for — "subtle overlays only"
-        # became "at least one overlay", and screen_recording spent rounds 19-21
-        # declining a target it should never have been given, with per-beat
-        # reasoning that was sound every time ("stillness provides visual rest;
-        # no text needed").
-        #
-        # It also made accept_shortfall a ROUTINE exit rather than the exception
-        # it was meant to be: the agent had to argue its way out of a demand the
-        # arithmetic invented.
-        #
-        # The over direction is unaffected and gets sharper — a family placed 3
-        # times against an implied 0 is still caught, and now the 0 is real.
-        implied = min(int(n_beats), int(round(float(rate) * dur_25)))
-        have = int((ruled or {}).get(fam, 0))
-        # A MIX, NOT A FLOOR PER FAMILY. set_spec resolves a DISTRIBUTION, and a
-        # run that places three zooms against an implied 1 while placing zero
-        # text against an implied 3 has satisfied neither — it is over on one
-        # and absent on the other, and both are misses of the same spec.
-        #
-        # MEASURED, round 20: four of five fixtures came back [zoom=3],
-        # [sfx=2 zoom=3], [zoom=1], [zoom=1] — every no-speech fixture placing
-        # one family and calling it an edit, with every gate green, because
-        # only the UNDER direction was ever checked.
-        #
-        # UNDER stays exactly as strict as it shipped: any unexplained gap at
-        # all. My first pass at adding the OVER direction also introduced a
-        # "one off is not a miss" tolerance, which quietly LOOSENED a check that
-        # was already RED-proven — adding a direction is not a licence to widen
-        # the one that worked, and a run one short of every family would have
-        # passed.
-        #
-        # OVER needs a threshold because it has no natural zero: placing one
-        # more than implied is rounding, not a miss. Two or more is the run
-        # substituting the family it finds easy for the one the brief asked for.
-        gap = implied - have
-        over = have - implied
-        if gap >= 1:
-            direction = 'absent' if have == 0 else 'under'
-        elif over >= 2:
-            direction = 'over'
-        else:
-            continue
-        out[fam] = {"target_per_25s": float(rate),
-                    "implied_over_%.1fs" % float(dur_s or 0): implied,
-                    "implied": implied, "ruled": have,
-                    "direction": direction,
-                    # kept for the existing consumers; negative means overshoot
-                    "still_unexplained": gap}
-    return out
 
 
 
@@ -11949,7 +11826,11 @@ _REQUIRED_PROMPT_BLOCKS = {
     "the four-step flow": "FOUR STEPS, NOT FOURTEEN",
     "non-derivable list": "WHAT ONLY YOU CAN DECIDE",
     "no-orchestration rule": "Do not orchestrate",
-    "soft-modifier rule": "SOFT MODIFIERS ARE QUANTITIES",
+    # ANCHORED ON WHAT THE BLOCK MUST SAY, not its old headline. It read
+    # "SOFT MODIFIERS ARE QUANTITIES" — the exact words removed when density
+    # stopped being the agent's arithmetic. The block is still load-bearing and
+    # still there; what it must carry is that "few" means FEWER, never none.
+    "soft-modifier rule": "They do not mean none",
     # Registered the day it was written. screen_recording came back a
     # PASSTHROUGH in rounds 8 AND 9 — kept 1.0, zero placements — with all four
     # beats ruled `none` for "no transcript to ground any overlay text in",
@@ -17423,89 +17304,27 @@ def edit(source_key: str, brief: str,
                 # the round collector can sum the aggregate families across
                 # fixtures — the only scale at which a sub-unit rate means
                 # anything.
-                _full_t = ((led.get("spec") or {}).get("targets") or {})
-                led["rate_regimes"] = family_regimes(_full_t, _src_dur)
-                _per_run_fams = {f for f, d in led["rate_regimes"].items()
-                                 if d["regime"] == REGIME_PER_RUN}
-                # PER-RUN SCORING TOUCHES PER-RUN FAMILIES ONLY. Round 25 fired
-                # 'zoom over' on one fixture and 'zoom under' on another in the
-                # same round; both were quantisation, not behaviour. zoom needs
-                # a 178.6s source to be within 20% of 0.35/25s and production's
-                # longest job is 180.0s, so no per-run verdict on it can mean
-                # anything. It is scored across the round instead.
-                _spec_t = {k: v for k, v in _full_t.items()
-                           if str(k) in _per_run_fams}
-                # ONE CALL to the pure function. This arithmetic used to be
-                # inline here, which meant its smoke could only replay a copy of
-                # it — and a replay stays green no matter what the shipped code
-                # does. Two mutations passed that way.
-                _ruled_by_fam = {}
-                for _f6 in list(_spec_t):
-                    if _f6 == "sfx":
-                        _ruled_by_fam[_f6] = sum(
-                            1 for v in led["beat_verdicts"]
-                            if str(v.get("sfx", "no")).lower() == "yes")
-                    elif _f6 == "cut":
-                        _ruled_by_fam[_f6] = sum(
-                            1 for v in led["beat_verdicts"]
-                            if str(v.get("cut", "keep")).lower() == "cut")
-                    else:
-                        _ruled_by_fam[_f6] = sum(
-                            1 for v in led["beat_verdicts"]
-                            if _f6 in [str(t).lower()
-                                       for t in (v.get("treatment") or [])])
-                _short = spec_shortfall(_spec_t, _ruled_by_fam,
-                                        len(_beats), _src_dur)
-                # A SPEC THAT ASKS FOR NOTHING CANNOT BE MISSED. Recorded here
-                # because this is where the targets, the beat count and the
-                # source duration are all in scope; read at end of run by
-                # _contract_violations, so it cannot be dodged by call ordering
-                # the way the shortfall escalation was.
-                # THE FULL TARGET SET, NOT THE SHORTFALL-FILTERED ONE.
+                # ── DENSITY GRADING RETIRED WITH THE FIELD IT GRADED ────
+                # `spec.targets` was five per-25s numbers the AGENT derived,
+                # and turn 1 spent 14,611 of the run's 15,891 output tokens
+                # deriving them — against 1,051 for all fourteen actual
+                # rulings. Everything that read them only GRADED: the code
+                # said so outright — "Both are retired by the ruling
+                # (2026-09-07): the reference rates are a grading instrument,
+                # not a bar ... Neither refuses anything." No feedback path to
+                # the agent, no repair prompt, no refusal. So a self-set bar
+                # cost more than every decision in the run and changed no
+                # placement.
                 #
-                # `_spec_t` has the ACCEPTED families removed — correct for the
-                # shortfall computation (an excused family must not be reported
-                # short again) and wrong for this question. Round 25 caught it
-                # on its first run: music and screen_recording both accepted a
-                # shortfall on `cut`, so cut left `_spec_t`, the remaining rates
-                # (zoom 0.4, sfx 0.2 / text 0.5, zoom 0.2) implied zero over a
-                # 20s source, and the check fired on two specs that HAD asked
-                # for cuts. Two false positives out of three firings.
-                #
-                # "Did the agent set a bar it can fail?" is a question about the
-                # bar it SET, not about what is left after it excuses parts of
-                # it — and accepting a shortfall on a family is itself proof
-                # that family carried a target. Same family of mistake as the
-                # collector reading a filtered view of the producer's verdict.
-                # EVALUATED OVER IN-SCOPE FAMILIES ONLY. Predicted before
-                # building it: judging "did the spec ask for anything?" over
-                # families that CANNOT be asked for at this duration would fire
-                # on correct behaviour, which is how a check gets switched off.
-                # A spec is empty when nothing it set is per-run scoreable here
-                # AND nothing rolls to the aggregate either.
-                _scoped_t = {f: d["rate"] for f, d in led["rate_regimes"].items()
-                             if d["regime"] != REGIME_OUT_OF_SCOPE}
-                led["spec_implies_nothing"] = spec_implies_nothing(
-                    _scoped_t, len(_beats), _src_dur)
-                # THE ASK-ONCE BOUND GOES WITH THE ASK. It existed so a
-                # satisfiable shortfall was not reported to the agent forever;
-                # nothing is reported to the agent now, so there is nothing to
-                # bound. The shortfall is still computed and ledgered below —
-                # that is the grading half, and it was never the problem.
-
-                # THE GRADE REFLECTS THE LATEST RULING, so an empty
-                # shortfall clears a stale one. This pop used to be the bug
-                # rather than the bookkeeping: asking and recording were the
-                # same variable, so the bound erased the record it was bounding
-                # — the agent was told once, shortfall_told filled, the next
-                # rule_all_beats took this else branch, and the CONTRACT failure
-                # that read the record could never fire (round 19). Both the
-                # ask and that failure are retired; what is left is a grade
-                # being kept current.
-                if _short:
-                    led["spec_shortfall"] = _short
-                else:
-                    led.pop("spec_shortfall", None)
+                # `rate_regimes`, `spec_shortfall` and `spec_implies_nothing`
+                # all graded against that invented number and go with it.
+                # `resolve_targets` — the corpus fallback that would have made
+                # the agent's numbers optional — had ZERO call sites and was
+                # never wired, so nothing is losing a live path here. The
+                # corpus constants stay; if density grading is wanted again it
+                # grades against THEM, not against a number the thing being
+                # graded made up.
+                led.pop("spec_shortfall", None)
                 # THE RATE IS NOT ASKED OF THE AGENT. This told it "your own
                 # spec set these rates and your rulings do not reach them —
                 # rule more beats for those families", which is the rubric
