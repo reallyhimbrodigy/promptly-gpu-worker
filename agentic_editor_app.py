@@ -12213,6 +12213,13 @@ def edit(source_key: str, brief: str,
     def _control_composite(before, dur_s):
         """(path or None) — `before` composited with an EMPTY layer.
 
+        SKIPPED ENTIRELY ON A PLAN-ONLY RUN. This is the CONTROL ARM for
+        measuring whether the alpha layer changed anything — and on a plan-only
+        run the alpha layer never renders, so it is 11.17s of compositing to
+        support a comparison that does not happen. Measured on the first
+        plan-only run, where it was the ONLY build left and 7.3% of the wall.
+        An instrument whose subject is absent is not a measurement.
+
         THE PRICE, CORRECTED BY THE SECOND MEASUREMENT. I quoted 2.1-3.2% of
         wall from composite_captions, then 3.6% from round 60's single
         composite. Round 61 ran TWO — text/caption's input and card's are
@@ -12229,6 +12236,8 @@ def edit(source_key: str, brief: str,
 
         Failure is LOUD and falls back to the window control rather than
         silently leaving the family unmeasurable."""
+        if plan_only:
+            return None
         _key = str(before)
         if _key in _ctrl_cache:
             return _ctrl_cache[_key]
@@ -16720,6 +16729,19 @@ def edit(source_key: str, brief: str,
                     "sequence, each writing an intermediate file, and verify as "
                     "you go."}]})
                 continue
+            # A PLAN-ONLY RUN HAS NO out.mp4 BY DESIGN, so this failure fires
+            # on correct behaviour — a check whose precondition the path never
+            # satisfies, exactly like offering `inspect_output` here. The
+            # deliverable on this path is the RULING, so that is what is
+            # checked: an agent that stopped having ruled nothing is still a
+            # failure, and says which.
+            if plan_only:
+                if not (led.get("beat_verdicts") or []):
+                    fail("agent_stopped_without_rulings",
+                         f"turn {it + 1}/{max_iters}: plan-only, and it stopped "
+                         f"with no beat_verdicts. stop_reason={_sr!r}, "
+                         f"text={(texts or '')[:300]!r}")
+                break
             if not os.path.exists("/work/out.mp4"):
                 fail("agent_stopped_without_output",
                      f"turn {it + 1}/{max_iters}: no tool_use and no /work/out.mp4. "
@@ -18830,6 +18852,15 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     from require_detach import require_detach
     require_detach("a full pipeline run")
     _out_key, _src_url, _out_url = out_key, src_url, out_url
+    # A PLAN-ONLY RUN PRODUCES NO ARTIFACT, so demanding an upload URL for it
+    # is the same shape as offering `inspect_output` on a path with no file: a
+    # precondition this path never satisfies, failing for a reason that has
+    # nothing to do with the work. The source is still required — there is
+    # nothing to rule on without it.
+    if plan_only and _src_url:
+        _out_url = _out_url or "plan-only://no-artifact"
+        _out_key = _out_key or "plan-only/no-artifact"
+        print("  PLAN ONLY       : no artifact, so no upload URL is minted")
     if not (_src_url and _out_url and _out_key):
         try:
             import boto3 as _b3
