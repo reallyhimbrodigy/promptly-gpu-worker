@@ -1191,7 +1191,21 @@ def verify_hops_3_and_4(tok, stage, plan):
             by_frame.setdefault(f, []).append(it)
 
     def _pick(row):
-        """The item at this row's frame whose ASSET is the one the plan named."""
+        """The item at this row's frame whose ASSET is the one the plan named.
+
+        AUDIO BY CONTAINMENT, NOT BY START. `fromFrame` is an ANCHOR: edit_item
+        shifts the item so the sound's anchor lands there, so a vine-boom
+        anchored at 526 is an item starting at 518 and no item starts at the
+        row's frame at all. Hop 3 learned this; this picker had not, so hop 4
+        reported 'no item at frame 526 to carry it' for a sound that was on the
+        timeline. The same semantics, biting a third reader.
+        """
+        if row["type"] == "audio":
+            return next((it for it in items
+                         if it.get("itemType") == "audio"
+                         and (it.get("timelineRange") or {}).get("fromFrame", 0)
+                         <= row["from"] <
+                         (it.get("timelineRange") or {}).get("toFrame", 0)), None)
         cands = by_frame.get(row["from"]) or []
         if len(cands) == 1:
             return cands[0]
@@ -1604,6 +1618,19 @@ def verify_hop6_clear(plan, source="/work/source.mp4"):
         t1 = (r["from"] + (r["dur"] or 0)) / 30.0
         occ = fb.face_occupied_bands(traj, t0, t1)
         b = vc.band_of(r, meas)
+        # THE CAPTION TRACK IS AN OCCUPANT, NOT A PLACEE. production's
+        # `_caption_occupied_bands` exists so OTHER graphics avoid where our
+        # captions land — the caption track itself goes where its style puts
+        # it, and is never repositioned around the speaker. Judging it by the
+        # face rule would condemn every captioned edit on this surface, which
+        # is the shape of a check that rejects a correct implementation. It is
+        # still checked for PIXEL overlap against everything else by hop 5.
+        if "caption" in (r.get("asset") or ""):
+            out["detail"].append(
+                "slot%-3s band %.3f-%.3f  the caption track — an occupant "
+                "others avoid, not a placement judged against the face"
+                % (r["slot"], b[0], b[1]))
+            continue
         # IN BAND NAMES. A placement intrudes when a band it MEANINGFULLY
         # occupies is one the face or the source's text also owns — not when
         # its edge touches the seam between two bands.
