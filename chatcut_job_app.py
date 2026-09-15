@@ -1066,9 +1066,32 @@ def _mcp_call(tok, name, args, expect=None):
                 break
             except Exception:                                     # noqa: BLE001
                 continue
+    # EVERY BLOCK, NOT JUST THE JSON ONE. Looked at rather than guessed:
+    #   preview_timeline returns a JSON block AND a separate resource_link
+    #     block carrying the frame URL — the URL is not in the JSON at all,
+    #     which is why four different walkers found nothing and HOP 5 kept
+    #     reporting the composition unrenderable.
+    #   inspect_item returns PLAIN TEXT, not JSON — a formatted report whose
+    #     `propertyOverrides: {...}` line is a string. Walking it for a
+    #     `propertyOverrides` KEY could never succeed, which is why HOP 4 said
+    #     the card carried none of its four overrides while inspect_item was
+    #     printing all four marked `(override)`.
+    # So the envelope always travels with the raw text and any links beside it.
+    _blocks = out.get("content") or []
+    _text = "".join(c.get("text") or "" for c in _blocks if isinstance(c, dict))
+    _links = [c.get("uri") for c in _blocks
+              if isinstance(c, dict) and isinstance(c.get("uri"), str)]
+    _links += [c["resource"]["uri"] for c in _blocks
+               if isinstance(c, dict) and isinstance(c.get("resource"), dict)
+               and isinstance(c["resource"].get("uri"), str)]
     if parsed is None and isinstance(out, dict) and (
             expect is None or expect in out):
         parsed = out
+    if parsed is None and (_text or _links):
+        parsed = {}
+    if isinstance(parsed, dict):
+        parsed.setdefault("_text", _text)
+        parsed.setdefault("_links", _links)
     if parsed is None or (expect is not None and expect not in parsed):
         raise RuntimeError(
             "%s returned nothing this reader could use%s. Keys seen: %s. "
@@ -1209,9 +1232,27 @@ def verify_hops_3_and_4(tok, stage, plan):
             det = _mcp_call(tok, "inspect_item",
                             {"projectId": pid,
                              "itemId": by_from[r["from"]]["id"]})
+            _po = _find_po(det, by_from[r["from"]]["id"])
+            if not _po:
+                # inspect_item is a TEXT report. Its own line is authoritative:
+                #   propertyOverrides: {"label":"…","value":5,…}
+                _m = re.search(r"propertyOverrides:\s*(\{.*?\})\s*$",
+                               str((det or {}).get("_text") or ""), re.M)
+                if _m:
+                    try:
+                        _po = json.loads(_m.group(1))
+                    except Exception:                             # noqa: BLE001
+                        _po = None
+            if _po is None:
+                res["hop4"] = {
+                    "state": "FAILED",
+                    "why": "could not read the overrides off the item at frame "
+                           "%s — inspect_item returned neither a JSON node nor "
+                           "a `propertyOverrides:` line, so this is UNCHECKED"
+                           % r["from"]}
+                return res
             by_from[r["from"]] = dict(by_from[r["from"]],
-                                      propertyOverrides=_find_po(
-                                          det, by_from[r["from"]]["id"]) or {})
+                                      propertyOverrides=_po)
         except Exception as e:                                    # noqa: BLE001
             res["hop4"] = {"state": "FAILED",
                            "why": "could not inspect the item at frame %s: %s"
@@ -1327,7 +1368,7 @@ def verify_hop5_composition(tok, stage, plan, items):
         pv = _mcp_call(tok, "preview_timeline",
                        {"projectId": pid, "views": ["viewer"],
                         "viewerFrames": [best]})
-        uris = []
+        uris = list(pv.get("_links") or []) if isinstance(pv, dict) else []
 
         def walk(o):
             # ANY http STRING, not only the two keys I guessed. The response
