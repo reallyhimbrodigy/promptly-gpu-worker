@@ -16632,6 +16632,35 @@ def edit(source_key: str, brief: str,
             _pm["out"] += getattr(u, "output_tokens", 0) or 0
             _pm["cache_read"] += getattr(u, "cache_read_input_tokens", 0) or 0
             _pm["cache_write"] += getattr(u, "cache_creation_input_tokens", 0) or 0
+        # ── WHAT THE TOKENS WERE, NOT JUST HOW MANY ────────────────────────
+        # Turn 1 produces 10,485 output tokens and the WHOLE RUN's tool JSON is
+        # 2,538 bytes — about 635 tokens. So ~94% of the turn never leaves the
+        # model as content, and nothing here could say what it was: there is no
+        # capture of thinking blocks anywhere in this file. "It is reasoning"
+        # was an inference from a subtraction, which is the same shape as
+        # inferring seconds from a generation rate nobody recorded.
+        #
+        # A census of the BLOCK TYPES answers it as a measurement. Sizes only —
+        # the reasoning text itself is not persisted, because a ledger is read
+        # by people and a verbatim chain-of-thought in it is a liability, not a
+        # diagnostic.
+        _blocks = {}
+        for _c in r.content:
+            _bt = getattr(_c, "type", "?")
+            _n = 0
+            if _bt == "text":
+                _n = len(getattr(_c, "text", "") or "")
+            elif _bt == "thinking":
+                _n = len(getattr(_c, "thinking", "") or "")
+            elif _bt == "tool_use":
+                try:
+                    _n = len(json.dumps(getattr(_c, "input", {}) or {}))
+                except Exception:                                 # noqa: BLE001
+                    _n = 0
+            _b = _blocks.setdefault(_bt, {"n": 0, "chars": 0})
+            _b["n"] += 1
+            _b["chars"] += _n
+        led.setdefault("blocks_by_turn", []).append(_blocks)
         msgs.append({"role": "assistant", "content": r.content})
         tool_uses = [c for c in r.content if getattr(c, "type", "") == "tool_use"]
         # PER-TURN CACHE, not just per-run. cache_write was 74% of a run's cost
@@ -19091,6 +19120,23 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
             print("     turn %d  %7.2fs  %5.1f%%  out=%-7s %s"
                   % (_i + 1, _sec, 100 * _sec / _tt,
                      _out if _out is not None else "?", _tools))
+        _bb = (r.get("ledger") or {}).get("blocks_by_turn") or []
+        if _bb:
+            print("     -- what those tokens WERE, by block --")
+            for _i, _blk in enumerate(_bb):
+                _parts = ", ".join(
+                    "%s %d chars" % (k, v["chars"])
+                    for k, v in sorted(_blk.items(), key=lambda kv: -kv[1]["chars"]))
+                _think = (_blk.get("thinking") or {}).get("chars", 0)
+                _vis = sum(v["chars"] for k, v in _blk.items() if k != "thinking")
+                print("     turn %d  %s%s"
+                      % (_i + 1, _parts,
+                         "   <- %.0f%% reasoning" % (100.0 * _think /
+                                                     max(1, _think + _vis))
+                         if _think else ""))
+            if not any("thinking" in b for b in _bb):
+                print("     (no thinking blocks returned — the tokens are in "
+                      "the visible blocks, or the API returned none)")
         _peak = max(range(len(_ts)), key=lambda i: _ts[i])
         print("     PEAK: turn %d at %.0f%% of model time — %s"
               % (_peak + 1, 100 * _ts[_peak] / _tt,
