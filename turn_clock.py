@@ -125,7 +125,8 @@ class CpuSampler(threading.Thread):
         self._stop = True
 
 
-def run_timed(cmd, cwd, stream_path, timing_path, timeout, env=None):
+def run_timed(cmd, cwd, stream_path, timing_path, timeout, env=None,
+              stdin_first=None, on_event=None):
     """Run the agent, stamping EVERY stream line the moment it arrives.
 
     `subprocess.run` returns one buffer at the end, so every arrival time is
@@ -139,10 +140,52 @@ def run_timed(cmd, cwd, stream_path, timing_path, timeout, env=None):
     events = []
     _env = dict(os.environ)
     _env.update(env or {})
+    # STDIN STAYS OPEN when the harness is driving the conversation. The agent
+    # is no longer handed one prompt and left alone: the source sheet arrives
+    # as PIXELS in the first message, and the review sheet as pixels in a
+    # SECOND message the harness sends once the placements exist. Those two
+    # messages remove five agent turns — a Read of the source sheet, and the
+    # preview/curl/tile/Read the review used to cost — because the harness can
+    # do all of it without spending a model turn.
     p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE,
-                         stderr=subprocess.PIPE, text=True, bufsize=1,
-                         env=_env)
+                         stderr=subprocess.PIPE,
+                         stdin=subprocess.PIPE if stdin_first else None,
+                         text=True, bufsize=1, env=_env)
     killed = False
+    _stdin_open = [bool(stdin_first)]
+
+    def _send(msg):
+        """Write another user message into the running conversation."""
+        if not _stdin_open[0]:
+            return False
+        try:
+            p.stdin.write(json.dumps(msg) + "\n")
+            p.stdin.flush()
+            return True
+        except Exception:                                         # noqa: BLE001
+            return False
+
+    def _close_stdin():
+        """Tell the agent no more input is coming, so it can finish.
+
+        WITHOUT THIS IT HANGS. stream-json input ends at EOF; a stdin left open
+        after the last message is a agent waiting for a turn that never
+        arrives, which looks exactly like a slow model.
+        """
+        if _stdin_open[0]:
+            _stdin_open[0] = False
+            try:
+                p.stdin.close()
+            except Exception:                                     # noqa: BLE001
+                pass
+
+    if stdin_first:
+        try:
+            p.stdin.write(stdin_first if stdin_first.endswith("\n")
+                          else stdin_first + "\n")
+            p.stdin.flush()
+        except Exception:                                         # noqa: BLE001
+            _close_stdin()
 
     # DRAIN STDERR CONCURRENTLY OR THE RUN CAN DEADLOCK. With stderr=PIPE and
     # nobody reading it, a chatty child fills the 64K pipe buffer and blocks on
@@ -176,6 +219,14 @@ def run_timed(cmd, cwd, stream_path, timing_path, timeout, env=None):
                 ev = json.loads(s)
             except Exception:                                     # noqa: BLE001
                 continue
+            if on_event is not None:
+                try:
+                    on_event(ev, _send, _close_stdin)
+                except Exception:                                 # noqa: BLE001
+                    # A DRIVER FAULT MUST NOT HANG THE RUN. If the injection
+                    # raises, stop driving and let the agent finish on its own
+                    # rather than waiting forever on a stdin nobody will close.
+                    _close_stdin()
             rec = {"t": t, "type": ev.get("type")}
             if ev.get("type") == "stream_event":
                 inner = ev.get("event") or {}

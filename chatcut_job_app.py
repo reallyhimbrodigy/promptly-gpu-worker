@@ -17,6 +17,7 @@ into a harness. That is the whole point of the rewrite: they are what makes the
 agent edit like the references instead of generically, and a harness that
 re-encodes them as rules loses exactly the thing that took the week.
 """
+import base64
 import json
 import math
 import os
@@ -1049,11 +1050,13 @@ TWO_TURN_LOOP = (
     "so a batch that fails tells you something a half-built timeline never "
     "can. Do not place them one at a time to watch them land, and do not "
     "collapse the plan's calls into one.\n\n"
-    "  TURN 2 — LOOK, THEN FIX IN ONE BATCH. Call preview_timeline with "
-    "viewerFrameCount, DOWNLOAD the frames and READ them as images (see the "
-    "two-step rule below), and judge the COMPOSED PICTURE — not the tool "
-    "results, which cannot show you a collision. Then make every correction in "
-    "one more edit_item call. Spend this turn only on what the frames show: "
+    "  TURN 2 — THE REVIEW SHEET IS SENT TO YOU. As soon as your placements "
+    "land, the harness fetches the composed frames at the settled moments the "
+    "plan named, tiles them, and sends them as an image. You do not call "
+    "preview_timeline, you do not curl anything and you do not read a file — "
+    "you LOOK at the picture you are given and judge the COMPOSED RESULT, not "
+    "the tool results, which cannot show you a collision. Then make every "
+    "correction in one more edit_item call. Spend this turn only on what the frames show: "
     "something illegible, something colliding, something off-frame, something "
     "landing on the wrong moment. Not on taste. If the frames are right, skip "
     "the turn and export — a revision you cannot justify from a frame is a "
@@ -1069,8 +1072,9 @@ TWO_TURN_LOOP = (
     "timeline.\n\n")
 
 SHEET_RULE = (
-    "BEFORE YOU PLACE ANYTHING, read the image /work/source_sheet.png — a "
-    "20-frame contact sheet of the whole source. THE PLAN CANNOT SEE THE "
+    "THE FIRST IMAGE IN THIS MESSAGE is a 20-frame contact sheet of the whole "
+    "source. You already have it — there is nothing to open and no file to "
+    "read. LOOK AT IT BEFORE YOU PLACE ANYTHING. THE PLAN CANNOT SEE THE "
     "FOOTAGE: it is derived from the transcript, so it does not know what is "
     "already BURNED INTO the frame. If the source already shows the words a "
     "title would add, say so and skip that placement rather than printing the "
@@ -1794,6 +1798,88 @@ def verify_hop7_sync(tok, stage, shape):
     return out
 
 
+def _sheet_message(text, image_path=None, media="image/jpeg"):
+    """A stream-json user message carrying TEXT and, when given, PIXELS.
+
+    PROVEN BEFORE IT WAS BUILT ON: an image passed this way is read by the
+    model with ZERO tool calls and the whole exchange is one turn. The old
+    shape — write the sheet to /work and tell the agent to Read it — spent a
+    turn getting pixels the harness already had in memory.
+    """
+    content = []
+    if image_path and os.path.exists(image_path):
+        with open(image_path, "rb") as fh:
+            content.append({"type": "image",
+                            "source": {"type": "base64", "media_type": media,
+                                       "data": base64.b64encode(
+                                           fh.read()).decode()}})
+    content.append({"type": "text", "text": text})
+    return {"type": "user", "message": {"role": "user", "content": content}}
+
+
+def _review_sheet(tok, pid, frames, out="/work/review.jpg"):
+    """Fetch the composed frames the plan named and tile them into ONE image.
+
+    THE HARNESS DOES WHAT COST FOUR AGENT TURNS. preview_timeline, a curl per
+    frame, an ffmpeg tile and a Read was four turns to look once; none of it is
+    a decision, and the model was only ever needed for the LOOKING. Returns the
+    path, or None with the reason printed — a review that could not be built
+    must not read as a review that found nothing.
+    """
+    try:
+        pv = _mcp_call(tok, "preview_timeline",
+                       {"projectId": pid, "views": ["viewer"],
+                        "viewerFrames": list(frames)[:9]})
+        uris = list(pv.get("_links") or [])
+        if not uris:
+            print("  REVIEW SHEET    : ABSENT  the viewer returned no frame "
+                  "links (keys %s)" % sorted(pv)[:8], flush=True)
+            return None
+        import urllib.request as _u
+        os.makedirs("/work/rev", exist_ok=True)
+        got = []
+        for i, u in enumerate(uris):
+            fp = "/work/rev/f%02d.jpg" % i
+            try:
+                with _u.urlopen(u, timeout=180) as r, open(fp, "wb") as fh:
+                    fh.write(r.read())
+                if os.path.getsize(fp) > 2000:
+                    got.append(fp)
+            except Exception:                                     # noqa: BLE001
+                continue
+        if not got:
+            print("  REVIEW SHEET    : ABSENT  no frame downloaded", flush=True)
+            return None
+        args = ["ffmpeg", "-v", "error", "-y"]
+        for fp in got:
+            args += ["-i", fp]
+        n = len(got)
+        # BUILT EXPLICITLY. `A + B + C if n > 1 else D` binds the ternary to
+        # the WHOLE concatenation, so the one-frame case silently dropped the
+        # scale — a precedence trap that would have produced a full-size single
+        # tile and looked fine until a plan named one review frame.
+        _scale = "".join("[%d]scale=360:-1[s%d];" % (i, i) for i in range(n))
+        if n > 1:
+            _fc = _scale + "".join("[s%d]" % i for i in range(n)) \
+                + "hstack=inputs=%d" % n
+        else:
+            _fc = _scale + "[s0]null"
+        args += ["-filter_complex", _fc, "-frames:v", "1", out]
+        if subprocess.run(args, capture_output=True,
+                          timeout=300).returncode != 0 or \
+                not os.path.exists(out):
+            print("  REVIEW SHEET    : FAILED  the tile did not build",
+                  flush=True)
+            return None
+        print("  REVIEW SHEET    : MEASURED  %d frame(s) tiled into %s (%d KB)"
+              % (n, out, os.path.getsize(out) // 1024), flush=True)
+        return out
+    except Exception as e:                                        # noqa: BLE001
+        print("  REVIEW SHEET    : FAILED  %s: %s" % (type(e).__name__, e),
+              flush=True)
+        return None
+
+
 def build_system_prompt():
     """The craft, in the session's context instead of on its to-do list."""
     parts = [CRAFT_CONTEXT, "\n\n===== THE CRAFT DOCUMENTS =====\n"]
@@ -2166,8 +2252,15 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     _q_state, _q = turn_clock.cpu_quota()
     print("  CPU QUOTA       : %s  cores=%s  os.cpu_count=%s"
           % (_q_state, _q, os.cpu_count()), flush=True)
+    # THE SOURCE SHEET IS AN IMAGE IN THE FIRST MESSAGE, not a file to Read.
+    _sheet_src = "/work/source_sheet.png" \
+        if os.path.exists("/work/source_sheet.png") else None
+    print("  SOURCE SHEET    : %s"
+          % ("in the prompt as pixels" if _sheet_src else
+             "ABSENT — the agent will have nothing to look at"), flush=True)
     _cmd = (
-        ["claude", "-p", prompt,
+        ["claude", "-p",
+         "--input-format", "stream-json",
          "--append-system-prompt-file", "/work/system.md",
          *(["--agents", json.dumps(agents)] if use_hands else []),
          # STREAM-JSON, because `json` returns only the final result and the
@@ -2212,9 +2305,53 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     print("  THINKING CAP    : %s"
           % (f"MAX_THINKING_TOKENS={think_tokens}" if think_tokens
              else "UNCAPPED (default)"), flush=True)
+    # ── THE HARNESS DRIVES THE CONVERSATION ─────────────────────────────────
+    # Two user messages, both carrying PIXELS the harness already has:
+    #   1. the plan, with the SOURCE contact sheet as an image
+    #   2. after the placements land, the REVIEW sheet as an image
+    # Between them that removes five agent turns — a Read of the source sheet,
+    # and the preview/curl/tile/Read the review used to cost — because none of
+    # it is a decision. The model is needed for the LOOKING, not the fetching.
+    sys.path.insert(0, "/root")
+    import verify_chain as _vc_f
+    _frames = _vc_f.settled_frames(plan or "")
+    _state = {"edits": 0, "sent": False}
+
+    def _drive(ev, send, close):
+        """Inject the review sheet once the placements exist, then close."""
+        if _state["sent"] or ev.get("type") != "assistant":
+            return
+        for b2 in ((ev.get("message") or {}).get("content") or []):
+            if b2.get("type") == "tool_use" and \
+                    str(b2.get("name") or "").endswith("edit_item"):
+                _state["edits"] += 1
+        # the plan names two calls: the items, then the effect.
+        if _state["edits"] < 2 or not _stage:
+            return
+        _state["sent"] = True
+        _sheet = _review_sheet(tok, _stage["projectId"], _frames)
+        if _sheet:
+            send(_sheet_message(
+                "Here are the composed frames at the settled moments the plan "
+                "named (%s), left to right. This is your review — look at it "
+                "and judge the COMPOSED PICTURE. If something is illegible, "
+                "colliding, off-frame or on the wrong moment, fix it in ONE "
+                "edit_item call. If the frames are right, submit the export. "
+                "Do not call preview_timeline; you already have the frames."
+                % ", ".join(str(f) for f in _frames[:9]), _sheet))
+        else:
+            send(_sheet_message(
+                "The review sheet could not be built, so you have NOT been "
+                "shown the composed frames. Fetch them yourself with "
+                "preview_timeline at frames %s before you export."
+                % ", ".join(str(f) for f in _frames[:9])))
+        close()
+
     _rc, _errtxt, _wall, _killed = turn_clock.run_timed(
         _cmd, "/work", "/work/stream.jsonl", "/work/timing.json", 1500,
-        env=_env)
+        env=_env,
+        stdin_first=json.dumps(_sheet_message(prompt, _sheet_src)),
+        on_event=_drive)
     mark("agent")
 
     class _R:
@@ -2249,13 +2386,23 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     # pass, whatever it rendered — because that is exactly the run that kept
     # the dead tail and exited 0.
     _calls = (shape or {}).get("calls") or []
-    _saw_sheet = any("source_sheet" in (c.get("in") or "") for c in _calls)
+    # THE SHEET IS DELIVERED, NOT FETCHED. It now arrives as pixels in the
+    # first message, so a Read of source_sheet.png is exactly what should NOT
+    # happen — keying the check on that call would report FAILED on the run
+    # that fixed it. What must hold is that the harness HANDED IT OVER.
+    _saw_sheet = bool(_sheet_src) or any(
+        "source_sheet" in (c.get("in") or "") for c in _calls)
     _prev_i = [i for i, c in enumerate(_calls)
                if c["tool"].endswith("preview_timeline")]
     _exp_i = [i for i, c in enumerate(_calls)
               if c["tool"].endswith("submit_export")]
-    _looked_before_render = bool(_prev_i) and (
-        not _exp_i or min(_prev_i) < max(_exp_i))
+    # AND THE REVIEW IS DELIVERED TOO. The harness tiles the composed frames
+    # and sends them; a preview_timeline call by the AGENT is now the fallback
+    # path, not the expected one. What must hold is that the composed frames
+    # reached it before it exported — by either route.
+    _looked_before_render = (
+        bool(_state.get("sent")) and os.path.exists("/work/review.jpg")
+    ) or (bool(_prev_i) and (not _exp_i or min(_prev_i) < max(_exp_i)))
     # THE UNDER-DELIVERY GATE. Every adherence leg asked whether the agent
     # ADDED something ruled out; none asked whether it placed what was ruled IN.
     # A run that skips a placement is FASTER and passes everything: 153.8s,
