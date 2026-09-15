@@ -36,9 +36,18 @@ LEGS = [
                 and re.search(r"one at a time", s)
                 and re.search(r"BATCHES THE PLAN NAMES|SINGLE edit_item call"
                               r"|ONE BATCH", s))),
-    ("pass 1 ENDS after the placements, so the harness can send the edit",
-     lambda s: re.search(r"YOUR TURN ENDS|turn ends", s)
-     and re.search(r"[Dd]o not preview", s)),
+    # THIS ASSERTED A GAG THAT WAS DELIBERATELY REMOVED. It required "YOUR
+    # TURN ENDS ... do not preview" — bounding how often the agent could LOOK,
+    # which was a wall problem solved by taking away the thing that makes it an
+    # editor. Not a reader keyed to wording this time: a check encoding a
+    # DESIGN DECISION that was later reversed. That fails the same way and is
+    # harder to catch, because the check was right when it was written.
+    ("the edit is SENT to pass 1 — a head start, not a ration",
+     lambda s: re.search(r"RENDERED AND SENT TO YOU", s)
+     and re.search(r"HEAD START", s)),
+    ("and the agent may look wherever, as often as it needs",
+     lambda s: re.search(r"SCRUB WHEREVER YOU WANT", s)
+     and re.search(r"[Nn]obody is counting", s)),
     ("pass 2 is look-then-fix on the composed picture",
      lambda s: re.search(r"(TURN|PASS) 2", s)
      and "COMPOSED PICTURE" in s
@@ -72,9 +81,14 @@ if __name__ == "__main__":
         # batching leg was, for that moment, a check that could not fail.
         ("batching removed",
          SRC.replace("one at a time", "however you like")),
-        ("the turn-end instruction removed",
-         SRC.replace("THEN YOUR TURN ENDS", "THEN CARRY ON")
-            .replace("Do not preview", "Feel free to preview")),
+        # The mutations that matter now are the HEAD START and the SCRUB
+        # invitation — the turn-end gag they replaced is gone on purpose.
+        ("the head start removed",
+         SRC.replace("RENDERED AND SENT TO YOU", "yours to go and get")),
+        ("the scrub invitation removed",
+         SRC.replace("SCRUB WHEREVER YOU WANT", "get on with it")
+            .replace("Nobody is counting", "You get one look")
+            .replace("nobody is counting", "you get one look")),
     ]
     red_ok = True
     for label, mutated in reds:
