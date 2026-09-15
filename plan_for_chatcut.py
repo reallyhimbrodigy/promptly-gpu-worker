@@ -34,6 +34,7 @@ makes the agent convert, and a conversion it gets wrong is a placement on the
 wrong moment that every gate passes.
 """
 import json
+import re
 import sys
 
 FPS_DEFAULT = 30
@@ -132,6 +133,48 @@ FAMILY_MAP = {
             "catalogues and it is a taste call — it is not made here."),
     },
 }
+
+
+def _card_overrides(hero, label):
+    """`card_hero` -> StatCard's (value, suffix), or a named refusal.
+
+    THE CARD WAS LOST AT THE LAUNCHER. `titles_from` built the prestage payload
+    from five control fields and `card_hero`/`card_label` were not among them,
+    so a beat ruled text+card registered a TITLE-ONLY asset. The plan then told
+    the agent "the card and the title are ONE placement here — the component
+    carries both", which was a claim about an asset nobody had checked. The
+    accounting counted the card as emitted, the placement landed, the run went
+    green, and frames 534/560/580/600 of that graphic's window carry the title
+    and no card.
+
+    StatCard is registered, DRAWS (9.710% px), and is offered under exactly
+    this beat's condition — "WHEN A NUMBER LANDS". It takes `value` (a number),
+    `suffix` and `label`. So the card becomes its OWN placement rather than a
+    property of a component that has none.
+    """
+    h = str(hero or "").strip()
+    m = re.match(r"^\s*([£$€]?)\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(.*)$", h)
+    if not m:
+        return None, ("card_hero %r carries no number, and StatCard is a "
+                      "NUMBER card — `value` is numeric and the whole "
+                      "component is built to land on a figure. A card ruled "
+                      "on a beat with no figure is a ruling this surface "
+                      "cannot execute." % h)
+    pre, num, suf = m.group(1), m.group(2).replace(",", ""), m.group(3).strip()
+    val = float(num)
+    if val == int(val):
+        val = int(val)
+    ov = {"value": val, "label": str(label or "").strip()}
+    if suf:
+        ov["suffix"] = " " + suf
+    if pre:
+        ov["prefix"] = pre
+    # `decimals` is a REAL SURFACE LIMIT, recorded rather than papered over:
+    # StatCard rounds to whole numbers by default, so a fractional hero needs
+    # it set or the card shows a different figure than the speaker said.
+    if isinstance(val, float):
+        ov["decimals"] = len(num.split(".")[1])
+    return ov, None
 
 
 def _target_of(frame, seg_add):
@@ -551,11 +594,32 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
             if _t in tr:
                 _emitted[_t] = _emitted.get(_t, 0) + 1
         if "card" in tr:
-            L += [f"    THIS BEAT IS ALSO RULED `card`: {p.get('card_condition')!r}",
-                  f"      hero        : {p.get('card_hero')!r}",
-                  f"      label       : {p.get('card_label')!r}",
-                  f"    The card and the title are ONE placement here — the "
-                  f"component carries both.", ""]
+            # ITS OWN ADD. The house title component has no card properties —
+            # text, band, size, holdSeconds, textColor, accentColor and nothing
+            # else — so a card folded into it is a card that does not render.
+            _ov, _why = _card_overrides(p.get("card_hero"), p.get("card_label"))
+            if _why:
+                raise Incomplete(
+                    "the beat at %.2fs is ruled `card` and %s" % (p["src_t0"], _why))
+            _ci = _idx[0]
+            _idx[0] += 1
+            L += [f"    THIS BEAT IS ALSO RULED `card`: "
+                  f"{p.get('card_condition')!r} — a SECOND placement, in the "
+                  f"same window, on StatCard.",
+                  f"    CALL 1, adds[{_ci}]:",
+                  f"      type                   : motion-graphic",
+                  f"      assetId                : the StatCard assetId listed "
+                  f"in your instructions",
+                  f"      from                   : {f0}",
+                  f"      durationInFrames       : {f1 - f0}",
+                  f"      propertyOverrides      : {json.dumps(_ov)}",
+                  f"      (StatCard anchors CENTRE by default and the title "
+                  f"sits in the upper third, so they do not collide)",
+                  ""]
+            # reviewed at its own settled frame — StatCard counts IN over
+            # `enterFrames` (32 by default), so 8 frames in shows a half-counted
+            # number and reads as a defect.
+            _settle.append(min(f0 + 36, max(f0, (f0 + f1) // 2)))
     # ── ZOOM AND SFX ARE NOT GRAPHICS, AND WERE NEVER EMITTED AT ALL ──────
     # FAMILY_MAP carries a VERIFIED primitive for each: zoom is an effect ON a
     # clip (`builtin:zoom`, targetItemId), sfx is an audio item whose assetId
@@ -624,8 +688,10 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
                 raise Incomplete(
                     "a zoom is ruled at source %.2fs, which the cut REMOVED."
                     % q["src_t0"])
-            _gi = _idx[0]
-            _idx[0] += 1
+            # THE EFFECT DOES NOT CONSUME A CALL 1 SLOT. It has its own
+            # counter because it is sent in its own call; taking one from the
+            # shared counter left a hole in CALL 1's index space and pushed the
+            # caption to adds[12] of an 11-element array.
             L += ["  CALL 2, adds[%d]:" % _zi,
                   "    type                   : effect",
                   "    assetId                : builtin:zoom",
@@ -753,7 +819,7 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
               "\"BEING A\" white over",
               "  \"CONTENT\" in its gold accent, its own drop shadow intact.",
               "",
-              "  edit_item adds[%d]:" % _gi,
+              "  CALL 1, adds[%d]:" % _gi,
               "    type                   : motion-graphic",
               "    assetId                : the `caption:%s` assetId listed in "
               "your instructions" % _cstyle,

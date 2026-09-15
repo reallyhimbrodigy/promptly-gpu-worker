@@ -74,8 +74,8 @@ def legs():
     # reader today to be wrong about correct text: anchor to the whole line.
     n_adds = len(re.findall(r"^[ \t]*CALL \d+, adds\[\d+\]:[ \t]*$", t, re.M))
     # 1 video + 3 graphics + 1 zoom + 1 sfx = 6
-    if n_adds != 6:
-        bad.append("expected 6 adds (1 video, 3 graphics, 1 zoom, 1 sfx), got %d"
+    if n_adds != 7:
+        bad.append("expected 7 adds (1 video, 3 graphics, 1 CARD, 1 zoom, 1 sfx), got %d"
                    % n_adds)
     for want in ("THE ZOOMS", "SOUND EFFECTS", "builtin:zoom",
                  "library:sound:"):

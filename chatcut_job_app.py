@@ -129,6 +129,8 @@ JSON""",
                     "/craft/chatcut_catalogue.json", copy=True)
     .add_local_file(os.path.join(_HERE, "turn_clock.py"),
                     "/root/turn_clock.py", copy=True)
+    .add_local_file(os.path.join(_HERE, "verify_chain.py"),
+                    "/root/verify_chain.py", copy=True)
     .add_local_file(os.path.join(_HERE, "reference_index.json"),
                     "/craft/reference_index.json", copy=True)
 )
@@ -979,6 +981,120 @@ SHEET_RULE = (
     "same words twice. This is checked after the run.\n\n")
 
 
+def _mcp_call(tok, name, args):
+    """One ChatCut tool call at module level, for the harness's own checks."""
+    r = mcp_rpc(tok, "tools/call", {"name": name, "arguments": args}, 900)
+    if r.get("error"):
+        raise RuntimeError("%s failed: %s" % (name, r["error"]))
+    out = r.get("result") or {}
+    txt = "".join(c.get("text") or "" for c in (out.get("content") or []))
+    if txt.strip().startswith("{"):
+        try:
+            return json.loads(txt)
+        except Exception:                                         # noqa: BLE001
+            pass
+    return out
+
+
+def verify_hops_3_and_4(tok, stage, plan):
+    """Read the placements back: did every add become an item, carrying what
+    the plan named?
+
+    HOP 3  every add BECAME AN ITEM. `items_added` counted adds SENT, and
+           ChatCut resolves an id PREFIX and returns ok, so a send was never a
+           landing.
+    HOP 4  every item ARRIVED CARRYING the ruling — the asset the plan named
+           and the propertyOverrides it specified. That is where the card died:
+           registered into an asset with no card properties, placed, counted,
+           and green.
+
+    THREE STATES. A check that could not run is FAILED or ABSENT and says
+    which; neither is a pass.
+    """
+    import sys as _sys
+    _sys.path.insert(0, "/root")
+    import verify_chain as vc
+    res = {"hop3": {"state": "ABSENT", "why": "not attempted"},
+           "hop4": {"state": "ABSENT", "why": "not attempted"}, "detail": []}
+    if not (plan and stage):
+        res["hop3"]["why"] = res["hop4"]["why"] = "no plan or no prestage"
+        return res
+    man = vc.plan_manifest(plan)
+    pid = stage["projectId"]
+    try:
+        tl = _mcp_call(tok, "preview_timeline",
+                       {"projectId": pid, "views": ["timeline"], "limit": 100})
+        entries = ((tl.get("timeline") or {}).get("entries") or [])
+    except Exception as e:                                        # noqa: BLE001
+        res["hop3"] = {"state": "FAILED",
+                       "why": "could not read the timeline: %s" % e}
+        return res
+
+    items = [e for e in entries if e.get("kind") == "item"]
+    miss3 = vc.hop3_placed(man, entries)
+    res["hop3"] = {
+        "state": "FAILED" if miss3 else "MEASURED",
+        "why": ("%d add(s) never became an item: %s"
+                % (len(miss3), "; ".join("CALL %s adds[%s] %s"
+                                         % (r["call"], r["slot"], w)
+                                         for r, w in miss3))
+                if miss3 else
+                "%d planned add(s), %d item(s) on the timeline"
+                % (len([r for r in man if r["type"] != "effect"]), len(items)))}
+
+    by_from = {}
+    for it in items:
+        f = (it.get("timelineRange") or {}).get("fromFrame")
+        if f is not None and f not in by_from:
+            by_from[f] = it
+
+    def _find_po(o):
+        if isinstance(o, dict):
+            if "propertyOverrides" in o:
+                return o["propertyOverrides"]
+            for v in o.values():
+                g = _find_po(v)
+                if g is not None:
+                    return g
+        elif isinstance(o, list):
+            for v in o:
+                g = _find_po(v)
+                if g is not None:
+                    return g
+        return None
+
+    # overrides live on the ITEM and the timeline view does not carry them, so
+    # the rows that name any are inspected individually. There is normally one.
+    for r in man:
+        if not (r.get("overrides") and r["from"] in by_from):
+            continue
+        try:
+            det = _mcp_call(tok, "inspect_item",
+                            {"projectId": pid,
+                             "itemId": by_from[r["from"]]["id"]})
+            by_from[r["from"]] = dict(by_from[r["from"]],
+                                      propertyOverrides=_find_po(det) or {})
+        except Exception as e:                                    # noqa: BLE001
+            res["hop4"] = {"state": "FAILED",
+                           "why": "could not inspect the item at frame %s: %s"
+                                  % (r["from"], e)}
+            return res
+
+    bad4 = vc.hop4_carries(man, by_from)
+    res["detail"] = ["%-8s slot%-3s frame %-5s %s"
+                     % ("MISSING" if any(b[0] is r for b in bad4) else "ok",
+                        r["slot"], r["from"], (r.get("asset") or "")[:44])
+                     for r in man if r["type"] != "effect"]
+    res["hop4"] = {
+        "state": "FAILED" if bad4 else "MEASURED",
+        "why": ("%d placement(s) did not carry the ruling: %s"
+                % (len(bad4), "; ".join("slot%s %s" % (r["slot"], w)
+                                        for r, w in bad4))
+                if bad4 else
+                "every item carries the asset and the overrides the plan named")}
+    return res
+
+
 def build_system_prompt():
     """The craft, in the session's context instead of on its to-do list."""
     parts = [CRAFT_CONTEXT, "\n\n===== THE CRAFT DOCUMENTS =====\n"]
@@ -1199,6 +1315,32 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         _stage = prestage(tok, prestage_title, controls=_ctl,
                           source_path="/work/source.mp4", titles=_titles)
         _libn = len(_stage.get("components") or {})
+        # ── HOP 2: plan -> prestage ─────────────────────────────────────────
+        # Every assetId the plan names must be registered BEFORE the agent
+        # starts. The card was lost exactly here: the plan named it, the
+        # launcher never carried card_hero/card_label into the payload, the
+        # asset registered without them, and the run went green on a graphic
+        # that rendered its title and no card. A check that runs after the
+        # agent is a report; this one refuses to start.
+        sys.path.insert(0, "/root")
+        import verify_chain as _vc
+        _manifest = _vc.plan_manifest(plan or "")
+        _reg = dict(_stage.get("components") or {})
+        for _i2, _t2 in enumerate(_stage.get("titles") or []):
+            _reg["GRAPHIC %d" % (_i2 + 1)] = _t2["assetId"]
+        _miss2 = _vc.hop2_prestage(_manifest, _reg)
+        if _miss2:
+            raise RuntimeError(
+                "HOP 2 (plan -> prestage): the plan names %d add(s) with no "
+                "registered asset behind them. Refusing to run — the agent "
+                "would place them and the run would go green on placements "
+                "that cannot render:\n  %s"
+                % (len(_miss2), "\n  ".join(
+                    "CALL %s adds[%s] (%s): %s"
+                    % (r["call"], r["slot"], r["type"], why)
+                    for r, why in _miss2)))
+        print("  HOP 2           : MEASURED  %d add(s), every assetId "
+              "registered" % len(_manifest), flush=True)
         print("  TITLE CONTROLS  : %s" % (json.dumps(_ctl) if _ctl
                                           else "ABSENT — defaults"), flush=True)
         print("  PRESTAGE        : MEASURED  project=%s title=%s source=%s  "
@@ -1483,6 +1625,18 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
           % (out["placements"]["state"], _planned, _added,
              "  (the agent named the omission)"
              if out["placements"]["declared_skip"] else ""), flush=True)
+    # ── HOPS 3 AND 4 ───────────────────────────────────────────────────────
+    # The last run's agent said in its closing message that it could not
+    # confirm the StatCard. It was right, and nothing acted on it. A placement
+    # the agent intended and cannot confirm is a DEFECT, not a note.
+    out["chain"] = verify_hops_3_and_4(tok, _stage, plan)
+    for _h in ("hop3", "hop4"):
+        print("  %s           : %s  %s"
+              % (_h.upper(), out["chain"][_h]["state"], out["chain"][_h]["why"]),
+              flush=True)
+    for _l in out["chain"].get("detail") or []:
+        print("      %s" % _l, flush=True)
+
     out["visual_pass"] = {
         "read_source_sheet": _saw_sheet,
         "previewed_before_render": _looked_before_render,

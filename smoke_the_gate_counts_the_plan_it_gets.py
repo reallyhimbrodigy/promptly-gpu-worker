@@ -67,7 +67,7 @@ RULING = {
              _beat(5.0, 8.0, ["text", "zoom"]),
              _beat(10.0, 13.0, ["text", "card", "sfx"])],
 }
-EXPECT = 6
+EXPECT = 7        # 1 video + 3 graphics + 1 StatCard + 1 sfx + 1 zoom
 
 
 def emit():
