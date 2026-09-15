@@ -220,12 +220,24 @@ def hop3_placed(manifest, timeline_entries):
     want = [r for r in manifest if r["type"] in ("video", "motion-graphic",
                                                  "audio")]
     got = [e for e in (timeline_entries or []) if e.get("kind") == "item"]
+    # COUNT, DO NOT JUST FIND. Two placements can start on the same frame — the
+    # card and the title that carries it both begin at 526 — so "an item starts
+    # here" is satisfied by ONE item for TWO adds, and a dropped second
+    # placement would pass. Consume each item once.
+    from collections import Counter
+    have = Counter((e.get("timelineRange") or {}).get("fromFrame") for e in got)
+    need = Counter(r["from"] for r in want)
     missing = []
     for r in want:
-        hit = [e for e in got
-               if (e.get("timelineRange") or {}).get("fromFrame") == r["from"]]
-        if not hit:
-            missing.append((r, "no item starts at frame %s" % r["from"]))
+        f = r["from"]
+        if have[f] > 0:
+            have[f] -= 1
+            continue
+        missing.append((r, "no unclaimed item starts at frame %s (%d add(s) "
+                           "there, %d item(s))"
+                           % (f, need[f], sum(1 for e in got
+                                              if (e.get("timelineRange") or {})
+                                              .get("fromFrame") == f))))
     return missing
 
 

@@ -1169,11 +1169,38 @@ def verify_hops_3_and_4(tok, stage, plan):
                 "%d planned add(s), %d item(s) on the timeline"
                 % (len([r for r in man if r["type"] != "effect"]), len(items)))}
 
-    by_from = {}
+    # TWO PLACEMENTS CAN START ON THE SAME FRAME. The card and the title that
+    # carries it both begin at 526, and keying by frame alone kept the FIRST —
+    # so hop 4 inspected Title 07, found no overrides on it, and reported the
+    # CARD's four overrides as missing. The evidence line is what caught it:
+    # "Asset: [62be58ebc6] Title 0...". Match the asset the plan named, not
+    # merely the frame it named.
+    by_frame = {}
     for it in items:
         f = (it.get("timelineRange") or {}).get("fromFrame")
-        if f is not None and f not in by_from:
-            by_from[f] = it
+        if f is not None:
+            by_frame.setdefault(f, []).append(it)
+
+    def _pick(row):
+        """The item at this row's frame whose ASSET is the one the plan named."""
+        cands = by_frame.get(row["from"]) or []
+        if len(cands) == 1:
+            return cands[0]
+        want = (row.get("asset") or "").lower()
+        for it in cands:
+            nm = str(((it.get("asset") or {}).get("name") or "")).lower()
+            if nm and nm in want:
+                return it
+        # a card is the row with numeric overrides; prefer an item whose asset
+        # name is not a plain "Title NN" when we are looking for one
+        if (row.get("overrides") or {}).get("value") is not None:
+            for it in cands:
+                nm = str(((it.get("asset") or {}).get("name") or ""))
+                if not nm.lower().startswith("title"):
+                    return it
+        return cands[0] if cands else None
+
+    by_from = {r["from"]: _pick(r) for r in man if _pick(r) is not None}
 
     def _find_po(o, item_id):
         """The overrides on THE ITEM, not the first ones in the tree.
