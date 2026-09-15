@@ -16593,7 +16593,25 @@ def edit(source_key: str, brief: str,
         _exec_phase = bool(_beats) and not [
             b for b in _beats
             if b["i"] not in {v.get("beat") for v in led.get("beat_verdicts") or []}]
-        _eff = "low" if (_exec_phase and cap_exec_effort) else effort
+        # ── THE SPEC TURN DOES NOT NEED EXTENDED REASONING ──────────────────
+        # ONE SETTING WAS REACHING BOTH RULING TURNS. `_exec_phase` is false
+        # until every beat has a verdict, so turns 1 AND 2 both ran at the
+        # run default — "high". Measured: turn 1 took 93.18s and 8,127 output
+        # tokens to emit 362 CHARACTERS — a mode, a family list and a short
+        # why — while turn 2 ruled all fourteen beats in 11.26s and 1,442
+        # tokens. The turn that decides least was costing eight times the turn
+        # that decides everything.
+        #
+        # The spec turn is identified by what has NOT happened yet: no spec on
+        # the ledger. That is knowable BEFORE the response, which the tool name
+        # is not.
+        _spec_phase = not (led.get("spec") or {})
+        if _exec_phase and cap_exec_effort:
+            _eff = "low"
+        elif _spec_phase and cap_exec_effort:
+            _eff = "low"
+        else:
+            _eff = effort
         led.setdefault("turn_effort", []).append(_eff)
         _kw = {"output_config": {"effort": _eff}} if _supports_effort(model) else {}
         led["effort_sent"] = bool(_kw)
@@ -19112,7 +19130,12 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     _tn = (r.get("ledger") or {}).get("turns") or []
     if _ts:
         _tt = sum(_ts) or 1.0
-        print("  MODEL TIME BY TURN: %.1fs over %d turn(s)" % (sum(_ts), len(_ts)))
+        _te = (r.get("ledger") or {}).get("turn_effort") or []
+        print("  MODEL TIME BY TURN: %.1fs over %d turn(s)%s"
+              % (sum(_ts), len(_ts),
+                 ("   effort: " + " ".join(
+                     "%d:%s" % (i + 1, e) for i, e in enumerate(_te)))
+                 if _te else "   effort: NOT RECORDED"))
         for _i, _sec in enumerate(_ts):
             _t = _tn[_i] if _i < len(_tn) else {}
             _tools = ",".join(_t.get("tools") or []) or "(no tool)"
