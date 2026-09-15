@@ -483,20 +483,17 @@ LOADBEARING = ["00_job_and_arc.md", "02_intent_standard.md", "01_cut_pass.md",
 # schemas. There is no eager-load flag, so the next best thing is to tell the
 # agent exactly which ones to fetch, in ONE call instead of nine.
 NEEDED_TOOLS = [
-    "create_project", "target_project", "list_projects", "import_media",
-    "browse_assets", "inspect_asset", "trigger_transcript", "track_progress",
-    "read_script", "apply_script", "find_transcript", "preview_timeline",
-    "inspect_item", "edit_item", "edit_track", "manage_timelines",
-    "split_item", "smooth_audio", "search_fonts",
-    # NO `browse_library`. Five of one run's 27 tool calls were browse_library,
-    # hunting the ids for two sounds, because the plan told the agent to go and
-    # find them. The plan now carries the real `library:sound:<id>` for every
-    # sound it rules, resolved offline from the fetched library — so the tool
-    # has nothing left to answer, and WITHHOLDING it is what makes that true
-    # rather than hoped for. Same move as `--detach` at the launcher: a
-    # capability the plan does not need is a capability the run cannot spend.
-    "create_motion_graphic_from_code", "edit_asset", "edit_captions",
-    "read_captions", "submit_export", "track_export",
+    # SIX, NOT TWENTY-FIVE. The plan now carries the project, the assets, the
+    # sound ids, the item references and the review frames, so the agent
+    # creates nothing, imports nothing, searches nothing and discovers nothing.
+    # Every tool it was offered for those jobs was a tool it could spend a turn
+    # on. What is left is: place, look, fix, deliver.
+    "edit_item",          # place, and fix by `updates` on the one revision
+    "preview_timeline",   # look at the composed frames
+    "inspect_item",       # a named defect may need one item's full state
+    "edit_asset",         # ...or a property on the asset behind it
+    "submit_export",      # deliver
+    "track_export",       # and report where it got to
 ]
 
 
@@ -1247,8 +1244,11 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                        if _stage.get("titleAssetId") else
                        "  NO GRAPHIC IS STAGED — this plan names none. Place "
                        "the video segments only.\n"))
-                + ("Call target_project with that id, then place EVERY add "
-                   "the plan names, in the CALLS THE PLAN NAMES — it labels "
+                + ("PASS `projectId` ON EVERY CALL — the id is above. Do "
+                   "NOT call target_project: binding the session is a turn, "
+                   "and every tool here takes projectId directly. Then place "
+                   "EVERY add the plan names, in the CALLS THE PLAN NAMES — "
+                   "it labels "
                    "each add `CALL 1, adds[3]:` and says at the end how many "
                    "calls there are and why. Each graphic's assetId is listed "
                    "above and already carries its own text, band, size, hold "
@@ -1340,7 +1340,18 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
          # An explicit allowlist is the right mechanism anyway — the agent
          # should have exactly the ChatCut tools and the local file tools, and
          # nothing it was never meant to reach.
-         "--allowedTools", "mcp__chatcut__*,Bash,Read,Write,Glob,Grep",
+         # NAMED, NOT WILDCARDED. `mcp__chatcut__*` admits all 60 tools the
+         # server advertises, and 60 tools is why their schemas arrive
+         # DEFERRED — which is the whole reason a ToolSearch turn exists at
+         # all. Whether Claude Code's deferral counts the server's tools or
+         # the ALLOWED ones is not documented, so this run answers it: if the
+         # ToolSearch turn disappears, the deferral respects the allowlist and
+         # the turn was ours to remove. If it survives, the deferral is the
+         # server's tool count and the turn is the harness's, not the edit's.
+         # Either way the six are exactly what a pre-resolved plan needs.
+         "--allowedTools",
+         ",".join(["mcp__chatcut__" + t for t in NEEDED_TOOLS]
+                  + ["Bash", "Read", "Write", "Glob", "Grep"]),
          "--model", model]
         # THE FLAG THAT MAKES THE SPLIT POSSIBLE. Without the deltas, queue,
         # prefill and generation collapse into one bucket — and a coarser
