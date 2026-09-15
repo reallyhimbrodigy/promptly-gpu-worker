@@ -1236,20 +1236,47 @@ def verify_hops_3_and_4(tok, stage, plan):
             if not _po:
                 # inspect_item is a TEXT report. Its own line is authoritative:
                 #   propertyOverrides: {"label":"…","value":5,…}
+                _txt = str((det or {}).get("_text") or "")
                 _m = re.search(r"propertyOverrides:\s*(\{.*?\})\s*$",
-                               str((det or {}).get("_text") or ""), re.M)
+                               _txt, re.M)
                 if _m:
                     try:
                         _po = json.loads(_m.group(1))
                     except Exception:                             # noqa: BLE001
                         _po = None
+                if not _po:
+                    # THE OTHER SHAPE THE SAME REPORT PRINTS. Above the
+                    # Properties block, inspect_item lists every effective
+                    # prop and marks the ones that are not defaults:
+                    #     value=5 (override)
+                    #     suffix=" MINUTES" (override)
+                    # That is the same fact in a form this reader can take, and
+                    # taking both means one of them changing does not blind the
+                    # hop.
+                    _po = {}
+                    for _k2, _v2 in re.findall(
+                            r"^\s*(\w+)=(.*?)\s*\(override\)\s*$",
+                            _txt, re.M):
+                        try:
+                            _po[_k2] = json.loads(_v2)
+                        except Exception:                         # noqa: BLE001
+                            _po[_k2] = _v2.strip('"')
+                    _po = _po or None
             if _po is None:
                 res["hop4"] = {
                     "state": "FAILED",
+                    # CARRY THE EVIDENCE. Three times today a failure
+                    # message without its input cost a whole run to diagnose:
+                    # "12 adds never became an item" (the reader saw nothing),
+                    # "could not render the frame" (the URL was in another
+                    # block), and this. A message that cannot say what it read
+                    # makes the next run the debugger.
                     "why": "could not read the overrides off the item at frame "
-                           "%s — inspect_item returned neither a JSON node nor "
-                           "a `propertyOverrides:` line, so this is UNCHECKED"
-                           % r["from"]}
+                           "%s — inspect_item gave neither a JSON node, a "
+                           "`propertyOverrides:` line, nor any `(override)` "
+                           "marker. UNCHECKED. First 240 chars of what it did "
+                           "return: %r"
+                           % (r["from"], str((det or {}).get("_text") or "")[:240])}
                 return res
             by_from[r["from"]] = dict(by_from[r["from"]],
                                       propertyOverrides=_po)
