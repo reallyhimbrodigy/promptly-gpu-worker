@@ -26,15 +26,25 @@ LEGS = [
     # CORRECT prompt. Sixth reader this session keyed to wording rather than
     # behaviour. What turn 1 must actually forbid is placing one at a time; and
     # what it must actually say is that the plan decides the batching.
-    ("turn 1 batches, and forbids placing one at a time",
-     lambda s: ("TURN 1" in s
-                and re.search(r"[Dd]o not place them one at a time", s)
-                and re.search(r"BATCHES THE PLAN NAMES|SINGLE edit_item call",
-                              s))),
-    ("it names turn 2 as look-then-fix",
-     lambda s: "TURN 2" in s and "preview_timeline" in s),
-    ("it gates turn 3 on a NAMED defect",
-     lambda s: "TURN 3" in s and "UNJUSTIFIED" in s),
+    # TURN vs PASS — THE WORD CHANGED AND THESE LEGS FAILED ON A CORRECT
+    # PROMPT. They read "TURN 1"/"TURN 2"/"TURN 3" literally; the loop is now
+    # described as PASSES because the agent watches, places, watches, fixes.
+    # Same class as every other reader keyed to wording, in the smoke written
+    # to protect the loop. They ask for the BEHAVIOUR now.
+    ("pass 1 batches, and forbids placing one at a time",
+     lambda s: (re.search(r"(TURN|PASS) 1", s)
+                and re.search(r"one at a time", s)
+                and re.search(r"BATCHES THE PLAN NAMES|SINGLE edit_item call"
+                              r"|ONE BATCH", s))),
+    ("pass 1 ENDS after the placements, so the harness can send the edit",
+     lambda s: re.search(r"YOUR TURN ENDS|turn ends", s)
+     and re.search(r"[Dd]o not preview", s)),
+    ("pass 2 is look-then-fix on the composed picture",
+     lambda s: re.search(r"(TURN|PASS) 2", s)
+     and "COMPOSED PICTURE" in s
+     and re.search(r"ONE edit_item call", s)),
+    ("pass 3 is gated on a NAMED defect",
+     lambda s: re.search(r"(TURN|PASS) 3", s) and "UNJUSTIFIED" in s),
     ("it is concatenated into the plan-path prompt",
      lambda s: re.search(r"\+ TWO_TURN_LOOP\b", s)),
     ("the superseded one-revision prose is gone",
@@ -61,9 +71,10 @@ if __name__ == "__main__":
         # the leg no longer reads — so the RED proof printed 0 red and the
         # batching leg was, for that moment, a check that could not fail.
         ("batching removed",
-         SRC.replace("Do not place them one at a time to watch them land",
-                     "Place them however you like")
-            .replace("BATCHES THE PLAN NAMES", "way you prefer")),
+         SRC.replace("one at a time", "however you like")),
+        ("the turn-end instruction removed",
+         SRC.replace("THEN YOUR TURN ENDS", "THEN CARRY ON")
+            .replace("Do not preview", "Feel free to preview")),
     ]
     red_ok = True
     for label, mutated in reds:

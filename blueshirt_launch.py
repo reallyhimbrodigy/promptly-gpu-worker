@@ -122,6 +122,12 @@ def main(result_json):
     titles = titles_from(d["plan"])
     json.dump(titles, open(f"{OUT}/titles.json", "w"), indent=1)
 
+    # THE TRANSCRIPT, time-aligned, for pass 1 to read against the frames.
+    _beats = (d.get("ledger") or {}).get("beats") or []
+    json.dump(_beats, open(f"{OUT}/transcript.json", "w"))
+    print("  TRANSCRIPT  : %d beat(s) -> %s/transcript.json"
+          % (len(_beats), OUT))
+
     keep = d["ledger"]["keep_spans"]
     print("  PLAN        : %d chars, %d kept span(s), %d graphic(s)"
           % (len(txt), len(keep), len(titles)))
@@ -136,6 +142,7 @@ def main(result_json):
         "--clip-url", urls["src_url"],
         "--plan-file", f"{OUT}/PLAN_CC.md",
         "--brief", "Execute the plan.",
+        "--transcript-file", f"{OUT}/transcript.json",
     ]
     # NO TITLE ARGUMENT WHEN THE PLAN NAMES NO GRAPHIC. A placeholder "TITLE"
     # would register an asset the plan never places, and the PLACEMENTS gate

@@ -30,6 +30,7 @@ Each RED-proven.
 import ast
 import json
 import os
+import re
 import pathlib
 import sys
 
@@ -94,9 +95,13 @@ def legs(src, tree):
         bad.append(("index", "the prompt still reads chatcut_catalogue.json, "
                              "which names SpeechBubble and no caption style"))
 
-    # SEEN — the agent is told to look at the picture, not just the names.
-    if "READ IT" not in src:
-        bad.append(("seen", "nothing tells the agent to read the sheet image "
+    # SEEN — the agent is POINTED AT THE PICTURE, not merely given names.
+    # This read `"READ IT" not in src` and failed the moment the sheet stopped
+    # being a file to read and became an image in the message — the leg
+    # condemning the change that made it unnecessary. What must hold is that
+    # the prompt sends the agent to the PICTURE rather than to the index.
+    if not re.search(r"(READ IT|FIRST IMAGE IN THIS MESSAGE)", src):
+        bad.append(("seen", "nothing points the agent at the sheet image "
                             "before choosing"))
     return bad
 
@@ -154,7 +159,11 @@ if __name__ == "__main__":
     print("    index back on the old catalogue -> %d leg(s) red" % len(m2))
     red &= any(k == "index" for k, _ in m2)
 
-    m3 = legs(SRC.replace("READ IT", "there it is"), TREE)
+    # the mutation has to remove BOTH spellings, or it only deletes the one
+    # the code no longer uses and the proof goes green having changed nothing.
+    m3 = legs(SRC.replace("READ IT", "there it is")
+                 .replace("FIRST IMAGE IN THIS MESSAGE", "somewhere about"),
+              TREE)
     print("    the 'read the picture' line gone -> %d leg(s) red" % len(m3))
     red &= any(k == "seen" for k, _ in m3)
 

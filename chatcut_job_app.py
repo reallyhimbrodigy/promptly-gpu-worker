@@ -1040,45 +1040,34 @@ FETCH_RULE = (
     "tile is a frame you did not look at, not a frame that was fine.\n\n")
 
 TWO_TURN_LOOP = (
-    "THE LOOP IS TWO TURNS. A third is a failure state, not a budget.\n\n"
-    "  TURN 1 — PLACE EVERYTHING, IN THE BATCHES THE PLAN NAMES. The plan "
-    "labels every add with its call (`CALL 1, adds[3]:`) and states at the end "
-    "how many calls there are and why. Usually that is ONE call for the items "
-    "and a second for any EFFECT, because an effect names an item that must "
-    "already exist and so cannot ride the batch that creates it. `edit_item` "
-    "commits a batch atomically and rolls the whole batch back on one failure, "
-    "so a batch that fails tells you something a half-built timeline never "
-    "can. Do not place them one at a time to watch them land, and do not "
-    "collapse the plan's calls into one.\n\n"
-    "  TURN 2 — THE REVIEW SHEET IS SENT TO YOU. As soon as your placements "
-    "land, the harness fetches the composed frames at the settled moments the "
-    "plan named, tiles them, and sends them as an image. You do not call "
-    "preview_timeline, you do not curl anything and you do not read a file — "
-    "you LOOK at the picture you are given and judge the COMPOSED RESULT, not "
-    "the tool results, which cannot show you a collision. Then make every "
-    "correction in one more edit_item call. Spend this turn only on what the frames show: "
-    "something illegible, something colliding, something off-frame, something "
-    "landing on the wrong moment. Not on taste. If the frames are right, skip "
-    "the turn and export — a revision you cannot justify from a frame is a "
-    "revision that costs a turn and changes nothing.\n\n"
-    "  TURN 3 — ONLY ON A DEFECT YOU CAN NAME. If you take one, your final "
+    "THE LOOP IS TWO PASSES. A third is a failure state, not a budget.\n\n"
+    "  PASS 1 — YOU WATCH THE SOURCE, THEN PLACE EVERYTHING IN ONE BATCH.\n"
+    "  Everything you need is in this message: the component inventory as "
+    "pictures, the source as a sequence of frames, the transcript against "
+    "them, and the plan. You look nothing up. Decide every placement — which "
+    "component, where it sits, when it runs — and send them in the calls the "
+    "plan names (usually one for the items, a second for any EFFECT, because "
+    "an effect names an item that must already exist).\n\n"
+    "  THEN YOUR TURN ENDS. Do not preview, do not fetch a frame, do not read "
+    "a file, do not check your work. The edit will be RENDERED AND SENT TO "
+    "YOU as the next message. Anything you do between your last placement and "
+    "that message is a turn spent on something you are about to be given.\n\n"
+    "  PASS 2 — YOU WATCH THE EDIT, THEN FIX IT IN ONE BATCH. The next "
+    "message carries frames of your timeline with everything on it. Judge the "
+    "COMPOSED PICTURE — tool results cannot show you a collision. Fix what is "
+    "wrong in ONE edit_item call: a graphic colliding with another or with "
+    "the captions, something illegible or off-frame, something on the "
+    "speaker's face, a title on the wrong moment, wrong size, drift. If it is "
+    "right, submit the export and stop.\n\n"
+    "  PASS 3 — ONLY ON A DEFECT YOU CAN NAME. If you take one, your final "
     "message must name the defect, the frame you saw it in, and what you "
     "changed. Unnamed, it is the same as not taking it: the run reports the "
-    "third turn as UNJUSTIFIED and the edit is judged without it.\n\n"
-    "WHY THE BATCHES. Each turn is a model turn with the whole context behind "
-    "it, and the measured wall is 71-84% the model producing tokens — so turns "
-    "are the unit that costs, not calls. Three placements in three turns costs "
-    "three times what three placements in one batch costs and builds the same "
-    "timeline.\n\n")
-
-SHEET_RULE = (
-    "THE FIRST IMAGE IN THIS MESSAGE is a 20-frame contact sheet of the whole "
-    "source. You already have it — there is nothing to open and no file to "
-    "read. LOOK AT IT BEFORE YOU PLACE ANYTHING. THE PLAN CANNOT SEE THE "
-    "FOOTAGE: it is derived from the transcript, so it does not know what is "
-    "already BURNED INTO the frame. If the source already shows the words a "
-    "title would add, say so and skip that placement rather than printing the "
-    "same words twice. This is checked after the run.\n\n")
+    "third pass as UNJUSTIFIED and the edit is judged without it.\n\n"
+    "WHY THE BATCHES. Each pass is a model turn with the whole context behind "
+    "it. Placing one item at a time to watch it land spends a turn per item "
+    "and tells you nothing a batch would not — `edit_item` commits a batch "
+    "atomically and rolls the whole batch back on one failure, so a batch that "
+    "fails tells you something a half-built timeline never can.\n\n")
 
 
 def _mcp_call(tok, name, args, expect=None):
@@ -1798,6 +1787,176 @@ def verify_hop7_sync(tok, stage, shape):
     return out
 
 
+# THE MODEL CANNOT WATCH VIDEO. Tested directly rather than assumed: a `video`
+# content block is refused — "Input tag 'video' ... does not match any of the
+# expected tags", and the accepted list carries image and document and no
+# moving picture. So "it watches the footage" has a ceiling, and the honest
+# ceiling is a DENSE SEQUENCE OF FULL FRAMES plus the transcript. Individual
+# frames at readable size, not one 240px tile of twenty — a tile is a thing the
+# harness chose and compressed; a sequence is the nearest thing to watching
+# that this surface allows.
+SOURCE_FRAMES_N = 14
+EDIT_FRAMES_N = 9                    # preview_timeline returns at most 9
+
+
+def _frames_of(video, n, out_dir, width=480):
+    """N evenly-spaced frames of a video, as individual readable images."""
+    os.makedirs(out_dir, exist_ok=True)
+    dur = 0.0
+    try:
+        dur = float(subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", video],
+            capture_output=True, text=True, timeout=120).stdout.strip() or 0.0)
+    except Exception:                                             # noqa: BLE001
+        return []
+    if dur <= 0:
+        return []
+    out = []
+    for i in range(n):
+        t = dur * (i + 0.5) / n
+        fp = os.path.join(out_dir, "f%02d.jpg" % i)
+        r = subprocess.run(
+            ["ffmpeg", "-v", "error", "-y", "-ss", "%.3f" % t, "-i", video,
+             "-vf", "scale=%d:-2" % width, "-frames:v", "1", "-q:v", "4", fp],
+            capture_output=True, timeout=300)
+        if r.returncode == 0 and os.path.exists(fp) and \
+                os.path.getsize(fp) > 2000:
+            out.append((round(t, 2), fp))
+    return out
+
+
+def _img_block(path, media="image/jpeg"):
+    with open(path, "rb") as fh:
+        return {"type": "image",
+                "source": {"type": "base64", "media_type": media,
+                           "data": base64.b64encode(fh.read()).decode()}}
+
+
+def _message(blocks_and_text):
+    """A stream-json user message from an ordered list of blocks."""
+    return {"type": "user", "message": {"role": "user",
+                                        "content": blocks_and_text}}
+
+
+def pass1_message(plan, beats, inventory_png, source_video):
+    """WHAT THE AGENT IS SERVED BEFORE IT DECIDES ANYTHING.
+
+    In order, in one message:
+      1. THE INVENTORY, as a picture — every component that renders, each a
+         real frame of itself, with what it is for beside it. Served, not
+         fetched: if it has to look something up it is not on a platter, and
+         the previous shape mounted a file and told it to Read one.
+      2. THE SOURCE, as a dense sequence of full frames with their timestamps.
+         Not a tile the harness compressed — individual readable frames. The
+         model cannot take video (tested: a `video` block is refused), so this
+         is the ceiling and it is stated rather than dressed up.
+      3. THE TRANSCRIPT, time-aligned against those frames.
+      4. THE PLAN.
+    """
+    blocks = []
+    if inventory_png and os.path.exists(inventory_png):
+        blocks.append({"type": "text", "text":
+                       "THE COMPONENT INVENTORY — every one of these renders, "
+                       "each picture is a real frame of that component, and "
+                       "the list underneath says what each is for. This is "
+                       "everything you can place. You never author component "
+                       "code and you never look anything up."})
+        blocks.append(_img_block(inventory_png, "image/png"))
+    frames = _frames_of(source_video, SOURCE_FRAMES_N, "/work/src_frames")
+    if frames:
+        blocks.append({"type": "text", "text":
+                       "THE SOURCE — %d frames across the whole clip, in order, "
+                       "at %s. Look at the footage before you decide anything: "
+                       "the plan is derived from the transcript and CANNOT SEE "
+                       "the picture, so it does not know what is already burned "
+                       "into the frame, where the speaker is, or what the shot "
+                       "already shows."
+                       % (len(frames),
+                          ", ".join("%.1fs" % t for t, _ in frames))})
+        for _t, fp in frames:
+            blocks.append(_img_block(fp))
+    if beats:
+        blocks.append({"type": "text", "text":
+                       "THE TRANSCRIPT, against those frames:\n"
+                       + "\n".join(
+                           "  %6.2f-%6.2fs  %s"
+                           % (b.get("t_start", 0), b.get("t_end", 0),
+                              str(b.get("text") or "").split(" \u00b7 ")[0])
+                           for b in beats)})
+    blocks.append({"type": "text", "text": plan})
+    return _message(blocks)
+
+
+def pass2_message(frames, plan_frames):
+    """WHAT THE AGENT IS SERVED BEFORE IT FIXES ANYTHING — the edit itself.
+
+    The composed timeline with everything on it, as a sequence of frames
+    across the whole edit. Fetched, downloaded and handed over by the harness:
+    the agent spends no turn getting them.
+    """
+    blocks = [{"type": "text", "text":
+               "THE EDIT — your timeline with everything on it, %d frames "
+               "across the whole thing (timeline frames %s). This is what the "
+               "viewer sees.\n\n"
+               "Look at it and fix what is wrong: a graphic colliding with "
+               "another or with the captions, something illegible, something "
+               "off-frame, something sitting on the speaker's face, a title on "
+               "the wrong moment, wrong size, drift. Make EVERY correction in "
+               "ONE edit_item call.\n\n"
+               "If it is right, submit the export. A further pass is only for "
+               "a defect you can NAME — and if you take one, say which frame "
+               "you saw it in and what you changed."
+               % (len(frames), ", ".join(str(f) for f in plan_frames[:9]))}]
+    for fp in frames:
+        blocks.append(_img_block(fp))
+    return _message(blocks)
+
+
+def _edit_frames(tok, pid, total_frames, n=EDIT_FRAMES_N):
+    """N frames evenly across the EDIT, downloaded. [] with the reason printed.
+
+    Evenly across the whole timeline, not only the settled moments — the
+    question in pass 2 is "is the edit right", and a defect does not wait for
+    a frame the planner nominated.
+    """
+    want = [int(total_frames * (i + 0.5) / n) for i in range(n)] if \
+        total_frames else []
+    if not want:
+        print("  EDIT FRAMES     : ABSENT  the timeline length is unknown",
+              flush=True)
+        return [], []
+    try:
+        pv = _mcp_call(tok, "preview_timeline",
+                       {"projectId": pid, "views": ["viewer"],
+                        "viewerFrames": want})
+        uris = list(pv.get("_links") or [])
+        if not uris:
+            print("  EDIT FRAMES     : ABSENT  the viewer returned no links "
+                  "(keys %s)" % sorted(pv)[:8], flush=True)
+            return [], want
+        import urllib.request as _u
+        os.makedirs("/work/edit_frames", exist_ok=True)
+        got = []
+        for i, u in enumerate(uris[:n]):
+            fp = "/work/edit_frames/e%02d.jpg" % i
+            try:
+                with _u.urlopen(u, timeout=180) as r, open(fp, "wb") as fh:
+                    fh.write(r.read())
+                if os.path.getsize(fp) > 2000:
+                    got.append(fp)
+            except Exception:                                     # noqa: BLE001
+                continue
+        print("  EDIT FRAMES     : %s  %d of %d frame(s) at %s"
+              % ("MEASURED" if got else "FAILED", len(got), len(want),
+                 ", ".join(str(f) for f in want)), flush=True)
+        return got, want
+    except Exception as e:                                        # noqa: BLE001
+        print("  EDIT FRAMES     : FAILED  %s: %s" % (type(e).__name__, e),
+              flush=True)
+        return [], want
+
+
 def _sheet_message(text, image_path=None, media="image/jpeg"):
     """A stream-json user message carrying TEXT and, when given, PIXELS.
 
@@ -1916,10 +2075,10 @@ def build_system_prompt():
                   _sh.get("header", "") + "\n",
                   "Every one is ALREADY REGISTERED in your project. You place it "
                   "by assetId and you never author component code.\n",
-                  "/craft/component_sheet.png is one image of all %d — READ IT "
-                  "before you choose, the way you read the source sheet. The "
-                  "picture is how you pick; the lines below are its index.\n"
-                  % len(_entries)]
+                  "THE PICTURE OF ALL %d IS THE FIRST IMAGE IN THIS MESSAGE "
+                  "— you already have it, there is nothing to open. The "
+                  "picture is how you pick; the lines below are its index, in "
+                  "the same order.\n" % len(_entries)]
         _by = {}
         for _e2 in _entries:
             _by.setdefault(_e2.get("when", "?"), []).append(_e2)
@@ -1949,7 +2108,8 @@ def build_system_prompt():
 def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
          run_id: str = "latest", use_hands: bool = False, plan: str = "",
          think_tokens: int = 0, prestage_title: str = "",
-         prestage_controls: str = "", prestage_titles: str = ""):
+         prestage_controls: str = "", prestage_titles: str = "",
+         transcript: str = ""):
     t0 = time.time()
     marks = {}
 
@@ -2252,12 +2412,20 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     _q_state, _q = turn_clock.cpu_quota()
     print("  CPU QUOTA       : %s  cores=%s  os.cpu_count=%s"
           % (_q_state, _q, os.cpu_count()), flush=True)
-    # THE SOURCE SHEET IS AN IMAGE IN THE FIRST MESSAGE, not a file to Read.
+    # PASS 1 IS SERVED, NOT SENT SHOPPING. The inventory as pictures, the
+    # source as a dense frame sequence, the transcript against it, the plan.
     _sheet_src = "/work/source_sheet.png" \
         if os.path.exists("/work/source_sheet.png") else None
-    print("  SOURCE SHEET    : %s"
-          % ("in the prompt as pixels" if _sheet_src else
-             "ABSENT — the agent will have nothing to look at"), flush=True)
+    # THE TRANSCRIPT TRAVELS WITH THE JOB, time-aligned, because pass 1 needs
+    # to read the words against the frames it is looking at.
+    try:
+        _beats = json.loads(transcript) if transcript else []
+    except Exception:                                             # noqa: BLE001
+        _beats = []
+    print("  PASS 1 SERVES   : inventory=%s  source frames=%d  transcript=%d "
+          "beat(s)"
+          % (os.path.exists("/craft/component_sheet.png"), SOURCE_FRAMES_N,
+             len(_beats)), flush=True)
     _cmd = (
         ["claude", "-p",
          "--input-format", "stream-json",
@@ -2314,43 +2482,46 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     # it is a decision. The model is needed for the LOOKING, not the fetching.
     sys.path.insert(0, "/root")
     import verify_chain as _vc_f
-    _frames = _vc_f.settled_frames(plan or "")
+    _man = _vc_f.plan_manifest(plan or "")
+    _total_frames = max([(r["from"] or 0) + (r["dur"] or 0) for r in _man]
+                        or [0])
+    _n_calls = len({r["call"] for r in _man}) or 1
     _state = {"edits": 0, "sent": False}
 
     def _drive(ev, send, close):
-        """Inject the review sheet once the placements exist, then close."""
+        """PASS 2: the edit is shown to the agent, once its placements land.
+
+        FIRED ON THE PLAN'S LAST CALL, not on a fixed count — a plan with no
+        effect names one call, and waiting for a second would have hung.
+        """
         if _state["sent"] or ev.get("type") != "assistant":
             return
         for b2 in ((ev.get("message") or {}).get("content") or []):
             if b2.get("type") == "tool_use" and \
                     str(b2.get("name") or "").endswith("edit_item"):
                 _state["edits"] += 1
-        # the plan names two calls: the items, then the effect.
-        if _state["edits"] < 2 or not _stage:
+        if _state["edits"] < _n_calls or not _stage:
             return
         _state["sent"] = True
-        _sheet = _review_sheet(tok, _stage["projectId"], _frames)
-        if _sheet:
-            send(_sheet_message(
-                "Here are the composed frames at the settled moments the plan "
-                "named (%s), left to right. This is your review — look at it "
-                "and judge the COMPOSED PICTURE. If something is illegible, "
-                "colliding, off-frame or on the wrong moment, fix it in ONE "
-                "edit_item call. If the frames are right, submit the export. "
-                "Do not call preview_timeline; you already have the frames."
-                % ", ".join(str(f) for f in _frames[:9]), _sheet))
+        _got, _want = _edit_frames(tok, _stage["projectId"], _total_frames)
+        if _got:
+            send(pass2_message(_got, _want))
         else:
-            send(_sheet_message(
-                "The review sheet could not be built, so you have NOT been "
-                "shown the composed frames. Fetch them yourself with "
-                "preview_timeline at frames %s before you export."
-                % ", ".join(str(f) for f in _frames[:9])))
+            # NAMED, NOT SILENT. An agent told nothing would export blind.
+            send(_message([{"type": "text", "text":
+                            "The edit could not be rendered for you to look "
+                            "at, so you have NOT seen it. Fetch the frames "
+                            "yourself with preview_timeline at %s before you "
+                            "export, and say in your final message that the "
+                            "harness could not show you the edit."
+                            % ", ".join(str(f) for f in _want[:9])}]))
         close()
 
     _rc, _errtxt, _wall, _killed = turn_clock.run_timed(
         _cmd, "/work", "/work/stream.jsonl", "/work/timing.json", 1500,
         env=_env,
-        stdin_first=json.dumps(_sheet_message(prompt, _sheet_src)),
+        stdin_first=json.dumps(pass1_message(
+            prompt, _beats, "/craft/component_sheet.png", "/work/source.mp4")),
         on_event=_drive)
     mark("agent")
 
@@ -3137,7 +3308,7 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
          model: str = "claude-sonnet-5", use_hands: bool = False,
          plan_file: str = "", think_tokens: int = 0,
          prestage_title: str = "", prestage_controls: str = "",
-         prestage_titles: str = ""):
+         prestage_titles: str = "", transcript_file: str = ""):
     if not clip_url:
         raise SystemExit("pass --clip-url")
     # THE PLAN IS READ HERE, ON THE MACHINE THAT OWNS IT, and passed as a
@@ -3202,6 +3373,15 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
             f"takes 500-900s. It would die mid-job. Re-mint it.")
     else:
         print(f"  CLIP URL        : MEASURED  {_left}s of validity left")
+    # THE TRANSCRIPT, read here so a missing file fails at LAUNCH rather than
+    # leaving pass 1 with frames and no words.
+    _tx = ""
+    if transcript_file:
+        with open(transcript_file, encoding="utf-8") as fh:
+            _tx = fh.read()
+        print("  TRANSCRIPT      : MEASURED  %d beat(s)" % len(json.loads(_tx)))
+    else:
+        print("  TRANSCRIPT      : ABSENT — pass 1 gets frames and no words")
     rid = run_id or f"run-{int(time.time())}"
     if wait:
         print(json.dumps(edit.remote(clip_url, brief, model=model, run_id=rid,
@@ -3209,7 +3389,8 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
                                      think_tokens=think_tokens,
                                      prestage_title=prestage_title,
                       prestage_controls=prestage_controls,
-                      prestage_titles=prestage_titles),
+                      prestage_titles=prestage_titles,
+                      transcript=_tx),
                          indent=1)[:6000])
         return
     # SPAWN, DO NOT WAIT. The result lands in the chatcut-results Dict, so the
@@ -3238,6 +3419,7 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
                       think_tokens=think_tokens,
                       prestage_title=prestage_title,
                       prestage_controls=prestage_controls,
-                      prestage_titles=prestage_titles)
+                      prestage_titles=prestage_titles,
+                      transcript=_tx)
     print(f"SPAWNED run_id={rid} call={call.object_id}")
     print(f"read it with:  modal run chatcut_read_result.py --run-id {rid}")
