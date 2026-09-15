@@ -1796,7 +1796,12 @@ def verify_hop7_sync(tok, stage, shape):
 # harness chose and compressed; a sequence is the nearest thing to watching
 # that this surface allows.
 SOURCE_FRAMES_N = 14
-EDIT_FRAMES_N = 9                    # preview_timeline returns at most 9
+# NO LONGER NINE. That was `preview_timeline`'s cap — "up to 9 frames" per
+# call — and pass 2 now samples a real rendered file instead, so the number is
+# chosen for what the agent needs to see rather than for what the tool would
+# give. Half evenly spaced so nothing is unwatched, half on the biggest
+# frame-to-frame changes, which is where entrances, exits and collisions are.
+EDIT_FRAMES_N = 16
 
 
 def _frames_of(video, n, out_dir, width=480):
@@ -1896,9 +1901,11 @@ def pass2_message(frames, plan_frames):
     the agent spends no turn getting them.
     """
     blocks = [{"type": "text", "text":
-               "THE EDIT — your timeline with everything on it, %d frames "
-               "across the whole thing (timeline frames %s). This is what the "
-               "viewer sees.\n\n"
+               "THE EDIT — your timeline, RENDERED, and sampled at %d "
+               "frames: evenly across the whole thing so nothing is unwatched, "
+               "and concentrated where the picture CHANGES most, which is "
+               "where entrances, exits and collisions happen. Timeline frames "
+               "%s. This is what the viewer sees.\n\n"
                "Look at it and fix what is wrong: a graphic colliding with "
                "another or with the captions, something illegible, something "
                "off-frame, something sitting on the speaker's face, a title on "
@@ -1913,48 +1920,104 @@ def pass2_message(frames, plan_frames):
     return _message(blocks)
 
 
-def _edit_frames(tok, pid, total_frames, n=EDIT_FRAMES_N):
-    """N frames evenly across the EDIT, downloaded. [] with the reason printed.
+def _edit_frames(tok, pid, total_frames, n=EDIT_FRAMES_N, fps=30):
+    """Frames of the EDIT for pass 2 — from a real render, not the 9-frame cap.
 
-    Evenly across the whole timeline, not only the settled moments — the
-    question in pass 2 is "is the edit right", and a defect does not wait for
-    a frame the planner nominated.
+    READ OFF THEIR SCHEMAS RATHER THAN INFERRED. `preview_timeline`'s viewer is
+    "actual composed timeline pixels for exact frames or a uniform sample (up
+    to 9 frames)" — stills, hard-capped at nine per call, and ChatCut's own
+    `verification` skill verifies exactly that way: download the signed frame
+    URLs and inspect the files. There is no playback on the tool surface; the
+    viewer with play/pause in their docs is the human editor's.
+
+    BUT `submit_export` IS RICHER: "Video/audio support frame- or seconds-based
+    partial ranges" and "always start a durable cloud render". So the harness
+    renders the edit ONCE and samples it at whatever density is useful, instead
+    of paying nine cloud renders for nine moments it had to nominate up front.
+
+    AND THE FRAMES GO WHERE THE MOTION IS. An even grid spends its budget on
+    held shots; a defect does not. Half the frames are evenly spaced so nothing
+    is unwatched, and half land on the biggest frame-to-frame changes, which is
+    where an entrance, an exit or a collision actually happens.
     """
-    want = [int(total_frames * (i + 0.5) / n) for i in range(n)] if \
-        total_frames else []
-    if not want:
-        print("  EDIT FRAMES     : ABSENT  the timeline length is unknown",
-              flush=True)
-        return [], []
     try:
-        pv = _mcp_call(tok, "preview_timeline",
-                       {"projectId": pid, "views": ["viewer"],
-                        "viewerFrames": want})
-        uris = list(pv.get("_links") or [])
-        if not uris:
-            print("  EDIT FRAMES     : ABSENT  the viewer returned no links "
-                  "(keys %s)" % sorted(pv)[:8], flush=True)
-            return [], want
+        ex = _mcp_call(tok, "submit_export",
+                       {"projectId": pid, "format": "video", "codec": "h264",
+                        "resolution": "720p"})
+        blob = json.dumps(ex) + str(ex.get("_text") or "")
+        rid = re.search(r"renderId[\"':\s]+([0-9a-f-]{8,})", blob)
+        if not rid:
+            print("  EDIT RENDER     : ABSENT  submit_export named no renderId",
+                  flush=True)
+            return [], []
+        url = None
+        for _ in range(40):
+            time.sleep(6)
+            st = _mcp_call(tok, "track_export",
+                           {"projectId": pid, "action": "status",
+                            "renderIds": rid.group(1)})
+            b2 = json.dumps(st) + str(st.get("_text") or "")
+            m = re.search(r'(https://[^\s"\\]+out\.mp4[^\s"\\]*)', b2)
+            if m:
+                url = m.group(1)
+                break
+            if re.search(r'"status"\s*:\s*"(failed|error)"', b2):
+                print("  EDIT RENDER     : FAILED  the render reported failure",
+                      flush=True)
+                return [], []
+        if not url:
+            print("  EDIT RENDER     : ABSENT  the render did not finish in "
+                  "time", flush=True)
+            return [], []
         import urllib.request as _u
         os.makedirs("/work/edit_frames", exist_ok=True)
+        with _u.urlopen(url, timeout=900) as r, open("/work/edit.mp4", "wb") as fh:
+            fh.write(r.read())
+        # where the motion is
+        pr = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", "/work/edit.mp4", "-vf",
+             "scale=64:114,format=gray", "-r", str(fps), "-f", "rawvideo", "-"],
+            capture_output=True, timeout=600)
+        want = []
+        if pr.returncode == 0 and pr.stdout:
+            sz = 64 * 114
+            fr = [pr.stdout[k * sz:(k + 1) * sz]
+                  for k in range(len(pr.stdout) // sz)]
+            diffs = [(sum(abs(a - b) for a, b in zip(fr[k], fr[k - 1])) / sz, k)
+                     for k in range(1, len(fr))]
+            diffs.sort(reverse=True)
+            hot, seen = [], set()
+            for _d, k in diffs:
+                if any(abs(k - h) < max(4, len(fr) // (n * 3)) for h in seen):
+                    continue
+                hot.append(k)
+                seen.add(k)
+                if len(hot) >= n // 2:
+                    break
+            even = [int(len(fr) * (i + 0.5) / (n - len(hot)))
+                    for i in range(n - len(hot))]
+            want = sorted(set(hot + even))
+        if not want:
+            want = [int(total_frames * (i + 0.5) / n) for i in range(n)]
         got = []
-        for i, u in enumerate(uris[:n]):
-            fp = "/work/edit_frames/e%02d.jpg" % i
-            try:
-                with _u.urlopen(u, timeout=180) as r, open(fp, "wb") as fh:
-                    fh.write(r.read())
-                if os.path.getsize(fp) > 2000:
-                    got.append(fp)
-            except Exception:                                     # noqa: BLE001
-                continue
-        print("  EDIT FRAMES     : %s  %d of %d frame(s) at %s"
-              % ("MEASURED" if got else "FAILED", len(got), len(want),
-                 ", ".join(str(f) for f in want)), flush=True)
+        for k in want:
+            fp = "/work/edit_frames/e%04d.jpg" % k
+            r2 = subprocess.run(
+                ["ffmpeg", "-v", "error", "-y", "-ss", "%.3f" % (k / float(fps)),
+                 "-i", "/work/edit.mp4", "-vf", "scale=480:-2", "-frames:v", "1",
+                 "-q:v", "4", fp], capture_output=True, timeout=300)
+            if r2.returncode == 0 and os.path.exists(fp) \
+                    and os.path.getsize(fp) > 2000:
+                got.append(fp)
+        print("  EDIT RENDER     : %s  rendered once, %d frame(s) sampled "
+              "(%d on motion) at %s"
+              % ("MEASURED" if got else "FAILED", len(got), n // 2,
+                 ", ".join(str(k) for k in want[:12])), flush=True)
         return got, want
     except Exception as e:                                        # noqa: BLE001
-        print("  EDIT FRAMES     : FAILED  %s: %s" % (type(e).__name__, e),
+        print("  EDIT RENDER     : FAILED  %s: %s" % (type(e).__name__, e),
               flush=True)
-        return [], want
+        return [], []
 
 
 def _sheet_message(text, image_path=None, media="image/jpeg"):
