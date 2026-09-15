@@ -1360,7 +1360,17 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     # visual pass MEASURED, export submitted, exit 0, and no title. Over-reach
     # was instrumented and under-delivery was not — the cheaper failure to have
     # and the easier one to ship. It is a GATE now, not a line in a report.
-    _planned = (plan.count("edit_item adds[") if plan else 0)
+    # A COUNTER KEYED TO PROSE BREAKS WHEN THE PROSE CHANGES. This counted
+    # `plan.count("edit_item adds[")`. The plan now labels every add with its
+    # CALL ("CALL 1, adds[3]:") because an effect cannot ride the batch that
+    # creates its target — and the counter would have read ZERO, putting the
+    # gate into ABSENT and reporting a complete edit as an empty plan. Fifth
+    # reader this session to be wrong about correct text. So: anchored to the
+    # whole line, and matching BOTH spellings, so a format change cannot
+    # silently zero it again.
+    _planned = len(re.findall(
+        r"^[ \t]*(?:CALL \d+, |edit_item )adds\[\d+\]:[ \t]*$",
+        plan or "", re.M))
     # Counted on the WHOLE input now, and only where the input is whole — a
     # count over a prefix is a claim about a string, not about the call.
     _added = 0
@@ -1392,6 +1402,16 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     _named = any(w in _ft for w in ("title", "graphic", "v2", "overlay"))
     _declined = _added < _planned and _said_skip and _named
     out["placements"] = {
+        # WHAT THIS COUNTS, stated in the record. `items_added` is the number
+        # of adds the agent SENT, read out of its own tool calls — not the
+        # number of items ChatCut created. edit_item accepts an id PREFIX and
+        # returns ok, so an add whose assetId or targetItemId resolved to
+        # nothing is indistinguishable from a correct one at this seam.
+        # Measured 2026-09-14: `targetItemId:"57ef4b265b"` — ten characters —
+        # was accepted, and the zoom did land; `inspect_item` refuses the same
+        # abbreviation. A green number here is a claim about the CALL. The
+        # placement itself is proven in the frames.
+        "counts": "adds SENT by the agent; not items ChatCut created",
         "planned_adds": _planned, "items_added": _added,
         "declared_skip": bool(_said_skip and _named),
         "state": ("MEASURED" if _planned and _added >= _planned
