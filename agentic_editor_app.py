@@ -2622,12 +2622,31 @@ PLACEMENT_FAMILY = {
 SPEC_FAMILIES = set(REFERENCE_PER_25S) | {"caption"}
 
 
-def normalize_spec(declared):
+def normalize_spec(declared, brief=""):
     """Validate the step-0 spec. Raises on anything too vague to check.
 
     A scope that cannot be checked is not a scope. `families` must name real
     families; `beats` may be None (meaning "wherever these families belong") but
     must be a list of ints when present.
+
+    AND `targeted_change` MUST SHOW ITS WORKING. The schema's own definition is
+    "they have an edit ALREADY and named something specific to change" — but
+    nothing tested that half, so on 2026-09-14 a brief handing over RAW FOOTAGE
+    ("Cut this into a punchy vertical short. Remove silence and filler. Burn
+    readable captions.") was scoped to families ["caption","cut"] with the
+    reason "it names no other family, so nothing else is added". Seven beats
+    were then ruled with treatment ["none"] and every `why` explained only the
+    cut — not restraint, an axis closed one stage earlier.
+
+    The brief also contained the word "punchy", which is the prompt's own FIRST
+    example of a full_edit vibe. Both signals were present and the narrow one
+    won, because three sentences warn against full_edit and one describes it.
+
+    So the mode must now carry the quote that supports it, and the quote is
+    checked against the brief. Not a keyword list — those learn a population
+    rather than a property. A QUOTE, verified by substring: if the brief cannot
+    supply words showing an edit already exists, targeted_change is not
+    available and the run makes the edit it was asked for.
     """
     d = dict(declared or {})
     mode = d.get("mode")
@@ -2650,6 +2669,26 @@ def normalize_spec(declared):
         raise ValueError(
             "a targeted_change must name the families it is allowed to touch — "
             "an unbounded 'targeted' change is a full edit wearing a smaller name")
+    # THE OTHER HALF OF THE DEFINITION, now enforced.
+    _q = str(d.get("existing_edit_quote") or "").strip()
+    if brief:
+        _norm = " ".join(str(brief).lower().split())
+        _qn = " ".join(_q.lower().split())
+        if not _qn:
+            raise ValueError(
+                "a targeted_change means they HAVE AN EDIT ALREADY and named "
+                "something to change in it. Quote the words in the brief that "
+                "show the edit exists, in `existing_edit_quote`. If the brief "
+                "hands over raw footage and asks for something to be MADE from "
+                "it — 'cut this into a short', 'make me a promo' — that is a "
+                "full_edit, and the changes it also names CONSTRAIN the edit "
+                "rather than replace it.")
+        if _qn not in _norm:
+            raise ValueError(
+                f"existing_edit_quote {_q!r} does not appear in the brief. It "
+                f"must be the brief's OWN words, not a paraphrase — a "
+                f"paraphrase is the scoping decision restated, not evidence "
+                f"for it.")
     unknown = sorted(set(fams) - SPEC_FAMILIES)
     if unknown:
         raise ValueError(
@@ -3374,6 +3413,23 @@ KNOWLEDGE_TOOLS = [{
                          "description": "targeted_change ONLY: the families the "
                                         "request asks for. One of: text, card, "
                                         "sfx, zoom, transition, cut, caption"},
+            "existing_edit_quote": {
+                "type": "string",
+                "description":
+                    "targeted_change ONLY, and REQUIRED for it. The brief's OWN "
+                    "WORDS showing they already have an edit to change — "
+                    "'make the captions bigger', 'shorten the intro', 'the "
+                    "zooms are too fast'. Verified by substring against the "
+                    "brief: a paraphrase is the scoping decision restated, not "
+                    "evidence for it.\n\n"
+                    "IF THE BRIEF HANDS OVER RAW FOOTAGE AND ASKS FOR SOMETHING "
+                    "TO BE MADE FROM IT, there is no such quote and the mode is "
+                    "full_edit. 'Cut this into a punchy vertical short, remove "
+                    "silence and filler, burn readable captions' is a FULL EDIT "
+                    "that also names two things — the naming CONSTRAINS the "
+                    "edit, it does not replace it. Scoping that to "
+                    "['caption','cut'] ruled seven beats with treatment "
+                    "['none'] and shipped a video with nothing on it."},
             # MEASURED ON REAL TRAFFIC, 2026-06-25..2026-09-12: 425 of 5,943
             # distinct briefs (7.2%) and 338 of 7,958 users (4.2%) name
             # something the edit must NOT do. "no captions" dominates, and the
@@ -10324,6 +10380,19 @@ FIDELITY_OK, FIDELITY_SHORT, FIDELITY_OVER, FIDELITY_UNSCOPED = (
 # scope the edit overshot — it is an instruction, and delivering the thing
 # somebody explicitly refused is a different failure from delivering extra.
 FIDELITY_FORBIDDEN = "FORBIDDEN"
+# A SCOPE THE AGENT WROTE CANNOT CERTIFY THE AGENT. spec_fidelity reads
+# `_asked` straight out of the spec the model itself set, so FAITHFUL has
+# always meant "delivered what it decided to deliver" — a tautology, not a
+# measurement, and it cannot fail. Measured on the blue-shirt run: the brief
+# said "Cut this into a punchy vertical short ... Burn readable captions", the
+# agent scoped it to ["caption","cut"], shipped a video with nothing on it, and
+# this graded it FAITHFUL. Two comments elsewhere in this file already record
+# FAITHFUL landing on runs that changed nothing; this is that class, general.
+#
+# The scope is now anchored by `existing_edit_quote`, verified as a substring
+# of the brief (see normalize_spec). Where that anchor is absent the state says
+# so instead of claiming fidelity.
+FIDELITY_SELF_SCOPED = "SELF_SCOPED"
 
 
 def spec_fidelity(spec, placements, cut_made=False, captions_made=False):
@@ -10381,6 +10450,14 @@ def spec_fidelity(spec, placements, cut_made=False, captions_made=False):
                 "judged. A minimal brief declared full_edit gets a full edit "
                 "and nothing here objects." % _mode)
     _asked = {str(f).lower() for f in (_sc.get("families") or [])}
+    _anchor = str(_sc.get("existing_edit_quote") or "").strip()
+    if not _anchor:
+        return (FIDELITY_SELF_SCOPED, [], sorted(_built - _asked),
+                "mode=targeted_change scoped to %s, but nothing anchors that "
+                "scope to the brief — `existing_edit_quote` is empty, so this "
+                "grades the run against a scope the agent wrote for itself. "
+                "Delivered %s. Whether that was the right scope is UNCHECKED."
+                % (sorted(_asked), sorted(_built)))
     _missing = sorted(_asked - _built)
     _unasked = sorted(_built - _asked)
     if _missing and _unasked:
@@ -10396,7 +10473,8 @@ def spec_fidelity(spec, placements, cut_made=False, captions_made=False):
                 "asked for %s and did not deliver %s" % (sorted(_asked),
                                                          _missing))
     return (FIDELITY_OK, [], [],
-            "asked for %s and delivered exactly that" % sorted(_asked))
+            "asked for %s and delivered exactly that; the scope is anchored to "
+            "the brief by %r" % (sorted(_asked), _anchor[:60]))
 
 
 
@@ -16863,8 +16941,15 @@ def edit(source_key: str, brief: str,
                         (tu.input.get("scope") or {}).get("beats") or [])
                     led["reedit_targets"] = sorted(_reedit_targets)
                 try:
-                    _sc = normalize_spec(dict(tu.input or {}))
+                    # THE BRIEF REACHES THE VALIDATOR. Without it the quote
+                    # leg cannot fire and the check would be structurally
+                    # present and permanently inert — this lane's oldest
+                    # failure shape, and the reason `existing_edit_quote` is
+                    # verified against text rather than trusted.
+                    _sc = normalize_spec(dict(tu.input or {}), brief=brief)
                     _sc["why"] = str((tu.input or {}).get("why") or "")[:200]
+                    _sc["existing_edit_quote"] = str(
+                        (tu.input or {}).get("existing_edit_quote") or "")[:200]
                     # TARGETS ARE NUMBERS. The agent answered
                     # text='10 per 25s - near every kept beat gets a bold
                     # caption, this is the workhorse per the brief' — the
@@ -18501,7 +18586,13 @@ def edit(source_key: str, brief: str,
     # runs to date is that case — so until now NOTHING judged the majority
     # shape. "Did what was asked land" has no referent here; what does have one
     # is whether the run delivered what IT decided.
-    if _fid_state == FIDELITY_UNSCOPED:
+    # SELF_SCOPED GOES THROUGH THE SAME DOOR. The VACANT guard below — "the
+    # edit contains nothing" — only ever ran on UNSCOPED, so a run that
+    # narrowed ITSELF to two families and then shipped a video with nothing on
+    # it walked straight past the one check written for an empty edit. That is
+    # exactly the case where the narrowing was never verified, so it is exactly
+    # the case that needs the coherence read.
+    if _fid_state in (FIDELITY_UNSCOPED, FIDELITY_SELF_SCOPED):
         _co_state, _co_drop, _co_unb, _co_why = unscoped_coherence(
             led.get("ruled_vs_built"), led.get("placements") or [],
             cut_made=_cut_made,
@@ -18838,6 +18929,13 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     # caller may pass the URLs in (run_round.sh / ab_run.sh mint them with the
     # system python3), and the in-process path is a convenience fallback that
     # says plainly what to do when boto3 is absent.
+    # THE GUARD THE OTHER LAUNCHER ALREADY HAD. This entrypoint blocks on
+    # .remote() for the whole pipeline — 170-500s — and an ephemeral `modal
+    # run` stops its app the moment the local client disconnects. Measured
+    # 2026-09-14: 468s in, mid-ruling, "App state is APP_STATE_STOPPED",
+    # everything lost.
+    from require_detach import require_detach
+    require_detach("a full pipeline run")
     _out_key, _src_url, _out_url = out_key, src_url, out_url
     if not (_src_url and _out_url and _out_key):
         try:

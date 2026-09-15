@@ -206,6 +206,16 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
     led = d["ledger"]
     rows = d["plan"]
     fams = families_in(rows)
+    # THE SPEC IS WHERE `caption` IS RULED, and this file never read it. The
+    # beat rows carry text/card/zoom/sfx; captions are ruled ONCE, for the whole
+    # edit, in set_spec's `families`. So `families_in(rows)` cannot see them and
+    # the section below asserted "NO CAPTIONS. They are not in the brief."
+    # UNCONDITIONALLY — on a run whose spec said families ["caption","cut"] and
+    # whose brief said "Burn readable captions". The plan told the agent not to
+    # do the thing the pipeline had ruled, and the export came back without
+    # them. Not an omission in the wiring: an instruction to skip.
+    _spec_fams = {str(f).lower() for f in ((led.get("spec") or {}).get("families") or [])}
+    _wants_captions = "caption" in _spec_fams
     # DROPPED IS NOT OMITTED. Refusing outright is right when an unmapped family
     # would reach the agent as prose to reconcile. But a ruling this pipeline
     # made and this surface cannot execute is a FACT about the run, and burying
@@ -411,12 +421,52 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
           f"the thing ruled out.",
           ("  You author no component code and you import no media — both are "
            "already done." if staged else ""),
-          "  No movement, no sound, no b-roll, no stock media.",
-          "  NO CAPTIONS. They are not in the brief. Captions are not items in "
-          "ChatCut —",
-          "  they are their own surface — so do not go looking for a caption "
-          "track either.",
-          ""]
+          "  No movement, no sound, no b-roll, no stock media."]
+    if _wants_captions:
+        L += ["  (Captions ARE in this edit — see the section below.)",
+              "", "## 4. THE CAPTIONS", "",
+              "  The brief asked for captions and the pipeline ruled them. They "
+              "are NOT items,",
+              "  so they are not in the adds above and they do not count toward "
+              "the placement",
+              "  total. They are their own surface, and it OWNS THE TEXT: "
+              "ChatCut transcribes",
+              "  the timeline itself and returns Cards keyed in TIMELINE FRAMES. "
+              "You do not",
+              "  supply words or times.",
+              "",
+              "    edit_captions action:\"enable\"",
+              "        -> transcribes every audible source and builds the Cards",
+              "    read_captions",
+              "        -> the Cards and the `revision` the next call needs",
+              "    edit_captions action:\"set_max_characters\"",
+              "        json:{\"scope\":\"all\",\"value\":<chars>,\"revision\":\"<from "
+              "read_captions>\"}",
+              "",
+              "  VERIFIED LIVE 2026-09-14: enable produced 42 Cards on a "
+              "2148-frame timeline,",
+              "  then max characters 14 and a preset, composed and read back off "
+              "the rendered frame.",
+              "",
+              "  DO NOT PICK A STYLE PRESET. Our nine caption styles (CleanCut, "
+              "Gadzhi, Prime,",
+              "  Cove, Lumen, Pulse, Quintessence, TwoTone, TypewriterReveal) "
+              "are Remotion",
+              "  components with their own word-level motion and they do not "
+              "transfer. ChatCut",
+              "  has 26 presets of its own and the mapping between the two "
+              "catalogues is a TASTE",
+              "  CALL NOBODY HAS MADE. Leave the default (plain: Inter, white) — "
+              "the brief asked",
+              "  for READABLE, and plain is readable. Choosing one here would be "
+              "inventing a",
+              "  ruling the pipeline did not make."]
+    else:
+        L += ["  NO CAPTIONS. The spec did not rule them. Captions are not items "
+              "in ChatCut —",
+              "  they are their own surface — so do not go looking for a caption "
+              "track either."]
+    L += [""]
     return "\n".join(L)
 
 

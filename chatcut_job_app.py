@@ -1072,6 +1072,16 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     with open("/work/system.md", "w") as fh:
         fh.write(sys_prompt)
     _sel = ",".join("mcp__chatcut__" + t for t in NEEDED_TOOLS)
+    # max_results DEFAULTS TO 5 AND THE SELECT LIST IS 26 NAMES LONG, so the
+    # "fetch them in ONE call" instruction was unsatisfiable as written: the
+    # bulk call returned five schemas and every other tool stayed uncallable.
+    # Measured on run-1789432983 — 23 ToolSearch calls out of 44 tool calls
+    # total, being `edit_item` re-fetched six times before it would run and
+    # `submit_export` sixteen, the agent visibly probing the cap
+    # (max_results 1, 2, 10, omitted). Those 22 extra round trips are also
+    # where 69% of that run's idle gap time sits. One argument, not a prompt
+    # rewrite: the count comes FROM the list so it cannot drift from it.
+    _nsel = len(NEEDED_TOOLS)
     # THE MODEL LEVER. ~700 of the 728s is the model thinking, and 39 of 88
     # turns called no tool at all, so the only remaining saving is thinking
     # LESS — not plumbing less. The split puts the mechanical legs (import,
@@ -1154,7 +1164,10 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
             f"in your final message. Do not fill it in quietly: a guess from "
             f"you is indistinguishable from a decision the pipeline made.\n\n"
             f"THE ChatCut tool schemas are DEFERRED. Fetch them in ONE call "
-            f"before you start:\n  ToolSearch query=\"select:{_sel}\"\n\n"
+            f"before you start:\n  ToolSearch query=\"select:{_sel}\" "
+            f"max_results={_nsel}\n"
+            f"  (max_results defaults to 5 — without it you get five of the "
+            f"{_nsel} and the rest stay uncallable.)\n\n"
             + TWO_TURN_LOOP
             + SHEET_RULE
             + FETCH_RULE
@@ -1200,7 +1213,10 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
             + f"BEFORE RENDER, call preview_timeline with viewerFrameCount to see the "
             f"composed result. Both of these are checked after the run.\n\n"
             f"The ChatCut tool schemas are DEFERRED. Fetch them in ONE call before "
-            f"you start:\n  ToolSearch query=\"select:{_sel}\"\n"
+            f"you start:\n  ToolSearch query=\"select:{_sel}\" "
+            f"max_results={_nsel}\n"
+            f"  (max_results defaults to 5 — without it you get five of the "
+            f"{_nsel} and the rest stay uncallable.)\n"
             f"The craft is already in your context — do not read /craft unless you "
             f"need something it does not cover.\n\n"
             + (HANDS_PARA_DECIDE if use_hands else ""))
@@ -1589,6 +1605,9 @@ def explain_refusal(name: str, use_old_props: str = ""):
 @app.local_entrypoint()
 def refusal(name: str, old_props_file: str = ""):
     """Print the full validator error for one component."""
+    from require_detach import require_detach
+    require_detach(why_not="one registration call, ~60s — a client drop costs "
+                           "a minute, not a run")
     old = ""
     if old_props_file:
         import json as _j
@@ -1599,6 +1618,8 @@ def refusal(name: str, old_props_file: str = ""):
 @app.local_entrypoint()
 def rendercheck(props_file: str = ""):
     """One project per component, pixels diffed, no teardown."""
+    from require_detach import require_detach
+    require_detach("a per-component render check (18 components, ~18 min)")
     txt = open(props_file, encoding="utf-8").read() if props_file else ""
     r = component_render_check.remote(txt)
     rows = r["components"]
@@ -1621,6 +1642,8 @@ def rendercheck(props_file: str = ""):
 @app.local_entrypoint()
 def sweep(props_file: str = ""):
     """Run the wiring sweep and print the table. No render, no agent."""
+    from require_detach import require_detach
+    require_detach("a wiring sweep")
     txt = open(props_file, encoding="utf-8").read() if props_file else ""
     r = wiring_sweep.remote(txt)
     rows = r["components"]
@@ -1706,16 +1729,12 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
     # of that sentence are true and NEITHER MECHANISM COVERS THE OTHER'S
     # FAILURE. So this refuses rather than relying on anyone remembering which
     # half they are looking at.
-    if "--detach" not in sys.argv:
-        raise SystemExit(
-            "REFUSING TO SPAWN WITHOUT --detach.\n"
-            "  .spawn() survives a signalled CLIENT. It does NOT survive the "
-            "APP stopping,\n"
-            "  and an ephemeral `modal run` stops its app as soon as this "
-            "entrypoint returns,\n"
-            "  killing the spawned call. Relaunch as:\n"
-            "    modal run --detach chatcut_job_app.py ...\n"
-            "  (or pass --wait to block in the foreground instead).")
+    # ONE GUARD, SHARED. This lived here as an inline refusal and the OTHER
+    # launcher — agentic_editor_app.py::main — did not have it, so on
+    # 2026-09-14 that one ran 468s, lost its client and stopped mid-ruling.
+    # A copy in one file is not a rule; it is a rule one file happens to know.
+    from require_detach import require_detach
+    require_detach("a spawned ChatCut edit")
     call = edit.spawn(clip_url, brief, model=model, run_id=rid,
                       use_hands=use_hands, plan=plan_text,
                       think_tokens=think_tokens,
