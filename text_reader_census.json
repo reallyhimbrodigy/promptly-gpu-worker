@@ -1,0 +1,29 @@
+{
+ "note": "code-shaped text readers; see smoke_text_readers_census.py",
+ "first_counted": "2026-09-14",
+ "readers": [
+  "smoke_authoring_reachable.py::\"hero\": str(hero)[:60]",
+  "smoke_authoring_reachable.py::led.setdefault(\"catalogue_gap_beats\"",
+  "smoke_beat_figure_offered.py::\"  (has a number)\" if b.get(\"has_number\")",
+  "smoke_chain_paths.py::cur = \"zoomed.mp4\"",
+  "smoke_chain_paths.py::if cur == \"zoomed.mp4\":",
+  "smoke_cut_count.py::count_cuts(led.get(\"keep_spans\")",
+  "smoke_cut_count.py::len(led.get(\"keep_spans\") or []) - 1",
+  "smoke_delivery_fps.py::_tgt = delivery_fps(float(_actual))",
+  "smoke_durable_plan.py::plan=_plan",
+  "smoke_framing_per_beat.py::build_cut(merged, framing_spans=_fr_spans)",
+  "smoke_framing_per_beat.py::def build_cut(keep_spans, words_per_cue=4, framing_spans=None)",
+  "smoke_half_ruling.py::_reject = _reject - _spent",
+  "smoke_one_definition_per_name.py::VERDICT_SURFACES_SYNCED = _sync_verdict_surfaces()",
+  "smoke_one_definition_per_name.py::_SYNCED_VERDICT_DESCRIPTIONS = _sync_verdict_descriptions()",
+  "smoke_pack_reel.py::os.path.exists(\"/work/reel.mov\")",
+  "smoke_prompt_fidelity.py::_TYPE = dict(BUILT_FAMILIES)",
+  "smoke_prompt_fidelity.py::_cap_for_fid = _cap_for_fid and _cc_changed",
+  "smoke_prompt_fidelity.py::beats_ruled=len(led.get(\"beat_verdicts\") or [])",
+  "smoke_prompt_fidelity.py::if _sc2 and _sc2.get(\"mode\") == \"targeted_change\"",
+  "smoke_purpose_join.py::_share >= 0.9",
+  "smoke_round_archived.py::sys.exit(1)",
+  "smoke_stage_accounting.py::_NESTED = (",
+  "smoke_visual_vocabulary.py::+ visual_purpose_block() +"
+ ]
+}

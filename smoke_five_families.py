@@ -91,7 +91,15 @@ ok("cutaway" not in (_top.get("PLACEMENT_FAMILY") or {}),
 # THE RETIRED SHAPE STAYS RETIRED. `place_cutaway` was a TOOL the agent called
 # to fetch footage; the family Zac ruled in is a RULING on a beat that the
 # harness builds from the upload. No tool, no fetch.
-ok("def place_cutaway" not in SRC, "place_cutaway is implemented again")
+# AST, NOT TEXT — AND THIS ONE IS A `not in`, WHICH IS THE WORSE DIRECTION.
+# A text needle that must be ABSENT goes GREEN the moment the code is reworded:
+# `def  place_cutaway` with two spaces, an `async def`, a decorator, or a
+# rename-and-alias would all restore the retired tool while this leg reported
+# it gone. Eight readers keyed to wording broke on correct code in one session;
+# the ones phrased as `not in` are the half that fail silently instead.
+ok(not any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+           and n.name == "place_cutaway" for n in ast.walk(TREE)),
+   "place_cutaway is implemented again")
 # NOTHING IS FETCHED. This is the property the 2026-09-06 removal protected and
 # the reason the name check existed. A cutaway may only come from material the
 # user already gave us.
@@ -475,7 +483,17 @@ for _nm, _if in sorted(_terms.items()):
            for n in ast.walk(_if)),
        f"terminal {_nm!r} does not set _unsupported_stop — it names itself "
        f"terminal and then lets the run continue")
-ok('"credit_charged": True' not in SRC,
+# Same direction, same risk: `'credit_charged': True` in single quotes, or
+# without the space after the colon, or built as `credit_charged=True`, all
+# slip past a text needle. Ask the syntax.
+ok(not any(
+    (isinstance(n, ast.Dict)
+     and any(isinstance(k, ast.Constant) and k.value == "credit_charged"
+             and isinstance(v, ast.Constant) and v.value is True
+             for k, v in zip(n.keys, n.values) if k is not None))
+    or (isinstance(n, ast.keyword) and n.arg == "credit_charged"
+        and isinstance(n.value, ast.Constant) and n.value.value is True)
+    for n in ast.walk(TREE)),
    "something records credit_charged: True on a terminal path")
 
 # ── THE CAPABILITY ROUTER ───────────────────────────────────────────────────
