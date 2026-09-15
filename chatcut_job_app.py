@@ -48,7 +48,13 @@ IMG = (
     # pillow AND numpy. Adding only pillow was a half-fix: the agent's command
     # is `from PIL import Image; import numpy as np`, so the identical error
     # came back on the next run. A fix aimed at the first line of a traceback.
-    .pip_install("pillow", "numpy", "opencv-python-headless")
+    # opencv PINNED BELOW 5. The unpinned install resolved to 5.0.0.93, which
+    # REMOVED the legacy Caffe importer: `cv2.dnn has no attribute
+    # readNetFromCaffe`, and HOP 6 died on the line that loads production's
+    # res10 model. Production's image pins 4.x, so an unpinned copy of its
+    # detector was always going to drift away from the weights it was written
+    # for. Same class as copying wget with its surroundings left behind.
+    .pip_install("pillow", "numpy", "opencv-python-headless<5")
     # THE REAL DETECTORS, NOT INVENTED ZONES. The sweep's face and burned-text
     # legs were judging against constants I made up — a face zone of 0.04-0.34
     # that reported "30% overlap" for every title, and an edge-density scan
@@ -1278,9 +1284,15 @@ def verify_hop5_composition(tok, stage, plan, items):
     os.makedirs("/work/hop5", exist_ok=True)
 
     def shot(tag):
+        # NO `expect` HERE. The viewer payload's key is not "viewer" and
+        # demanding it made _mcp_call raise, which HOP 5 reported as "could
+        # not render the all-visible frame" — the reader's own strictness
+        # showing up as a composition that could not be checked. What this
+        # call actually needs is A URL, so that is what it asserts, and a
+        # response with none names the keys it did get.
         pv = _mcp_call(tok, "preview_timeline",
                        {"projectId": pid, "views": ["viewer"],
-                        "viewerFrames": [best]}, expect="viewer")
+                        "viewerFrames": [best]})
         uris = []
 
         def walk(o):
@@ -1296,6 +1308,9 @@ def verify_hop5_composition(tok, stage, plan, items):
                     walk(v)
         walk(pv)
         if not uris:
+            out["detail"].append(
+                "preview_timeline returned no frame URL; keys: %s"
+                % (sorted(pv)[:10] if isinstance(pv, dict) else type(pv).__name__))
             return None
         p2 = "/work/hop5/%s.jpg" % tag
         return p2 if _fetch(uris[0], p2) else None
@@ -1976,10 +1991,28 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     # The last run's agent said in its closing message that it could not
     # confirm the StatCard. It was right, and nothing acted on it. A placement
     # the agent intended and cannot confirm is a DEFECT, not a note.
-    out["chain"] = verify_hops_3_and_4(tok, _stage, plan)
-    out["chain"]["hop5"] = verify_hop5_composition(
-        tok, _stage, plan, out["chain"].pop("_items", None) or _chain_items(
-            tok, _stage))
+    # A VERIFIER MUST NEVER KILL THE RUN. HOP 6 raised
+    # `cv2.dnn has no attribute readNetFromCaffe` and the whole job died in the
+    # container — no record persisted, the turn budget, the placements and the
+    # agent's entire transcript lost, for an edit that had already exported
+    # successfully. A gate exists to fail the VERDICT, not to destroy the
+    # evidence: every hop now returns FAILED on its own exception and the
+    # record is written either way.
+    def _hop(name, fn, *a):
+        try:
+            return fn(*a)
+        except Exception as e:                                    # noqa: BLE001
+            return {"state": "FAILED", "detail": [],
+                    "why": "%s raised %s: %s — this is the CHECK failing, not "
+                           "the edit" % (name, type(e).__name__, str(e)[:160])}
+
+    out["chain"] = _hop("hops 3+4", verify_hops_3_and_4, tok, _stage, plan)
+    for _k in ("hop3", "hop4"):
+        out["chain"].setdefault(_k, {"state": "FAILED",
+                                     "why": "the hop 3/4 pass did not report"})
+    out["chain"].setdefault("detail", [])
+    out["chain"]["hop5"] = _hop("hop5", verify_hop5_composition, tok, _stage,
+                                plan, _chain_items(tok, _stage))
     for _h in ("hop3", "hop4", "hop5"):
         print("  %s           : %s  %s"
               % (_h.upper(), out["chain"][_h]["state"], out["chain"][_h]["why"]),
@@ -1991,7 +2024,7 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     # whose frames carry two things on top of each other, does not pass —
     # whatever the agent exported. The deliverable is the edit that was ruled,
     # and an unverified one is not it.
-    out["chain"]["hop6"] = verify_hop6_clear(plan)
+    out["chain"]["hop6"] = _hop("hop6", verify_hop6_clear, plan)
     print("  HOP6           : %s  %s" % (out["chain"]["hop6"]["state"],
                                          out["chain"]["hop6"]["why"]), flush=True)
     for _l in out["chain"]["hop6"].get("detail") or []:
