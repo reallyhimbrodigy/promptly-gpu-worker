@@ -914,20 +914,39 @@ def prestage(access_token, title_text, controls=None, source_path=None,
 FETCH_RULE = (
     "LOOKING AT A COMPOSED FRAME TAKES TWO STEPS. `preview_timeline` returns "
     "signed image URLs, and `Read` only opens LOCAL paths — reading a URL "
-    "errors and you will have looked at nothing. Download first, then read:\n"
-    "    mkdir -p /work/frames && curl -fsSL -o /work/frames/f1.jpg \"<uri>\"\n"
-    "    Read /work/frames/f1.jpg\n"
+    "errors and you will have looked at nothing. Download first, then read.\n\n"
+    # ONE SHEET, NOT ONE READ PER FRAME. Measured on run-1789443426: 13 of 24
+    # tool calls were `Read` of a single frame — twelve turns spent on the same
+    # review an earlier run did in one, because nothing said to tile. A
+    # contact sheet is also the BETTER instrument: the defects this turn is
+    # for — a collision, a band drifting, a title landing on the wrong moment —
+    # are comparisons ACROSS frames, and frames read one at a time are compared
+    # from memory.
+    "DOWNLOAD THEM ALL, TILE THEM INTO ONE SHEET, READ THE SHEET ONCE. Not one "
+    "Read per frame: twelve frames read one at a time is twelve turns spent on "
+    "the review, and a collision or a drifting band is a comparison ACROSS "
+    "frames that a sheet shows you and a sequence of single frames does not.\n"
+    "    mkdir -p /work/frames && cd /work/frames\n"
+    "    curl -fsSL -o f0.jpg \"<uri 1>\"   # one curl per uri, all in ONE Bash\n"
+    "    curl -fsSL -o f1.jpg \"<uri 2>\"\n"
+    "    ffmpeg -v error -i f0.jpg -i f1.jpg ... -filter_complex \\\n"
+    "      \"[0][1]...hstack=inputs=N,scale=1600:-1\" -frames:v 1 sheet.png\n"
+    "    Read /work/frames/sheet.png            # ONE Read\n"
     "Use -fsSL: without it curl writes a redirect body and exits 0, which is a "
-    "file that is not a frame.\n\n")
+    "file that is not a frame. If a curl fails, say so — a sheet with a missing "
+    "tile is a frame you did not look at, not a frame that was fine.\n\n")
 
 TWO_TURN_LOOP = (
     "THE LOOP IS TWO TURNS. A third is a failure state, not a budget.\n\n"
-    "  TURN 1 — PLACE EVERYTHING, IN ONE BATCH. Every add the plan names goes "
-    "in a SINGLE edit_item call: the video segments and the graphics together. "
-    "`edit_item` commits the whole batch atomically and rolls the whole batch "
-    "back on one failure, so a batch that fails tells you something a "
-    "half-built timeline never can. Do not place them one at a time to watch "
-    "them land.\n\n"
+    "  TURN 1 — PLACE EVERYTHING, IN THE BATCHES THE PLAN NAMES. The plan "
+    "labels every add with its call (`CALL 1, adds[3]:`) and states at the end "
+    "how many calls there are and why. Usually that is ONE call for the items "
+    "and a second for any EFFECT, because an effect names an item that must "
+    "already exist and so cannot ride the batch that creates it. `edit_item` "
+    "commits a batch atomically and rolls the whole batch back on one failure, "
+    "so a batch that fails tells you something a half-built timeline never "
+    "can. Do not place them one at a time to watch them land, and do not "
+    "collapse the plan's calls into one.\n\n"
     "  TURN 2 — LOOK, THEN FIX IN ONE BATCH. Call preview_timeline with "
     "viewerFrameCount, DOWNLOAD the frames and READ them as images (see the "
     "two-step rule below), and judge the COMPOSED PICTURE — not the tool "
@@ -1210,9 +1229,10 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                        if _stage.get("titleAssetId") else
                        "  NO GRAPHIC IS STAGED — this plan names none. Place "
                        "the video segments only.\n"))
-                + ("Call target_project with that id, then place EVERY add the "
-                   "plan names in ONE edit_item call — the video segments and "
-                   "the graphics together. Each graphic's assetId is listed "
+                + ("Call target_project with that id, then place EVERY add "
+                   "the plan names, in the CALLS THE PLAN NAMES — it labels "
+                   "each add `CALL 1, adds[3]:` and says at the end how many "
+                   "calls there are and why. Each graphic's assetId is listed "
                    "above and already carries its own text, band, size, hold "
                    "and colours, so there is nothing to pass and nothing to "
                    "decide. `import_media` and "
@@ -1221,14 +1241,26 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                    "one revision.\n")
                 + (("\nThe project also carries %d PRE-REGISTERED components, "
                     "each already validated, each with its editable properties "
-                    "declared. If the plan calls for one, place it by assetId — "
-                    "you never author component code:\n  %s\n"
-                    % (_libn, ", ".join(
-                        "%s=%s%s" % (
+                    "declared. If the plan calls for one, place it by the "
+                    "assetId BESIDE ITS NAME — the plan writes the NAME "
+                    "(`caption:TwoTone`), this list holds the ID. Never send a "
+                    "name as an assetId, and never author component code:\n"
+                    "%s\n"
+                    # THE WHOLE UUID. This printed `[:8]`, so every id the
+                    # agent could see was already truncated — and it then sent
+                    # `caption:TwoTone` (rejected, the run's only error) and
+                    # recovered with `c85df628`, the 8 characters this line
+                    # gave it. Every abbreviated id in two runs came from here.
+                    # edit_item happens to resolve a prefix and inspect_item
+                    # refuses one, so the truncation cost three failed calls in
+                    # the run before this and one rejected call in this one,
+                    # while looking like the agent mistyping.
+                    % (_libn, "\n".join(
+                        "    %-22s %s%s" % (
                             k,
                             ((v.get("assetId") if isinstance(v, dict) else v)
-                             or "?")[:8],
-                            ("(+overrides)" if isinstance(v, dict) else ""))
+                             or "?"),
+                            ("   (+overrides)" if isinstance(v, dict) else ""))
                         for k, v in sorted(
                             (_stage.get("components") or {}).items())[:60])))
                    if _libn else "")

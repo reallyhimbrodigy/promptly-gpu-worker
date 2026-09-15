@@ -19,8 +19,18 @@ SRC = open("chatcut_job_app.py", encoding="utf-8").read()
 LEGS = [
     ("the constant exists",
      lambda s: re.search(r"^TWO_TURN_LOOP = \(", s, re.M)),
-    ("it names turn 1 as one batch",
-     lambda s: "TURN 1" in s and "SINGLE edit_item call" in s),
+    # THE PROPERTY, NOT THE SENTENCE. This read `"SINGLE edit_item call" in s`
+    # — and the rule had to change, because an EFFECT names an item that must
+    # already exist and so cannot ride the batch that creates it. The plan now
+    # emits two calls, the prompt defers to it, and this leg failed on a
+    # CORRECT prompt. Sixth reader this session keyed to wording rather than
+    # behaviour. What turn 1 must actually forbid is placing one at a time; and
+    # what it must actually say is that the plan decides the batching.
+    ("turn 1 batches, and forbids placing one at a time",
+     lambda s: ("TURN 1" in s
+                and re.search(r"[Dd]o not place them one at a time", s)
+                and re.search(r"BATCHES THE PLAN NAMES|SINGLE edit_item call",
+                              s))),
     ("it names turn 2 as look-then-fix",
      lambda s: "TURN 2" in s and "preview_timeline" in s),
     ("it gates turn 3 on a NAMED defect",
@@ -47,7 +57,13 @@ if __name__ == "__main__":
         ("constant deleted", SRC.replace("TWO_TURN_LOOP = (", "X_UNUSED = (")),
         ("not concatenated", SRC.replace("+ TWO_TURN_LOOP", "+ \"\"")),
         ("turn 3 gate removed", SRC.replace("UNJUSTIFIED", "fine")),
-        ("batching removed", SRC.replace("SINGLE edit_item call", "call")),
+        # THE MUTATION MUST MATCH THE LEG. This deleted the old wording, which
+        # the leg no longer reads — so the RED proof printed 0 red and the
+        # batching leg was, for that moment, a check that could not fail.
+        ("batching removed",
+         SRC.replace("Do not place them one at a time to watch them land",
+                     "Place them however you like")
+            .replace("BATCHES THE PLAN NAMES", "way you prefer")),
     ]
     red_ok = True
     for label, mutated in reds:
