@@ -134,6 +134,110 @@ FAMILY_MAP = {
 }
 
 
+def _target_of(frame, seg_add):
+    """Which adds[] entry made the video item under `frame`.
+
+    THE ZOOM COST THREE FAILED inspect_item CALLS because the plan said "read
+    it back from the adds you just made" — an instruction to go looking. The
+    segment covering a timeline frame is arithmetic this file already has: the
+    segments are emitted first, in order, so adds[k] IS the k-th segment. Name
+    the index and the id arrives in the response the agent already holds.
+    """
+    for k, a, b, f0, f1 in seg_add:
+        if f0 <= frame < f1:
+            return ("the id returned for CALL 1 adds[%d] (source %.2fs-%.2fs, "
+                    "timeline frames %d-%d). edit_item returns createdItems in "
+                    "adds order — take the WHOLE uuid from the response you "
+                    "already have. DO NOT call inspect_item, preview_timeline "
+                    "or read_project to find it." % (k, a, b, f0, f1))
+    raise Incomplete(
+        "a zoom is ruled on timeline frame %d and NO video segment covers it "
+        "(segments end at frame %d). An effect with no item to sit on is a "
+        "placement nobody can execute."
+        % (frame, seg_add[-1][4] if seg_add else 0))
+
+
+# ── THE TWO SOUND VOCABULARIES, MAPPED BY HAND AND CLOSED ────────────────────
+# The planner's `sfx_name` is a CLOSED ENUM OF SIXTEEN PREDICATES ("the speaker
+# throws a verbal blow", "a photo is taken"), each a MOMENT in the footage.
+# ChatCut's library is thirty-five NAMED RECORDINGS. Neither is a spelling of
+# the other, and the first version of this resolver matched them by shared
+# tokens — which answered `whoosh` and `ding` and returned nothing at all for
+# `transition-sfx` and `punchsfx`, the only two sounds the real edit ruled.
+#
+# Same shape as `white_on_footage` arriving in a `color` field: a field match
+# that checked names, units and clock and never checked VOCABULARIES. So the
+# map is written out, and a token that is not in it is DROPPED AND NAMED rather
+# than fuzzily satisfied — a wrong sound on a beat is a worse edit than a
+# missing one, and a matcher that always finds something can never say so.
+SFX_LIBRARY = {
+    # the four whooshes-and-turns, by weight
+    "swoosh-sound-effects": "simple-whoosh",
+    "woosh-professional":   "airy-short-whoosh",      # narration travels: light
+    "transition-sfx":       "deep-short-whoosh",      # the act turn: heaviest
+    # impacts. The library has ONE impact and two predicates want it — the
+    # heaviest claim and the verbal blow are the same sound at this surface.
+    "boom":                 "vine-boom-impact",
+    "punchsfx":             "vine-boom-impact",
+    # a reversal STOPS; it does not build. The riser was wrong for `shocking`
+    # for the same reason `from` was wrong for a sound anchor — plausible, and
+    # backwards.
+    "shockingsfx":          "record-scratch-stop",
+    "imposter":             "fast-suspense-riser",    # suspicion BUILDS
+    "awkward-moment":       "awkward-crow-flyby",
+    "wompwomp":             "short-drum-roll-sting",
+    # literals
+    "popsfx":               "tiny-bubble-pop",
+    "iphoneding":           "phone-notification-ping",
+    "money-ching":          "cash-register-success",
+    "camera-flash":         "camera-shutter",
+    "mouse-click-sound":    "mouse-click",
+}
+# `voice` IS NOT A SOUND. Its predicate is "a beat whose delivery already does
+# what a sound would do" — a SIGNED choice to place nothing. Mapping it to any
+# recording would add a sound the planner explicitly declined.
+SFX_MEANS_SILENCE = {"voice"}
+# ...and `rizz` has no recording here. The library carries no charm sting, and
+# `anime-wow-reaction` is a reaction, not a flex. Named, not substituted.
+SFX_NO_SOUND_IN_LIBRARY = {"rizz"}
+
+
+def _sound_ids():
+    """The library's real ids, read from the fetched file — never hand-typed."""
+    import os as _os
+    _p = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                       "chatcut_sound_library.json")
+    lib = json.load(open(_p, encoding="utf-8"))["sounds"]
+    return {s["id"].split(":")[-1]: (s["id"], s["name"]) for s in lib}
+
+
+def _resolve_sound(want):
+    """`sfx_name` -> (assetId, name, state). Offline, closed, and honest.
+
+    THE AGENT SPENT FIVE browse_library CALLS on one placement, because the plan
+    told it to go and find the id. The library does not change between runs, so
+    it is fetched once and stored beside this file — the same move as
+    pre-staging the project, the asset and the components.
+
+    state is MEASURED (a real id), SILENT (`voice`: the planner declined a
+    sound) or ABSENT (nothing in the library plays this moment).
+    """
+    w = str(want or "").strip().lower()
+    if w in SFX_MEANS_SILENCE:
+        return None, None, "SILENT"
+    slug = SFX_LIBRARY.get(w)
+    if slug is None:
+        return None, None, "ABSENT"
+    ids = _sound_ids()
+    if slug not in ids:
+        # the map names a recording the library does not carry. Loud, because a
+        # silently-empty map is how a closed enum rots into a no-op.
+        raise Incomplete(
+            "SFX_LIBRARY maps %r to %r and chatcut_sound_library.json has no "
+            "such sound. The map and the library moved apart." % (w, slug))
+    return ids[slug][0], ids[slug][1], "MEASURED"
+
+
 class Unmapped(Exception):
     """A family with no verified ChatCut primitive reached the translator."""
 
@@ -279,12 +383,13 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
          "",
          "## 1. THE BASE VIDEO — one item on V1",
          "",
-         "EVERY add BELOW IS ONE ELEMENT OF ONE edit_item CALL. The indices run "
-         "across the",
-         "whole plan — adds[0], adds[1], … — so send them together in a single "
-         "call and",
-         "check the returned item count equals the number of adds the plan "
-         "names.",
+         "EVERY add BELOW IS LABELLED WITH ITS CALL AND ITS SLOT — `CALL 1, "
+         "adds[3]:`.",
+         "Send each call's adds TOGETHER, in one call, in the order given, and "
+         "check the",
+         "returned item count equals the number of adds that call names. The "
+         "plan states",
+         "at the end how many calls there are and why.",
          ""]
     # A PLAN THAT SAYS "CREATE" BESIDE A PROMPT THAT SAYS "DO NOT CREATE" is
     # the unsatisfiable instruction that cost the first plan-first run two
@@ -331,10 +436,12 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
         return None
 
     _idx = [0]
+    _seg_add = []          # (adds index, source a, source b, timeline f0, f1)
     t_cursor = 0
     for a, b in keep:
         f0, f1 = int(round(t_cursor * fps)), int(round((t_cursor + (b - a)) * fps))
-        L += [f"  edit_item adds[{_idx[0]}]:",
+        _seg_add.append((_idx[0], a, b, f0, f1))
+        L += [f"  CALL 1, adds[{_idx[0]}]:",
               f"    type                     : video",
               f"    assetId                  : (given in your instructions)",
               f"    from                     : {f0}",
@@ -418,7 +525,7 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
                f"  GRAPHIC {n} — one create_motion_graphic_from_code, then one "
                f"item on V2"),
               f"    text          : {p['text_content']!r}",
-              f"    edit_item adds[{_gi}]:",
+              f"    CALL 1, adds[{_gi}]:",
               f"      type                   : motion-graphic",
               f"      assetId                : the GRAPHIC {n} assetId listed "
               f"in your instructions",
@@ -452,30 +559,10 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
     # could not express either, so both fell out of every plan in silence while
     # the map said they were ready.
     _zoom_rows = [q for q in rows if "zoom" in (q.get("treatment") or [])]
-    if _zoom_rows:
-        L += ["## 2b. THE ZOOMS — an effect ON the video item, not an item", ""]
-        for q in _zoom_rows:
-            _t0 = _to_timeline(q["src_t0"])
-            if _t0 is None:
-                raise Incomplete(
-                    "a zoom is ruled at source %.2fs, which the cut REMOVED."
-                    % q["src_t0"])
-            _gi = _idx[0]
-            _idx[0] += 1
-            L += ["  edit_item adds[%d]:" % _gi,
-                  "    type                   : effect",
-                  "    assetId                : builtin:zoom",
-                  "    targetItemId           : the id of the VIDEO item "
-                  "covering timeline frame %d — read it back from the adds you "
-                  "just made" % int(round(_t0 * fps)),
-                  '    propertyOverrides      : {"magnification": 1.12, '
-                  '"shape": "%s"}' % (q.get("zoom_arc") or "payoff"),
-                  "    why                    : %s" % q.get("why"), ""]
-            _emitted["zoom"] = _emitted.get("zoom", 0) + 1
-
     _sfx_rows = [q for q in rows if "sfx" in (q.get("treatment") or [])]
+    _sfx_unplayed = []
     if _sfx_rows:
-        L += ["## 2c. THE SOUND EFFECTS — audio items on their own track", ""]
+        L += ["## 2b. THE SOUND EFFECTS — audio items on their own track", ""]
         for q in _sfx_rows:
             _t0 = _to_timeline(q["src_t0"])
             if _t0 is None:
@@ -484,16 +571,67 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
                     "REMOVED." % q["src_t0"])
             _gi = _idx[0]
             _idx[0] += 1
-            L += ["  edit_item adds[%d]:" % _gi,
+            _want = str(q.get("sfx_name") or "").strip()
+            _sid, _sname, _sst = _resolve_sound(_want)
+            if _sst != "MEASURED":
+                # NAMED, NOT VANISHED, and not raised either: one unplayable
+                # moment must not cost the other thirteen placements. This is
+                # the `dropped` discipline applied one level down, to a single
+                # beat instead of a whole family.
+                _sfx_unplayed.append((q["src_t0"], _want, _sst))
+                _emitted["sfx"] = _emitted.get("sfx", 0) + 1
+                continue
+            L += ["  CALL 1, adds[%d]:" % _gi,
                   "    type                   : audio",
-                  '    assetId                : library:sound:<id> — resolve '
-                  'the id ONCE with browse_library category="sound-effects" '
-                  'searching %r' % (q.get("sfx_name") or "the beat"),
-                  "    from                   : %d" % int(round(_t0 * fps)),
+                  "    assetId                : %s   (%s — resolved here; do "
+                  "NOT call browse_library)" % (_sid, _sname),
+                  # `fromFrame`, NOT `from`, AND IT IS AN ANCHOR. browse_library
+                  # states the shape outright: "edit_item imports/reuses the
+                  # Library sound asset and SHIFTS THE ITEM START so the sound
+                  # anchor lands on fromFrame." A sound placed with `from`
+                  # starts where the beat starts, which puts the audible hit
+                  # LATE by the length of its own attack.
+                  "    fromFrame              : %d   (the editorial moment — "
+                  "edit_item shifts the item so the sound's ANCHOR lands here)"
+                  % int(round(_t0 * fps)),
                   "    NOTE: library sounds REFUSE validateOnly by design — "
                   "commit them, do not dry-run them.",
                   "    why                    : %s" % q.get("why"), ""]
             _emitted["sfx"] = _emitted.get("sfx", 0) + 1
+        for _t, _w, _st in _sfx_unplayed:
+            L += ["  NO SOUND AT %.2fs — ruled %r, %s." % (_t, _w, _st),
+                  "    %s" % ("the planner's own `voice` ruling: this beat's "
+                              "delivery already does what a sound would do, so "
+                              "placing one would overrule it."
+                              if _st == "SILENT" else
+                              "ChatCut's 35-sound library carries no recording "
+                              "for this moment. Named here rather than "
+                              "substituted — a wrong sound on a beat is a "
+                              "worse edit than a missing one."), ""]
+
+    _zi = 0
+    if _zoom_rows:
+        L += ["## 2c. THE ZOOMS — CALL 2. An effect ON a video item, not an "
+              "item of its own;", "    it names an item that must already "
+              "exist, so it cannot ride CALL 1.", ""]
+        for q in _zoom_rows:
+            _t0 = _to_timeline(q["src_t0"])
+            if _t0 is None:
+                raise Incomplete(
+                    "a zoom is ruled at source %.2fs, which the cut REMOVED."
+                    % q["src_t0"])
+            _gi = _idx[0]
+            _idx[0] += 1
+            L += ["  CALL 2, adds[%d]:" % _zi,
+                  "    type                   : effect",
+                  "    assetId                : builtin:zoom",
+                  "    targetItemId           : %s" % _target_of(
+                      int(round(_t0 * fps)), _seg_add),
+                  '    propertyOverrides      : {"magnification": 1.12, '
+                  '"shape": "%s"}' % (q.get("zoom_arc") or "payoff"),
+                  "    why                    : %s" % q.get("why"), ""]
+            _zi += 1
+            _emitted["zoom"] = _emitted.get("zoom", 0) + 1
 
     # ── THE RECONCILIATION. Loud, by name, or the plan does not exist. ──────
     _lost = {f: _ruled[f] - _emitted.get(f, 0) for f in _ruled
@@ -523,10 +661,37 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
               "      " + ", ".join(dropped),
               "  Do not attempt them. They are named so the edit is honest "
               "about its gaps.", ""]
-    L += ["", f"  THE PLAN NAMES {_idx[0]} adds. One edit_item call, "
-          f"{_idx[0]} elements. If the timeline",
-          "  afterwards holds fewer items than that, the edit is incomplete "
-          "and you are not done.",
+    # TWO CALLS, AND THE PLAN SAYS SO — because an EFFECT names an item that
+    # must already exist. The last run spent a turn on
+    # `ToolSearch("edit_item adds effect targetItemId reference same batch temp
+    # id")` working this out, then split into two calls anyway. An instruction
+    # that says "one call" while the surface needs two is not a simpler
+    # instruction; it is a turn spent discovering the contradiction.
+    _n_eff = len(_zoom_rows)
+    if _n_eff:
+        L += ["", "  THE PLAN NAMES %d adds, IN TWO edit_item CALLS:" % _idx[0],
+              "    CALL 1 — the %d video / motion-graphic / audio adds. An "
+              "item is created for each," % (_idx[0] - _n_eff),
+              "             and the response lists them IN adds ORDER. KEEP "
+              "THAT RESPONSE.",
+              "    CALL 2 — the %d effect add%s, whose targetItemId is an id "
+              "from CALL 1's" % (_n_eff, "" if _n_eff == 1 else "s"),
+              "             response. An effect names an item that must "
+              "ALREADY EXIST, so it",
+              "             cannot ride the batch that creates it.",
+              "",
+              "  IDS ARE FULL UUIDS. A tool result may ABBREVIATE an id for "
+              "display; the",
+              "  id you pass is the whole thing from CALL 1's response. Three "
+              "inspect_item",
+              "  calls went on guessing a truncated one (`d57895d3`, then "
+              "`d57895d37f`, then",
+              "  the real uuid). Copy, do not retype.", ""]
+    else:
+        L += ["", f"  THE PLAN NAMES {_idx[0]} adds. One edit_item call, "
+              f"{_idx[0]} elements.", ""]
+    L += ["  If the timeline afterwards holds fewer items than that, the edit "
+          "is incomplete and you are not done.",
           "", "## 3. WHAT IS NOT IN THIS EDIT", "",
           f"  Exactly {n} motion graphic{'' if n == 1 else 's'}. A second one is "
           f"the thing ruled out.",

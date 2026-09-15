@@ -1,0 +1,181 @@
+{
+ "source": "browse_library category=sound-effects, all 4 groups, 2026-09-14",
+ "total": 35,
+ "sounds": [
+  {
+   "id": "library:sound:simple-whoosh",
+   "name": "Simple Whoosh",
+   "group": "transition-emphasis"
+  },
+  {
+   "id": "library:sound:deep-short-whoosh",
+   "name": "Deep Short Whoosh",
+   "group": "transition-emphasis"
+  },
+  {
+   "id": "library:sound:airy-short-whoosh",
+   "name": "Airy Short Whoosh",
+   "group": "transition-emphasis"
+  },
+  {
+   "id": "library:sound:long-suspense-riser",
+   "name": "Long Suspense Riser",
+   "group": "transition-emphasis"
+  },
+  {
+   "id": "library:sound:fast-suspense-riser",
+   "name": "Fast Suspense Riser",
+   "group": "transition-emphasis"
+  },
+  {
+   "id": "library:sound:sharp-bass-riser",
+   "name": "Sharp Bass Riser",
+   "group": "transition-emphasis"
+  },
+  {
+   "id": "library:sound:short-drum-roll-sting",
+   "name": "Short Drum Roll Sting",
+   "group": "transition-emphasis"
+  },
+  {
+   "id": "library:sound:record-scratch-stop",
+   "name": "Record Scratch Stop",
+   "group": "transition-emphasis"
+  },
+  {
+   "id": "library:sound:record-scratch-rewind",
+   "name": "Record Scratch Rewind",
+   "group": "transition-emphasis"
+  },
+  {
+   "id": "library:sound:tiny-bubble-pop",
+   "name": "Tiny Bubble Pop",
+   "group": "ui-motion-feedback"
+  },
+  {
+   "id": "library:sound:synthetic-bubble-pop",
+   "name": "Synthetic Bubble Pop",
+   "group": "ui-motion-feedback"
+  },
+  {
+   "id": "library:sound:keyboard-typing-loop",
+   "name": "Keyboard Typing Loop",
+   "group": "ui-motion-feedback"
+  },
+  {
+   "id": "library:sound:slow-dell-keyboard-typing",
+   "name": "Slow Dell Keyboard Typing",
+   "group": "ui-motion-feedback"
+  },
+  {
+   "id": "library:sound:mouse-click",
+   "name": "Mouse Click",
+   "group": "ui-motion-feedback"
+  },
+  {
+   "id": "library:sound:new-notification-ping",
+   "name": "New Notification Ping",
+   "group": "ui-motion-feedback"
+  },
+  {
+   "id": "library:sound:ui-pop-up-alert",
+   "name": "UI Pop-up Alert",
+   "group": "ui-motion-feedback"
+  },
+  {
+   "id": "library:sound:phone-notification-ping",
+   "name": "Phone Notification Ping",
+   "group": "ui-motion-feedback"
+  },
+  {
+   "id": "library:sound:sent-message-ping",
+   "name": "Sent Message Ping",
+   "group": "ui-motion-feedback"
+  },
+  {
+   "id": "library:sound:video-call-ringtone",
+   "name": "Video Call Ringtone",
+   "group": "ui-motion-feedback"
+  },
+  {
+   "id": "library:sound:clean-ding",
+   "name": "Clean Ding",
+   "group": "ui-motion-feedback"
+  },
+  {
+   "id": "library:sound:censor-beep",
+   "name": "Censor Beep",
+   "group": "ui-motion-feedback"
+  },
+  {
+   "id": "library:sound:cash-register-success",
+   "name": "Cash Register Success",
+   "group": "ui-motion-feedback"
+  },
+  {
+   "id": "library:sound:camera-shutter",
+   "name": "Camera Shutter",
+   "group": "device-texture"
+  },
+  {
+   "id": "library:sound:vintage-camera-shutter",
+   "name": "Vintage Camera Shutter",
+   "group": "device-texture"
+  },
+  {
+   "id": "library:sound:short-shutter-click",
+   "name": "Short Shutter Click",
+   "group": "device-texture"
+  },
+  {
+   "id": "library:sound:mechanical-clicking-loop",
+   "name": "Mechanical Clicking Loop",
+   "group": "device-texture"
+  },
+  {
+   "id": "library:sound:gear-turn-click",
+   "name": "Gear Turn Click",
+   "group": "device-texture"
+  },
+  {
+   "id": "library:sound:light-clock-tick",
+   "name": "Light Clock Tick",
+   "group": "device-texture"
+  },
+  {
+   "id": "library:sound:glitchy-tv-signal",
+   "name": "Glitchy TV Signal",
+   "group": "device-texture"
+  },
+  {
+   "id": "library:sound:tv-switch-off-noise",
+   "name": "TV Switch Off Noise",
+   "group": "device-texture"
+  },
+  {
+   "id": "library:sound:vine-boom-impact",
+   "name": "Vine Boom Impact",
+   "group": "reaction-mood"
+  },
+  {
+   "id": "library:sound:dramatic-thunder-roll",
+   "name": "Dramatic Thunder Roll",
+   "group": "reaction-mood"
+  },
+  {
+   "id": "library:sound:anime-wow-reaction",
+   "name": "Anime Wow Reaction",
+   "group": "reaction-mood"
+  },
+  {
+   "id": "library:sound:awkward-crow-flyby",
+   "name": "Awkward Crow Flyby",
+   "group": "reaction-mood"
+  },
+  {
+   "id": "library:sound:sitcom-laugh-track",
+   "name": "Sitcom Laugh Track",
+   "group": "reaction-mood"
+  }
+ ]
+}

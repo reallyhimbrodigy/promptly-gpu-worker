@@ -480,7 +480,14 @@ NEEDED_TOOLS = [
     "browse_assets", "inspect_asset", "trigger_transcript", "track_progress",
     "read_script", "apply_script", "find_transcript", "preview_timeline",
     "inspect_item", "edit_item", "edit_track", "manage_timelines",
-    "split_item", "smooth_audio", "browse_library", "search_fonts",
+    "split_item", "smooth_audio", "search_fonts",
+    # NO `browse_library`. Five of one run's 27 tool calls were browse_library,
+    # hunting the ids for two sounds, because the plan told the agent to go and
+    # find them. The plan now carries the real `library:sound:<id>` for every
+    # sound it rules, resolved offline from the fetched library — so the tool
+    # has nothing left to answer, and WITHHOLDING it is what makes that true
+    # rather than hoped for. Same move as `--detach` at the launcher: a
+    # capability the plan does not need is a capability the run cannot spend.
     "create_motion_graphic_from_code", "edit_asset", "edit_captions",
     "read_captions", "submit_export", "track_export",
 ]

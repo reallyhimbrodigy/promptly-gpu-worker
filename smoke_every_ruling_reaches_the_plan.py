@@ -22,6 +22,7 @@ is not a smaller edit; it is an edit nobody ruled.
 """
 import copy
 import json
+import re
 import os
 import sys
 import tempfile
@@ -36,7 +37,7 @@ def _beat(t0, t1, treatment, text="WORDS"):
             "text_content": text, "size": "medium", "case": "upper",
             "where": "upper_third", "colour": "white_on_footage",
             "hold_s": 2.0, "why": "smoke", "purpose": "hook",
-            "zoom_arc": "payoff", "sfx_name": "whoosh",
+            "zoom_arc": "payoff", "sfx_name": "transition-sfx",
             "card_condition": "WHEN A NUMBER LANDS", "card_hero": "5 MINUTES",
             "card_label": "to edit"}
 
@@ -63,7 +64,15 @@ def emit(plan):
 def legs():
     bad = []
     t = emit(BASE)
-    n_adds = t.count("edit_item adds[")
+    # COUNT THE BLOCK, NOT ITS LABEL. The effect moved into a second
+    # edit_item call and its header changed from `edit_item adds[0]:`
+    # to `CALL 2, adds[0]:` — a counter keyed to the old prose
+    # reported the zoom missing from a plan that emits it.
+    # ...and a HEADER, not a MENTION of one. The plan's own prose shows the
+    # agent the shape ("EVERY add BELOW IS LABELLED ... `CALL 1, adds[3]:`"),
+    # and an unanchored scan counted that sentence as a seventh add. Fourth
+    # reader today to be wrong about correct text: anchor to the whole line.
+    n_adds = len(re.findall(r"^[ \t]*CALL \d+, adds\[\d+\]:[ \t]*$", t, re.M))
     # 1 video + 3 graphics + 1 zoom + 1 sfx = 6
     if n_adds != 6:
         bad.append("expected 6 adds (1 video, 3 graphics, 1 zoom, 1 sfx), got %d"

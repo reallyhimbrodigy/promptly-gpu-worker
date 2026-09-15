@@ -70,10 +70,18 @@ check("the job function exists", fn is not None)
 if fn is not None:
     pre_ln = [n.lineno for n in ast.walk(fn)
               if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "preflight"]
+    # THE LAUNCH MOVED AND THE CHECK DID NOT. This looked for
+    # `subprocess.run(... "claude" ...)` inside `edit`; the launch now goes
+    # through `turn_clock.run_timed`, so the leg found nothing and reported
+    # FAIL on a file that launches the agent correctly — and, worse, the
+    # ordering leg below it silently stopped running, so "preflight runs BEFORE
+    # the agent" has been unproven ever since. Find the launch by what it IS —
+    # the argv whose first element is the literal "claude" — not by the name of
+    # whatever runs it.
     agent_ln = [n.lineno for n in ast.walk(fn)
-                if isinstance(n, ast.Call)
-                and "subprocess.run" in ast.unparse(n.func)
-                and "claude" in ast.unparse(n)]
+                if isinstance(n, ast.List) and n.elts
+                and isinstance(n.elts[0], ast.Constant)
+                and n.elts[0].value == "claude"]
     check("preflight is CALLED inside the job", bool(pre_ln))
     check("the agent is launched inside the job", bool(agent_ln))
     if pre_ln and agent_ln:

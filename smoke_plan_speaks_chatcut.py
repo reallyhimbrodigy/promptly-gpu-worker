@@ -112,13 +112,30 @@ if os.path.exists(_pl):
     subprocess.run([sys.executable, "plan_for_chatcut.py", _pl, _out, "--staged"],
                    capture_output=True)
     _txt = open(_out, encoding="utf-8").read() if os.path.exists(_out) else ""
-    _ix = re.findall(r"edit_item adds\[(\d+)\]", _txt)
+    # ONE SLOT SPACE PER CALL. An effect names an item that must already
+    # exist, so the plan now emits TWO edit_item calls and each numbers its
+    # own adds array from 0. A single flat index space across both calls would
+    # tell the agent to put the effect at adds[10] of a call with one element.
+    # So the legs run PER CALL — and a regex anchored to the old single-call
+    # prose matched one stray mention and called a correct plan broken.
+    _per = {}
+    for _m in re.finditer(r"^\s*CALL (\d+), adds\[(\d+)\]:", _txt, re.M):
+        _per.setdefault(_m.group(1), []).append(_m.group(2))
+    _ix = [i for v in _per.values() for i in v]
     check("the emitted plan numbers every add", bool(_ix), "none found")
-    check("no two adds share an index", len(_ix) == len(set(_ix)),
-          f"indices: {_ix}")
-    check("the indices are contiguous from 0",
-          sorted(int(i) for i in _ix) == list(range(len(_ix))),
-          f"indices: {_ix}")
+    for _c, _v in sorted(_per.items()):
+        check("no two adds share an index in CALL %s" % _c,
+              len(_v) == len(set(_v)), f"indices: {_v}")
+        check("CALL %s indices are contiguous from 0" % _c,
+              sorted(int(i) for i in _v) == list(range(len(_v))),
+              f"indices: {_v}")
+    # ABSENT, PRINTED — not silence. If the fixture rules no effect there is
+    # no CALL 2, and a leg that simply does not run reads exactly like a leg
+    # that passed. `smoke_plan_fields_are_chatcuts` builds its own zoom-bearing
+    # fixture and checks the CALL 2 shape there.
+    if "2" not in _per:
+        print("  [--] CALL 2 legs ABSENT: the fixture at %s rules no effect"
+              % _pl)
     check("the plan states how many adds it names",
           "THE PLAN NAMES" in _txt)
 else:
