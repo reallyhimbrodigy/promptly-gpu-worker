@@ -789,9 +789,17 @@ check("the set_spec description could be assembled (non-vacuity)",
       len(_spec_desc) > 400, f"{len(_spec_desc)} chars")
 check("set_spec tells the agent a small brief must produce a small edit",
       "LITTLE MUST PRODUCE LITTLE" in _spec_desc)
-check("and warns that full_edit is how a narrow request escapes scope",
-      "never because you are unsure" in _spec_desc,
-      "full_edit has no family scope, so nothing downstream can object")
+# THE PROPERTY, NOT THE WARNING. This read "never because you are unsure" — a
+# sentence that existed because the mode choice was a JUDGMENT and full_edit
+# was the escape hatch from it. The choice is now a READING: two questions of
+# the brief, and a BOTH branch so a tie needs no breaking. A warning against
+# picking it out of uncertainty is redundant once uncertainty has somewhere to
+# go, and the leg failed on the change that removed the need for it.
+check("set_spec makes the mode a READING, not a judgment — a narrow brief with "
+      "no vibe has an answer that is not full_edit",
+      "targeted_change, families = what it named" in _spec_desc
+      and "BOTH yes" in _spec_desc,
+      "the Q1/Q2 procedure is missing, so full_edit is an escape hatch again")
 
 print()
 if fails:

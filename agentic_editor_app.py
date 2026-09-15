@@ -2662,6 +2662,32 @@ def normalize_spec(declared, brief=""):
                 f"decides whether the generated-footage family gets built")
         return {"mode": mode, "families": None, "beats": None,
                 "unsupported_class": _cls}
+    # A full_edit MAY CARRY GUARANTEED FAMILIES. This discarded them on every
+    # non-targeted mode, so the ruling — a vibe word plus named changes is a
+    # full_edit whose named families MUST be delivered — could not reach the
+    # grader even when the agent declared it. The families were normalised to
+    # None one function before anything read them.
+    #
+    # They are GUARANTEES here, not a scope: the grader requires them and lets
+    # the vibe add more. A targeted_change's families still bound what may be
+    # touched at all, which is why that branch keeps its own stricter rules
+    # below (non-empty, and a brief quote to anchor them).
+    if mode == "full_edit":
+        _fe = d.get("families")
+        if _fe is not None and (not isinstance(_fe, list)
+                                or not all(isinstance(f, str) for f in _fe)):
+            raise ValueError(
+                "full_edit families must be a list of family names — the "
+                "changes the brief NAMED and that the edit must deliver — or "
+                "omitted entirely")
+        _fe = sorted({str(f).lower() for f in (_fe or [])})
+        _unknown = [f for f in _fe if f not in SPEC_FAMILIES]
+        if _unknown:
+            raise ValueError(
+                f"full_edit guarantees unknown famil(ies) {_unknown}; valid: "
+                f"{sorted(SPEC_FAMILIES)}")
+        return {"mode": mode, "families": _fe or None, "beats": None,
+                "existing_edit_quote": str(d.get("existing_edit_quote") or "")}
     if mode != "targeted_change":
         return {"mode": mode, "families": None, "beats": None}
     fams = d.get("families")
@@ -3343,15 +3369,49 @@ KNOWLEDGE_TOOLS = [{
         "user did not request, delivered over the one they did. 'Just add "
         "captions' is a targeted_change naming text, and an output carrying "
         "four zooms has failed it however good the zooms are.\n\n"
-        "Choosing full_edit for a narrow request is how that happens: "
-        "full_edit has no family scope, so nothing downstream can object. Pick "
-        "it because the request describes a VIBE, never because you are "
-        "unsure.\n\n"
+        "PICK THE MODE BY READING, NOT BY WEIGHING. Two questions, asked of "
+        "the brief, in order. This is a reading — it has an answer — and it "
+        "should take you seconds:\n"
+        "  Q1. Does the brief NAME a change? ('add zooms', 'burn captions', "
+        "'remove the filler', 'make the text bigger', 'cut it down'.) Every "
+        "one it names goes in `families`. These are GUARANTEED — the edit must "
+        "deliver them.\n"
+        "  Q2. Does the brief carry VIBE language? ('punchy', 'clean', "
+        "'cinematic', 'professional', 'like a trailer', 'tighter', 'more "
+        "energy'.) A vibe asks for the whole edit.\n\n"
+        "Then the mode falls out:\n"
+        "  Q1 yes, Q2 no   -> targeted_change, families = what it named, and "
+        "quote the brief in `existing_edit_quote`. The named things, nothing "
+        "else.\n"
+        "  Q1 no,  Q2 yes  -> full_edit, no families. The vibe is the whole "
+        "spec.\n"
+        "  BOTH yes        -> full_edit WITH families, and quote the brief. "
+        "The named families are guaranteed AND the vibe adds whatever the "
+        "beats deserve. This is the commonest real brief and it used to have "
+        "nowhere to go: forced to targeted_change it delivered the named "
+        "things and threw the punch away; forced to bare full_edit nothing "
+        "could check the things they actually asked for.\n"
+        "  NEITHER         -> it is a question, or it needs footage you do not "
+        "have. Say which.\n\n"
+        "Do not agonise over the boundary. If a word could be either, it is a "
+        "vibe AND a named change and the answer is BOTH — that branch exists "
+        "precisely so the tie does not need breaking.\n\n"
         "  full_edit       — the request describes a VIBE ('punchy and direct', "
         "'clean and professional', 'like a movie trailer'). The vibe is the "
         "spec: derive the whole edit from it. DENSITY IS NOT YOUR DECISION — "
         "there is no rate to set. Rule each beat on its own merits and the "
         "count is whatever the beats deserved.\n"
+        "                    A VIBE WORD AND NAMED CHANGES IS STILL full_edit, "
+        "and you LIST THE NAMED ONES IN `families`. 'Cut this into a punchy "
+        "vertical short, remove filler, burn readable captions' is a vibe "
+        "(punchy) plus two named changes (cut, caption): mode full_edit, "
+        "families ['cut','caption'], and quote the brief in "
+        "`existing_edit_quote`. On a full_edit those families are GUARANTEES, "
+        "not a ceiling — they MUST be delivered, and the vibe is free to add "
+        "whatever else the beats deserve. Calling that targeted_change "
+        "delivers the two named things and nothing else, which throws the "
+        "punch away; calling it full_edit with no families leaves nothing able "
+        "to check the two things they actually asked for.\n"
         "  targeted_change — the request names a specific change ('add zooms and "
         "light transitions', 'make the captions bigger', 'shorten the intro'). "
         "List the families it asks for. If they asked for zooms, the output has "
@@ -10321,11 +10381,44 @@ def spec_fidelity(spec, placements, cut_made=False, captions_made=False):
         return (FIDELITY_FORBIDDEN, [], _violated,
                 "the request said NOT to do %s and the edit contains it. This "
                 "is the one thing they were explicit about." % _violated)
+    # ── A VIBE WORD PLUS NAMED CHANGES IS A full_edit WITH GUARANTEES ──────
+    # Zac's ruling. "Cut this into a punchy vertical short. Remove silence and
+    # filler. Burn readable captions." carries BOTH: a vibe ("punchy") and two
+    # named changes (cut, caption). Forcing that into one of two boxes lost
+    # something either way — targeted_change delivered captions and a cut and
+    # NOTHING ELSE on a brief that asked for punch; full_edit returned UNSCOPED
+    # and nothing could object to anything.
+    #
+    # So a full_edit MAY carry families, and they are GUARANTEES rather than a
+    # scope: the named ones must be delivered, and the vibe is free to add
+    # more. Missing a guarantee is SHORT. Adding beyond them is what full_edit
+    # MEANS, so `unasked` is reported and never failed.
+    _asked_fe = {str(f).lower() for f in (_sc.get("families") or [])}
+    if _mode == "full_edit" and _asked_fe:
+        _anchor_fe = str(_sc.get("existing_edit_quote") or "").strip()
+        _missing_fe = sorted(_asked_fe - _built)
+        _extra_fe = sorted(_built - _asked_fe)
+        if _missing_fe:
+            return (FIDELITY_SHORT, _missing_fe, _extra_fe,
+                    "full_edit guaranteeing %s did not deliver %s. The vibe is "
+                    "free to add more — %s is not a fault — but a family the "
+                    "brief NAMED is a promise, not a suggestion.%s"
+                    % (sorted(_asked_fe), _missing_fe, _extra_fe or "nothing extra",
+                       (" Anchored to the brief by %r."
+                        % _anchor_fe[:60]) if _anchor_fe else
+                       " NOTE: no brief quote, so the guarantee list is the "
+                       "agent's own reading."))
+        return (FIDELITY_OK, [], _extra_fe,
+                "full_edit guaranteeing %s delivered all of them%s. The vibe "
+                "added %s, which is what full_edit is for.%s"
+                % (sorted(_asked_fe), "", _extra_fe or "nothing further",
+                   (" Anchored to the brief by %r." % _anchor_fe[:60])
+                   if _anchor_fe else ""))
     if _mode != "targeted_change":
         return (FIDELITY_UNSCOPED, [], sorted(_built),
-                "mode=%s — no declared family scope, so fidelity cannot be "
-                "judged. A minimal brief declared full_edit gets a full edit "
-                "and nothing here objects." % _mode)
+                "mode=%s and no guaranteed families — nothing anchors a scope, "
+                "so fidelity cannot be judged. A brief that names a change "
+                "should list it in `families` even on a full_edit." % _mode)
     _asked = {str(f).lower() for f in (_sc.get("families") or [])}
     _anchor = str(_sc.get("existing_edit_quote") or "").strip()
     if not _anchor:

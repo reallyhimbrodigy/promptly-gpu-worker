@@ -2633,6 +2633,25 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     except Exception as e:                                        # noqa: BLE001
         shape = {"error": f"classifier failed: {type(e).__name__}: {e}"}
 
+    # PER-TURN, PRINTED — the same question the planner now answers. The
+    # run-level split says thinking/tool_use/text; only this says whether the
+    # deliberation sits on the turns that DECIDE or is spread across turns
+    # placing what the plan already settled.
+    _pt = (_budget or {}).get("per_turn") or []
+    if _pt:
+        _tot = sum(t["s"] for t in _pt) or 1.0
+        print("  MODEL TIME BY TURN: %.1fs over %d turn(s)   effort: NOT SET "
+              "(the CLI takes no effort flag; MAX_THINKING_TOKENS=%s)"
+              % (sum(t["s"] for t in _pt), len(_pt), think_tokens or "unset"),
+              flush=True)
+        for t in _pt:
+            _b = ", ".join("%s %.1fs" % (k, v) for k, v in
+                           sorted(t["blocks"].items(), key=lambda kv: -kv[1]))
+            print("     turn %-2d %7.2fs  %5.1f%%  %s"
+                  % (t["n"], t["s"], 100 * t["s"] / _tot, _b or "-"), flush=True)
+        _pk = max(_pt, key=lambda t: t["s"])
+        print("     PEAK: turn %d at %.0f%% of model time"
+              % (_pk["n"], 100 * _pk["s"] / _tot), flush=True)
     print("  TURN BUDGET     : %s" % json.dumps(
         {k: v for k, v in (_budget or {}).items() if k != "gap_detail"}),
         flush=True)

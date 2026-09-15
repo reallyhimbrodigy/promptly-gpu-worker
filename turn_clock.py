@@ -320,6 +320,16 @@ def budget(timing):
     # "the model is generating" is not yet a fix: thinking, prose and tool-call
     # JSON are three different levers (a reasoning budget, a prompt, a schema).
     # The delta events carry their block index, so the stream can say which.
+    # PER-TURN, THE SAME QUESTION THE PLANNER NOW ANSWERS. The run-level split
+    # says thinking/tool_use/text; it cannot say whether deliberation sits on
+    # the turn that DECIDES or is spread across turns that are placing what the
+    # plan already settled. On the planner that distinction found a spec turn
+    # costing eight times the ruling turn. Here it is derivable from the same
+    # stream — message_start to message_stop is one turn — and was simply never
+    # taken.
+    turn_spans = []     # (t_start, t_end) per assistant turn
+    per_turn_block = []  # [{s, blocks}] parallel to turn_spans
+    _turn_acc = [{}]     # block seconds accruing inside the open turn
     blocks = {}         # index -> block type
     gen_by_block = {}
     delta_count = {}
@@ -348,6 +358,9 @@ def budget(timing):
                     gen_by_block[_bt] = round(
                         gen_by_block.get(_bt, 0.0) + (t - last_delta[_i]), 3)
                 delta_count[_bt] = delta_count.get(_bt, 0) + 1
+                if _i in last_delta:
+                    _turn_acc[0][_bt] = round(
+                        _turn_acc[0].get(_bt, 0.0) + (t - last_delta[_i]), 3)
                 last_delta[_i] = t
             elif sub == "content_block_stop":
                 last_delta.pop(e.get("idx"), None)
@@ -360,6 +373,17 @@ def budget(timing):
                 spans.append(("TTFT", msg_open, t))
             elif sub == "message_stop" and msg_open is not None:
                 spans.append(("GENERATING", first_delta or msg_open, t))
+                # ONE TURN, CLOSED. Recorded with the block split that accrued
+                # inside it, so "which turn was the deliberation" is a read
+                # rather than a re-run.
+                turn_spans.append((first_delta or msg_open, t))
+                _acc = {}
+                for _bi, _bt2 in blocks.items():
+                    _acc[_bt2] = _acc.get(_bt2, 0.0)
+                per_turn_block.append({
+                    "s": round(t - (first_delta or msg_open), 2),
+                    "blocks": dict(_turn_acc[0])})
+                _turn_acc[0] = {}
                 msg_open, first_delta = None, None
         elif typ == "assistant":
             if not have_partials:
@@ -424,7 +448,11 @@ def budget(timing):
 
     gap_cpu = [(a, b) + cpu_in(a, b) for a, b in gaps[:40]]
     allcpu = [r[1] for r in cpu_rows]
+    # PER-TURN, RETURNED. Unused data is the same defect as unmeasured data.
+    _pt = [{"n": _k + 1, "s": _d["s"], "blocks": _d["blocks"]}
+           for _k, _d in enumerate(per_turn_block)]
     return {
+        "per_turn": _pt,
         "wall_s": wall,
         "mode": "PARTIAL_MESSAGES" if have_partials else
                 "COARSE (no deltas — queue, prefill and generation are ONE bucket)",
