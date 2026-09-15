@@ -50,8 +50,20 @@ BUILDS = lambda r: (str(r.get("sfx", "no")).lower() == "yes"
                     and bool((r.get("sfx_name") or "").strip()))
 
 
+# THE FIVE CONTROLS ARE PART OF A `text` RULING, NOT DECORATION.
+# `half_ruling_refusal` made size/case/where/colour/hold_s mandatory for any
+# beat ruled `text` — they are how the words READ — and this fixture predates
+# it. Without them admit_verdict refuses, `beat_verdicts` comes back EMPTY, and
+# every leg below either passes vacuously or dies on an IndexError that looks
+# like a defect in the admission surface. It was a FIXTURE GAP reading as a
+# surface defect for however long it sat here.
+TITLE_CONTROLS = {"size": "medium", "case": "upper", "where": "upper_third",
+                  "colour": "white_on_footage", "hold_s": 2.0}
+
+
 def admit(extra):
     v = {"beat": 1, "purpose": "hook", "cut": "keep", "why": "w"}
+    v.update(TITLE_CONTROLS)
     v.update(extra)
     led, seen = {"beat_verdicts": []}, set()
     ok, rj = A.admit_verdict(led, dict(v), seen)

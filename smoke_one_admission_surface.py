@@ -51,7 +51,22 @@ FULL = {"beat": 1, "purpose": "hook", "treatment": ["zoom", "text"],
         "zoom_arc": sorted(A.ZOOM_ARC_HOMES)[0],
         "text_content": "ChatGPT", "framing": "blur", "card_label": "",
         "keep_from_s": 0.0, "keep_to_s": 3.0, "cutaway_from_s": None,
-        "card_hero": ""}
+        "card_hero": "",
+        # See TITLE_CONTROLS below — a `text` ruling without these is refused,
+        # and every leg here then reads an empty beat_verdicts.
+        "size": "medium", "case": "upper", "where": "upper_third",
+        "colour": "white_on_footage", "hold_s": 2.0}
+
+# THE FIVE CONTROLS ARE PART OF A `text` RULING, NOT DECORATION.
+# `half_ruling_refusal` made size/case/where/colour/hold_s mandatory for any
+# beat ruled `text` — they are how the words READ — and this fixture predates
+# it. Without them admit_verdict refuses, `beat_verdicts` comes back EMPTY, and
+# every leg below either passes vacuously or dies on an IndexError that looks
+# like a defect in the admission surface. It was a FIXTURE GAP reading as a
+# surface defect for however long it sat here.
+TITLE_CONTROLS = {"size": "medium", "case": "upper", "where": "upper_third",
+                  "colour": "white_on_footage", "hold_s": 2.0}
+
 
 # 1. EVERY FIELD THE SCHEMA OFFERS.
 led, seen = _led(), set()

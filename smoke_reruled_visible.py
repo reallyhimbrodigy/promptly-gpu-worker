@@ -398,11 +398,26 @@ check("the app RAISES if rule_all_beats is ever absent from a path — "
 # AND NO CAPABILITY IS LOST ON THE FIRST EDIT, because a re-ruling there is
 # discarded whichever tool sends it. Driven through the shipped rule, not
 # asserted from the source.
+# THE FIVE CONTROLS ARE PART OF A `text` RULING, NOT DECORATION.
+# `half_ruling_refusal` made size/case/where/colour/hold_s mandatory for any
+# beat ruled `text`, and these fixtures predate it. Without them admit_verdict
+# refuses, `beat_verdicts` comes back EMPTY, and the legs below die on an
+# IndexError that reads as a defect in the admission surface. A FIXTURE GAP
+# wearing a surface defect's clothes.
+_CTL = {"purpose": "hook", "cut": "keep", "why": "w", "size": "medium",
+        "case": "upper", "where": "upper_third",
+        "colour": "white_on_footage", "hold_s": 2.0}
+
 _led = {"beat_verdicts": []}
 _seen = set()
-_app.admit_verdict(_led, {"beat": 0, "treatment": ["text"],
+_app.admit_verdict(_led, {**_CTL, "beat": 0, "treatment": ["text"],
                           "text_content": "a"}, _seen)
-_ok, _ = _app.admit_verdict(_led, {"beat": 0, "treatment": ["text"],
+# NON-VACUITY, NAMED. If the first ruling is refused, every leg below is
+# reading an empty list and the IndexError that follows names nothing.
+assert _led["beat_verdicts"], (
+    "the fixture ruling was REFUSED, so nothing below is being tested. "
+    "admit_verdict has gained a requirement this fixture does not answer.")
+_ok, _ = _app.admit_verdict(_led, {**_CTL, "beat": 0, "treatment": ["text"],
                                    "text_content": "CHANGED"}, _seen,
                             reedit=False)
 check("on a FIRST edit a re-ruling is discarded whichever tool sends it, so "
@@ -410,7 +425,7 @@ check("on a FIRST edit a re-ruling is discarded whichever tool sends it, so "
       _ok is False and _led["beat_verdicts"][0]["text_content"] == "a")
 _led2 = {"beat_verdicts": [{"beat": 0, "treatment": ["text"],
                             "text_content": "a"}]}
-_ok2, _ = _app.admit_verdict(_led2, {"beat": 0, "treatment": ["text"],
+_ok2, _ = _app.admit_verdict(_led2, {**_CTL, "beat": 0, "treatment": ["text"],
                                      "text_content": "CHANGED"}, {0},
                              reedit=True, reedit_targets={0})
 check("on a RE-EDIT inside the declared scope the change LANDS — the tool does "
@@ -418,7 +433,7 @@ check("on a RE-EDIT inside the declared scope the change LANDS — the tool does
       _ok2 is True and _led2["beat_verdicts"][0]["text_content"] == "CHANGED")
 _led3 = {"beat_verdicts": [{"beat": 1, "treatment": ["text"],
                             "text_content": "b"}]}
-_ok3, _ = _app.admit_verdict(_led3, {"beat": 1, "treatment": ["text"],
+_ok3, _ = _app.admit_verdict(_led3, {**_CTL, "beat": 1, "treatment": ["text"],
                                      "text_content": "NOPE"}, {1},
                              reedit=True, reedit_targets={0})
 check("and a beat the instruction did NOT name is refused and counted",

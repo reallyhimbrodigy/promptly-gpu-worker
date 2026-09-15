@@ -61,7 +61,19 @@ def _P(*fams):
     return [{"family": x} for x in fams]
 
 
-T = lambda *f: {"mode": "targeted_change", "families": list(f)}   # noqa: E731
+# `existing_edit_quote` IS PART OF A targeted_change SPEC, NOT DECORATION.
+# Added this session: a narrow scope the agent wrote for ITSELF grades
+# FAITHFUL against its own scope, which is the tautology the SELF_SCOPED state
+# exists to break — so `targeted_change` now has to quote the brief it claims
+# to be narrowed by. This fixture predates that by one commit, so every spec
+# below graded SELF_SCOPED and nine legs failed on a CORRECT grader.
+#
+# Same class as the five title controls that broke three other smokes: a
+# requirement is added, the fixtures do not know, and a FIXTURE GAP reads as a
+# surface defect. The difference is that this one was mine, and it was one
+# commit old.
+T = lambda *f: {"mode": "targeted_change", "families": list(f),   # noqa: E731
+                "existing_edit_quote": "just add captions"}
 
 # ── THE REQUIREMENT, CASE BY CASE ───────────────────────────────────────────
 check("'just add captions' delivering text only is FAITHFUL",
@@ -325,7 +337,12 @@ check("a targeted_change that delivers a forbidden family is FORBIDDEN rather "
          "forbidden": ["caption"]}, _P("zoom"),
         captions_made=True)[:3] == (_AA.FIDELITY_FORBIDDEN, [], ["caption"]))
 check("a forbidden family that was NOT delivered passes",
+      # ...and this spec is built INLINE rather than through T(), so it needs
+      # the brief anchor too. The FORBIDDEN legs around it pass without one
+      # only because FORBIDDEN outranks SELF_SCOPED — which is exactly how a
+      # fixture gap hides: the neighbours stay green.
       f({"mode": "targeted_change", "families": ["zoom"],
+         "existing_edit_quote": "punch in on the hook",
          "forbidden": ["caption"]}, _P("zoom"), captions_made=False)[0] == OK)
 check("cut counts as a deliverable family for the forbidden check — "
       "'no trimming no cutting anything' is the exclusive shape",
@@ -391,9 +408,31 @@ for _nm in ("unscoped_vacant", "unscoped_incoherent"):
           any(isinstance(n, ast.Call) and getattr(n.func, "id", "") == "fail"
               and n.args and isinstance(n.args[0], ast.Constant)
               and n.args[0].value == _nm for n in ast.walk(tree)))
-check("it runs ONLY on the unscoped path — a scoped brief is judged by what "
-      "was asked, not by what the run decided",
-      "if _fid_state == FIDELITY_UNSCOPED:" in src)
+# THE PROPERTY, NOT THE LINE. This read the source line verbatim:
+#   "if _fid_state == FIDELITY_UNSCOPED:" in src
+# and the line legitimately became
+#   if _fid_state in (FIDELITY_UNSCOPED, FIDELITY_SELF_SCOPED):
+# when SELF_SCOPED was added — a scope the agent wrote for ITSELF is exactly as
+# unjudged as no scope at all, so it must reach the same guard. The leg failed
+# on correct code. Seventh reader this session keyed to wording rather than
+# behaviour, and the second one broken by a change one commit old.
+#
+# What must actually hold: the guard is GATED on _fid_state, the gate includes
+# UNSCOPED, and it does NOT fire on a brief that was scoped and anchored.
+_guard = [n for n in ast.walk(tree)
+          if isinstance(n, ast.If) and "_fid_state" in ast.unparse(n.test)
+          and "UNSCOPED" in ast.unparse(n.test)]
+check("the vacancy guard is gated on the fidelity state, and UNSCOPED is in "
+      "the gate", bool(_guard),
+      "no `if _fid_state ... UNSCOPED ...` anywhere — the guard is either "
+      "ungated or gone")
+check("it does NOT fire on a brief that was scoped AND anchored to it — a "
+      "scoped brief is judged by what was asked, not by what the run decided",
+      all(not any(_s in ast.unparse(g.test)
+                  for _s in ("FIDELITY_OK", "FIDELITY_FAITHFUL"))
+          for g in _guard),
+      "the guard fires on an anchored scope too, which re-judges a brief that "
+      "was already judged by what was asked")
 
 # ── ONE VOCABULARY FOR SFX ──────────────────────────────────────────────────
 # 25 of 75 ruled sfx placements were lost, and it was never a missing
@@ -440,8 +479,15 @@ check("and the refusal names both sides, so it is satisfiable from either",
 _led = {"beat_verdicts": []}
 _AA.admit_verdict(_led, {"beat": 0, "treatment": ["sfx"],
                          "sfx_name": "boom"}, set())
+# ...and the five title controls, without which the `text` beat is REFUSED and
+# this leg reads an empty list. Same gap, same file, a hundred lines apart.
 _AA.admit_verdict(_led, {"beat": 1, "treatment": ["text"],
-                         "text_content": "hi"}, set())
+                         "text_content": "hi", "size": "medium",
+                         "case": "upper", "where": "upper_third",
+                         "colour": "white_on_footage", "hold_s": 2.0}, set())
+assert len(_led["beat_verdicts"]) == 2, (
+    "one of the two fixture rulings was REFUSED (%d admitted) — the legs below "
+    "are reading a list that is not there" % len(_led["beat_verdicts"]))
 check("a blank field is filled from the treatment: 'yes' on an sfx beat, 'no' "
       "otherwise",
       _led["beat_verdicts"][0].get("sfx") == "yes"
