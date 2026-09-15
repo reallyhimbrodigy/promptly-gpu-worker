@@ -400,6 +400,28 @@ def masks_overlap(masks, min_px=200, min_frac=0.06):
     return hits
 
 
+def bands_touched(band, band_fraction, names=("top", "center", "bottom"),
+                  min_share=0.25):
+    """Which of PRODUCTION's bands a placement meaningfully occupies.
+
+    COMPARE IN BAND NAMES, NOT RAW FRACTIONS. The first version overlapped a
+    title's 0.000-0.360 against `center` at 0.333-0.667, found 0.027 of shared
+    height, and failed every one of seven titles for sitting on the speaker's
+    face. That 2.7% is the seam between two adjacent bands, not a placement in
+    the wrong one — production works in band NAMES for exactly this reason.
+
+    A band counts as occupied only when it holds at least `min_share` of the
+    placement's own height, so touching a boundary is not intruding.
+    """
+    h = max(1e-6, band[1] - band[0])
+    out = set()
+    for n in names:
+        lo, hi = band_fraction(n)
+        if (min(band[1], hi) - max(band[0], lo)) / h >= min_share:
+            out.add(n)
+    return out
+
+
 def sits_on(band, occupied_names, band_fraction, tol=0.02):
     """[(name, overlap)] for every occupied band this placement intrudes into —
     HOP 6's judgment, extracted for the same reason.

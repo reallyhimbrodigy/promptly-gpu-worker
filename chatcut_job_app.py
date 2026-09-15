@@ -1152,20 +1152,53 @@ def verify_hops_3_and_4(tok, stage, plan):
         if f is not None and f not in by_from:
             by_from[f] = it
 
-    def _find_po(o):
-        if isinstance(o, dict):
-            if "propertyOverrides" in o:
-                return o["propertyOverrides"]
-            for v in o.values():
-                g = _find_po(v)
-                if g is not None:
-                    return g
-        elif isinstance(o, list):
-            for v in o:
-                g = _find_po(v)
-                if g is not None:
-                    return g
-        return None
+    def _find_po(o, item_id):
+        """The overrides on THE ITEM, not the first ones in the tree.
+
+        The first version returned the first `propertyOverrides` key a
+        depth-first walk met, and reported that slot 8 carried none of its four
+        overrides on a run where the agent had demonstrably sent
+        {"value": 5, "label": ..., "suffix": " MINUTES", "offsetY": 288}. A
+        reader taking the first match — the same shape as every other reader
+        that broke today. Match the node that IS the item, and only fall back
+        to a non-empty match elsewhere.
+        """
+        hit = [None]
+
+        def walk(o, depth=0):
+            if isinstance(o, dict):
+                if str(o.get("id") or "").startswith(str(item_id)[:8]) \
+                        and "propertyOverrides" in o:
+                    hit[0] = o["propertyOverrides"]
+                    return True
+                for v in o.values():
+                    if walk(v, depth + 1):
+                        return True
+            elif isinstance(o, list):
+                for v in o:
+                    if walk(v, depth + 1):
+                        return True
+            return False
+
+        if walk(o):
+            return hit[0]
+
+        # no id-matched node: take the first NON-EMPTY overrides rather than
+        # the first key, so an empty asset-level dict cannot mask the item's.
+        best = [None]
+
+        def walk2(o):
+            if isinstance(o, dict):
+                po = o.get("propertyOverrides")
+                if isinstance(po, dict) and po and best[0] is None:
+                    best[0] = po
+                for v in o.values():
+                    walk2(v)
+            elif isinstance(o, list):
+                for v in o:
+                    walk2(v)
+        walk2(o)
+        return best[0]
 
     # overrides live on the ITEM and the timeline view does not carry them, so
     # the rows that name any are inspected individually. There is normally one.
@@ -1177,7 +1210,8 @@ def verify_hops_3_and_4(tok, stage, plan):
                             {"projectId": pid,
                              "itemId": by_from[r["from"]]["id"]})
             by_from[r["from"]] = dict(by_from[r["from"]],
-                                      propertyOverrides=_find_po(det) or {})
+                                      propertyOverrides=_find_po(
+                                          det, by_from[r["from"]]["id"]) or {})
         except Exception as e:                                    # noqa: BLE001
             res["hop4"] = {"state": "FAILED",
                            "why": "could not inspect the item at frame %s: %s"
@@ -1296,16 +1330,24 @@ def verify_hop5_composition(tok, stage, plan, items):
         uris = []
 
         def walk(o):
+            # ANY http STRING, not only the two keys I guessed. The response
+            # carries a `viewer` node — the keys it reported were
+            # ['editorUrl','projectId','state','viewer','views'] — and the frame
+            # URL inside it is not under `uri` or `url`, so the walker found
+            # nothing and HOP 5 reported the composition as unrenderable. The
+            # editorUrl/projectId strings are excluded by name, since those are
+            # links to the project rather than to a frame.
             if isinstance(o, dict):
                 for k, v in o.items():
-                    if k in ("uri", "url") and isinstance(v, str) \
-                            and v.startswith("http"):
-                        uris.append(v)
-                    else:
-                        walk(v)
+                    if k in ("editorUrl", "projectId", "browserHandoff"):
+                        continue
+                    walk(v)
             elif isinstance(o, list):
                 for v in o:
                     walk(v)
+            elif isinstance(o, str) and o.startswith("http") \
+                    and ("render" in o or ".jpg" in o or ".png" in o):
+                uris.append(o)
         walk(pv)
         if not uris:
             out["detail"].append(
@@ -1438,18 +1480,24 @@ def verify_hop6_clear(plan, source="/work/source.mp4"):
         t1 = (r["from"] + (r["dur"] or 0)) / 30.0
         occ = fb.face_occupied_bands(traj, t0, t1)
         b = vc.band_of(r, meas)
-        for name, ov in vc.sits_on(b, occ | bbands, fb.band_to_fraction):
+        # IN BAND NAMES. A placement intrudes when a band it MEANINGFULLY
+        # occupies is one the face or the source's text also owns — not when
+        # its edge touches the seam between two bands.
+        mine = vc.bands_touched(b, fb.band_to_fraction)
+        for name in sorted(mine & (occ | bbands)):
             bad.append((r["slot"], name,
-                        "face" if name in occ else "source text", ov))
+                        "face" if name in occ else "source text",
+                        1.0))
         out["detail"].append(
-            "slot%-3s band %.3f-%.3f  face bands %s  source-text bands %s"
-            % (r["slot"], b[0], b[1], sorted(occ) or "none",
-               sorted(bbands) or "none"))
+            "slot%-3s band %.3f-%.3f occupies %s | face %s | source text %s"
+            % (r["slot"], b[0], b[1],
+               sorted(vc.bands_touched(b, fb.band_to_fraction)) or "none",
+               sorted(occ) or "none", sorted(bbands) or "none"))
     out["state"] = "FAILED" if bad else "MEASURED"
     out["why"] = (
         "%d placement(s) sit on something: %s"
-        % (len(bad), "; ".join("slot%s over the %s (%s band, %.0f%%)"
-                               % (s, k, n, o * 100) for s, n, k, o in bad))
+        % (len(bad), "; ".join("slot%s in the %s band, which the %s occupies"
+                               % (s, n, k) for s, n, k, _o in bad))
         if bad else
         "faces found in %d of %d sampled frames; source text in %s; no "
         "placement overlaps either"
