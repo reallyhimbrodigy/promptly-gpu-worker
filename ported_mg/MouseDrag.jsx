@@ -358,7 +358,7 @@ function useMGPhase(timing, { defaultEnterFrames, defaultExitFrames }) {
       // linear average ON THE FIRST FRAME, so it made its one consumer
       // (PillMarquee) step WORSE, 0.30 -> 0.41 peak_step. Same finding as the
       // zoom cap, same fix — one profile for all motion in this codebase.
-      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.25) : void 0
+      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.25) : undefined
     }
   );
   const exitProgress = interpolate(
@@ -370,7 +370,7 @@ function useMGPhase(timing, { defaultEnterFrames, defaultExitFrames }) {
       extrapolateRight: "clamp",
       // Departure: the same bounded-velocity profile, skewed late so the exit
       // accelerates away rather than crawling off.
-      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.75) : void 0
+      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.75) : undefined
     }
   );
   return {
@@ -502,7 +502,7 @@ var MouseDrag = ({
   const wipeP1 = dissolveP * (100 + wipeBand);
   const wipeP0 = wipeP1 - wipeBand;
   const wipeMid = wipeP0 + wipeBand * 0.55;
-  const cardMask = dRaw > 0 ? `linear-gradient(104deg, transparent ${wipeP0.toFixed(1)}%, rgba(0,0,0,0.4) ${wipeMid.toFixed(1)}%, #000 ${wipeP1.toFixed(1)}%)` : void 0;
+  const cardMask = dRaw > 0 ? `linear-gradient(104deg, transparent ${wipeP0.toFixed(1)}%, rgba(0,0,0,0.4) ${wipeMid.toFixed(1)}%, #000 ${wipeP1.toFixed(1)}%)` : undefined;
   const dissolveScale = 1 + 0.05 * dissolveP;
   const dissolveBlur = 6 * dissolveP;
   return <AbsoluteFill style={containerStyle}>
@@ -530,7 +530,7 @@ var MouseDrag = ({
       background: cardColor,
       boxShadow: cardShadow,
       whiteSpace: "nowrap",
-      filter: dissolveBlur > 0.01 ? `blur(${dissolveBlur.toFixed(2)}px)` : void 0,
+      filter: dissolveBlur > 0.01 ? `blur(${dissolveBlur.toFixed(2)}px)` : undefined,
       maskImage: cardMask,
       WebkitMaskImage: cardMask
     }}
@@ -567,4 +567,14 @@ var MouseDrag = ({
         </div>
       </div>
     </AbsoluteFill>;
+};
+
+
+// ── ChatCut adapter (generated) ──────────────────────────────────────────────
+// Root must be a plain div per the MG contract; AbsoluteFill may only be an
+// inner layer. Editable values arrive on item.props.
+const Component = ({ item }) => {
+  const rootStyle = { position: "absolute", inset: 0, backgroundColor: "transparent" };
+  const p = (item && item.props) || {};
+  return <div style={rootStyle}><MouseDrag {...p} /></div>;
 };

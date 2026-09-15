@@ -1,0 +1,142 @@
+{
+ "entries": [
+  {
+   "name": "EditorialQuote",
+   "frame": "EditorialQuote.jpg",
+   "when": "WHEN SOCIAL PROOF OR A MESSAGE IS QUOTED",
+   "size": "LARGE",
+   "claim": "Someone notable said this.",
+   "what": "a centered serif quote in italic Playfair behind a big opening quotation mark, with a tall accent left-bar and an optional author + role attribution that fades in beneath; lines reveal one at a time and the type auto-fits the frame",
+   "props": [
+    [
+     "",
+     "{ \"text\": \"Most growth happens outside your comfort zone\", \"author\"?: \"James Clear\", \"role\"?: \"Atomic Habits\", \"fontKey\"?: \"playfairDisplay\"|\"dmSerifDisplay\", \"showQuoteMark\"?: true, \"accentColor\"?: \"#FFD60A\", \"anchor\"?: \"upper_third_safe\"|\"center\"|\"lower_third_safe\" }"
+    ]
+   ],
+   "evidence": "5.885% px @f48, bbox (0, 431, 882, 921)"
+  },
+  {
+   "name": "IMessageBubble",
+   "frame": "IMessageBubble.jpg",
+   "when": "WHEN SOCIAL PROOF OR A MESSAGE IS QUOTED",
+   "size": "LARGE",
+   "claim": "The EXACT text message \u2014 see the actual SMS.",
+   "what": "single iMessage bubble with iOS tail; incoming gray left / outgoing blue right; optional Delivered/Read status; optional typewriter reveal. ~600-800px wide",
+   "props": [
+    [
+     "",
+     "{ \"text\": \"ETA 10 mins, parking now\", \"messageType\": \"incoming\" | \"outgoing\", \"status\"?: \"Delivered\" | \"Read\", \"typewriter\"?: bool }"
+    ]
+   ],
+   "evidence": "0.330% px @f20, bbox (187, 696, 500, 750)"
+  },
+  {
+   "name": "MouseDrag",
+   "frame": "MouseDrag.jpg",
+   "when": "WHEN THE SCREEN OR APP IS THE SUBJECT",
+   "size": "MEDIUM",
+   "claim": "Watch this get dragged into place.",
+   "what": "a UI cursor drags a labeled card in from off-frame and drops it into place with a settle, then arcs back out as the card dissolves away",
+   "props": [
+    [
+     "",
+     "{ \"label\": \"Drag & Drop\", \"cardColor\"?: \"#F2C211\", \"cardTextColor\"?: \"#1C1C1C\", \"showCursor\"?: true, \"anchor\"?: \"upper_third_safe\"|\"center\"|\"lower_third_safe\" }"
+    ]
+   ],
+   "evidence": "1.585% px @f38, bbox (584, 814, 882, 915)"
+  },
+  {
+   "name": "PullQuote",
+   "frame": "PullQuote.jpg",
+   "when": "WHEN SOMETHING IS NAMED OR REVEALED",
+   "size": "LARGE",
+   "claim": "What they just said, as the whole screen.",
+   "what": "the speaker's own line blown up full-frame in bold caps, building word-by-word with keywords landing bigger and in an accent color. No card, no quotation marks, no name",
+   "props": [
+    [
+     "",
+     "{ \"text\": \"Most people quit right before the breakthrough\", \"keywords\"?: [\"quit\",\"breakthrough\"], \"highlightStyle\"?: \"color\"|\"bar\"|\"scale\", \"keywordColor\"?: \"#FFD60A\", \"fontKey\"?: \"anton\", \"anchor\"?: \"upper_third_safe\"|\"center\"|\"lower_third_safe\" }"
+    ]
+   ],
+   "evidence": "2.340% px @f48, bbox (176, 672, 705, 776)"
+  },
+  {
+   "name": "Reticle",
+   "frame": "Reticle.jpg",
+   "when": "WHEN A REGION OF THE FRAME NEEDS POINTING AT",
+   "size": "SMALL",
+   "claim": "Lock onto THIS exact spot.",
+   "what": "HUD corner-brackets that snap onto a small rectangular region with an overshoot lock, a brief acquiring wobble, an inner scan sweep, and a monospace tag that slides in after lock",
+   "props": [
+    [
+     "",
+     "{ \"label\"?: \"LOCK\", \"regionWidth\"?: 620, \"regionHeight\"?: 720, \"accentColor\"?: \"#36E27A\", \"bracketColor\"?: \"#FFFFFF\", \"showScanline\"?: true, \"showCrosshair\"?: false, \"anchor\"?: \"upper_third_safe\"|\"center\"|\"lower_third_safe\", \"offsetX\"?: int, \"offsetY\"?: int }"
+    ]
+   ],
+   "evidence": "0.644% px @f24, bbox (183, 423, 698, 1023)"
+  },
+  {
+   "name": "SectionDivider",
+   "frame": "SectionDivider.jpg",
+   "when": "WHEN TIME OR SEQUENCE IS THE STORY",
+   "size": "LARGE",
+   "claim": "A new section starts here.",
+   "what": "a full-frame chapter card: an eyebrow kicker and a giant index over an accent rule, with the big title unfolding line-by-line from behind the line; optional dark scrim",
+   "props": [
+    [
+     "",
+     "{ \"title\": \"The\\\\nBreakthrough\", \"label\"?: \"PART ONE\", \"number\"?: \"01\", \"fontKey\"?: \"anton\"|\"dmSerifDisplay\", \"variant\"?: \"full\"|\"band\", \"accentColor\"?: \"#hex\", \"anchor\"?: \"upper_third_safe\"|\"center\"|\"lower_third_safe\" }"
+    ]
+   ],
+   "evidence": "99.956% px @f58, bbox (0, 0, 882, 1568)"
+  },
+  {
+   "name": "Stamp",
+   "frame": "Stamp.jpg",
+   "when": "WHEN A CLAIM GETS A VERDICT OR STAMP",
+   "size": "MEDIUM",
+   "claim": "Stamp it \u2014 this is OFFICIAL.",
+   "what": "a circular VERIFIED-style seal (or rectangular rubber-stamp) that slams onto the frame from oversized to rest with weight: a compression-recoil bounce, a locked tilt, a flash and an expanding shock ring, then a brief settle. Single-ink \u2014 ring and text share one color",
+   "props": [
+    [
+     "",
+     "{ \"text\": \"VERIFIED\", \"style\"?: \"seal\"|\"stamp\"|\"ribbon\", \"subtextTop\"?: \"OFFICIALLY\", \"subtextBottom\"?: \"AUTHENTIC\", \"mark\"?: \"star\"|\"check\"|\"none\", \"color\"?: \"#C8321F\", \"anchor\"?: \"upper_third_safe\"|\"center\"|\"lower_third_safe\" }"
+    ]
+   ],
+   "evidence": "4.840% px @f38, bbox (60, 496, 822, 951)"
+  },
+  {
+   "name": "StatCard",
+   "frame": "StatCard.jpg",
+   "when": "WHEN A NUMBER LANDS",
+   "size": "MEDIUM",
+   "claim": "The HEADLINE NUMBER the speaker just stated, full size.",
+   "what": "hero number (~120-180pt, white) counting up digit-by-digit from 0 (or fromValue) to target; accent divider drawing in; caps label below; optional prefix/suffix. No card background \u2014 the number floats over the footage",
+   "props": [
+    [
+     "",
+     "{ \"value\": 100000, \"label\": \"SUBSCRIBERS\", \"prefix\"?: \"$\", \"suffix\"?: \"%\" | \"K\" | \"M\" | \"+\", \"fromValue\"?: number, \"decimals\"?: int, \"accentColor\"?: \"#hex\" }"
+    ]
+   ],
+   "evidence": "9.710% px @f40, bbox (25, 602, 857, 848)"
+  },
+  {
+   "name": "StepDivider",
+   "frame": "StepDivider.jpg",
+   "when": "WHEN TIME OR SEQUENCE IS THE STORY",
+   "size": "LARGE",
+   "claim": "We're on step N of the process.",
+   "what": "a full-frame step card: a \"STEP 2 / 05\" kicker, a giant title, and a segmented progress bar filled to the current step",
+   "props": [
+    [
+     "",
+     "{ \"title\": \"Build the\\\\nOffer\", \"step\": 2, \"totalSteps\": 5, \"kicker\"?: \"STEP\", \"showProgress\"?: true, \"fontKey\"?: \"anton\"|\"oswald\", \"accentColor\"?: \"#4F9DF7\", \"anchor\"?: \"upper_third_safe\"|\"center\"|\"lower_third_safe\" }"
+    ]
+   ],
+   "evidence": "3.467% px @f56, bbox (225, 582, 656, 850)"
+  }
+ ],
+ "rendered_but_unconditioned": [
+  "NamePlate"
+ ]
+}

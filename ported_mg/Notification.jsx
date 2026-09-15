@@ -333,7 +333,7 @@ function useMGPhase(timing, { defaultEnterFrames, defaultExitFrames }) {
       // linear average ON THE FIRST FRAME, so it made its one consumer
       // (PillMarquee) step WORSE, 0.30 -> 0.41 peak_step. Same finding as the
       // zoom cap, same fix — one profile for all motion in this codebase.
-      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.25) : void 0
+      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.25) : undefined
     }
   );
   const exitProgress = interpolate(
@@ -345,7 +345,7 @@ function useMGPhase(timing, { defaultEnterFrames, defaultExitFrames }) {
       extrapolateRight: "clamp",
       // Departure: the same bounded-velocity profile, skewed late so the exit
       // accelerates away rather than crawling off.
-      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.75) : void 0
+      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.75) : undefined
     }
   );
   return {
@@ -498,8 +498,8 @@ var NotificationBanner = ({ item, style }) => {
       background: style.background,
       backdropFilter: style.blur,
       WebkitBackdropFilter: style.blur,
-      border: style.border === "none" ? void 0 : style.border,
-      boxShadow: style.shadow === "none" ? void 0 : style.shadow,
+      border: style.border === "none" ? undefined : style.border,
+      boxShadow: style.shadow === "none" ? undefined : style.shadow,
       paddingTop: style.paddingY,
       paddingBottom: style.paddingY,
       paddingLeft: style.paddingX,
@@ -626,7 +626,7 @@ var Notification = ({
   const platformTopOffset = STYLES[platform].topOffset;
   const { containerStyle, wrapperStyle } = resolveMGPosition(
     { anchor: "top", offsetY: platformTopOffset, scale },
-    void 0,
+    undefined,
     "Notification"
   );
   const { fps } = useVideoConfig2();
@@ -686,4 +686,14 @@ var Notification = ({
       </div>
       </div>
     </AbsoluteFill>;
+};
+
+
+// ── ChatCut adapter (generated) ──────────────────────────────────────────────
+// Root must be a plain div per the MG contract; AbsoluteFill may only be an
+// inner layer. Editable values arrive on item.props.
+const Component = ({ item }) => {
+  const rootStyle = { position: "absolute", inset: 0, backgroundColor: "transparent" };
+  const p = (item && item.props) || {};
+  return <div style={rootStyle}><Notification {...p} /></div>;
 };

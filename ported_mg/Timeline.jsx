@@ -333,7 +333,7 @@ function useMGPhase(timing, { defaultEnterFrames, defaultExitFrames }) {
       // linear average ON THE FIRST FRAME, so it made its one consumer
       // (PillMarquee) step WORSE, 0.30 -> 0.41 peak_step. Same finding as the
       // zoom cap, same fix — one profile for all motion in this codebase.
-      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.25) : void 0
+      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.25) : undefined
     }
   );
   const exitProgress = interpolate(
@@ -345,7 +345,7 @@ function useMGPhase(timing, { defaultEnterFrames, defaultExitFrames }) {
       extrapolateRight: "clamp",
       // Departure: the same bounded-velocity profile, skewed late so the exit
       // accelerates away rather than crawling off.
-      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.75) : void 0
+      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.75) : undefined
     }
   );
   return {
@@ -637,7 +637,7 @@ var Timeline = ({
     const labelText = String(step.label ?? "");
     const labelMetrics = mgTextMetrics(labelText);
     const labelFont = mgTextFont(labelText, "inter");
-    const descFont = step.description ? mgTextFont(step.description, "inter") : void 0;
+    const descFont = step.description ? mgTextFont(step.description, "inter") : undefined;
     const advance = labelMetrics.script === "latin" ? 0.62 : labelMetrics.advanceEm;
     const titleChars = Math.max(1, [...labelText].length);
     const titleSize = Math.min(48, (cardWidth - 60) / (titleChars * advance));
@@ -918,4 +918,14 @@ var Timeline = ({
         </div>
       </div>
     </AbsoluteFill>;
+};
+
+
+// ── ChatCut adapter (generated) ──────────────────────────────────────────────
+// Root must be a plain div per the MG contract; AbsoluteFill may only be an
+// inner layer. Editable values arrive on item.props.
+const Component = ({ item }) => {
+  const rootStyle = { position: "absolute", inset: 0, backgroundColor: "transparent" };
+  const p = (item && item.props) || {};
+  return <div style={rootStyle}><Timeline {...p} /></div>;
 };

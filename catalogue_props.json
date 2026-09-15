@@ -1,0 +1,367 @@
+{
+ "_note": "SAMPLE PROPS FOR THE CATALOGUE STILLS ONLY. Not defaults, not a rubric \u2014 each one exists to make the component RENDER SOMETHING so the still shows what it looks like. An empty StatCard renders 48,138 bytes of nothing and exits 0, which is why the builder refuses a near-uniform frame.",
+ "AnnotationArrow": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "start": {
+   "x": 0.25,
+   "y": 0.35
+  },
+  "end": {
+   "x": 0.72,
+   "y": 0.62
+  },
+  "pathType": "curved-arc",
+  "color": "#C8551F",
+  "strokeWidth": 10,
+  "seed": 3,
+  "arrowheadSize": 36
+ },
+ "BarRace": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "bars": [
+   {
+    "label": "ORGANIC",
+    "value": 82
+   },
+   {
+    "label": "PAID",
+    "value": 54
+   },
+   {
+    "label": "REFERRAL",
+    "value": 31
+   }
+  ],
+  "maxValue": 100,
+  "accentColor": "#C8551F",
+  "valueSuffix": "%"
+ },
+ "ChatThread": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "header": {
+   "name": "TEAM",
+   "subtitle": "iMessage",
+   "initials": "TM"
+  },
+  "messages": [
+   {
+    "sender": "them",
+    "text": "we shipped it"
+   },
+   {
+    "sender": "me",
+    "text": "numbers are up"
+   },
+   {
+    "sender": "them",
+    "text": "3x in a week"
+   }
+  ]
+ },
+ "DropBanner": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "title": "LAUNCH WEEK",
+  "subtitle": "three things shipped",
+  "points": [
+   "faster render",
+   "new editor",
+   "live preview"
+  ],
+  "accentColor": "#C8551F"
+ },
+ "DropCard": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "title": "THE SETUP",
+  "subtitle": "what you need",
+  "steps": [
+   "upload",
+   "choose a vibe",
+   "render"
+  ],
+  "accentColor": "#C8551F"
+ },
+ "EditorialQuote": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "text": "the edit is the argument",
+  "author": "REF-2",
+  "accentColor": "#C8551F"
+ },
+ "EndCard": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "kind": "cta",
+  "title": "FOLLOW FOR MORE",
+  "lines": [
+   {
+    "text": "@promptly",
+    "icon": "at"
+   },
+   {
+    "text": "promptly.video",
+    "icon": "globe"
+   }
+  ],
+  "palette": {
+   "bg": "#14141A",
+   "fg": "#FEFCFD",
+   "accent": "#C8551F"
+  }
+ },
+ "IMessageBubble": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "platform": "imessage",
+  "messageType": "incoming",
+  "text": "did you see the numbers"
+ },
+ "InstagramComment": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "platform": "instagram",
+  "username": "kellan",
+  "comment": "how is this free",
+  "timestamp": "2h",
+  "likes": 412
+ },
+ "MouseDrag": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "label": "Lace Quick Fix",
+  "cardColor": "#F2C211",
+  "cardTextColor": "#1C1C1C",
+  "regionWidth": 720,
+  "regionHeight": 360,
+  "showCursor": true
+ },
+ "NamePlate": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "name": "KELLAN HENNEBERRY",
+  "handle": "@kellanhenneberry",
+  "accentColor": "#C8551F"
+ },
+ "Notification": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "notifications": [
+   {
+    "app": "apple-pay",
+    "appName": "Apple Pay",
+    "title": "Payment Received",
+    "body": "$249.00 from Kellan",
+    "timestamp": "now"
+   }
+  ]
+ },
+ "PillCluster": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "tags": [
+   "FAST",
+   "CHEAP",
+   "GOOD",
+   "NO WATERMARK"
+  ],
+  "accentColor": "#C8551F",
+  "accentEvery": 2,
+  "fontSize": 48
+ },
+ "PillMarquee": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "pills": [
+   "NO WATERMARK",
+   "4K EXPORT",
+   "AUTO CAPTIONS",
+   "B-ROLL"
+  ],
+  "accentColor": "#C8551F"
+ },
+ "ProgressBar": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "label": "RAISED SO FAR",
+  "value": 47000,
+  "total": 100000,
+  "accentColor": "#C8551F"
+ },
+ "PullQuote": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "text": "IT EDITS ITSELF",
+  "keywords": [
+   "EDITS"
+  ],
+  "accentColor": "#C8551F"
+ },
+ "RankedList": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "items": [
+   {
+    "rank": "1",
+    "label": "HOOK",
+    "value": "0-2s"
+   },
+   {
+    "rank": "2",
+    "label": "PROOF",
+    "value": "2-8s"
+   },
+   {
+    "rank": "3",
+    "label": "CLOSE",
+    "value": "8-12s"
+   }
+  ],
+  "order": "topDown",
+  "highlightTop": true,
+  "accentColor": "#C8551F"
+ },
+ "RecordingFrame": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "label": "REC",
+  "value": "00:14",
+  "corner": "top-left"
+ },
+ "Reticle": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "target": {
+   "x": 0.5,
+   "y": 0.45
+  },
+  "color": "#C8551F"
+ },
+ "SectionDivider": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "title": "PART TWO",
+  "accentColor": "#C8551F"
+ },
+ "SpeechBubble": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "platform": "tweet",
+  "name": "Kellan",
+  "handle": "@kellanhenneberry",
+  "initials": "KH",
+  "text": "this changes the workflow",
+  "stats": {
+   "replies": 128,
+   "reposts": 412,
+   "likes": 1200,
+   "views": 98000
+  }
+ },
+ "Stamp": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "text": "SOLD OUT",
+  "style": "seal",
+  "accentColor": "#C8551F"
+ },
+ "StatCard": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "value": 20000000,
+  "prefix": "$",
+  "label": "RAISED IN 14 DAYS",
+  "accentColor": "#C8551F"
+ },
+ "StepDivider": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "title": "STEP 2",
+  "subtitle": "choose the vibe",
+  "accentColor": "#C8551F"
+ },
+ "StickyNotes": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "notes": [
+   {
+    "text": "hook",
+    "color": "#FFE86B",
+    "rotation": -4
+   },
+   {
+    "text": "proof",
+    "color": "#9BE7A6",
+    "rotation": 3
+   },
+   {
+    "text": "close",
+    "color": "#FFB3C1",
+    "rotation": -2
+   }
+  ]
+ },
+ "TikTokComment": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "platform": "tiktok",
+  "username": "kellan",
+  "comment": "wait how",
+  "timestamp": "2h",
+  "likes": 98
+ },
+ "Timeline": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "stats": [
+   {
+    "label": "2019",
+    "value": "IDEA"
+   },
+   {
+    "label": "2021",
+    "value": "BUILD"
+   },
+   {
+    "label": "2024",
+    "value": "SHIP"
+   }
+  ]
+ },
+ "TimelineRoadmap": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "stats": [
+   {
+    "label": "Q1",
+    "value": "EDITOR"
+   },
+   {
+    "label": "Q2",
+    "value": "MOBILE"
+   },
+   {
+    "label": "Q3",
+    "value": "API"
+   }
+  ]
+ },
+ "TweetBubble": {
+  "startMs": 0,
+  "durationMs": 3000,
+  "platform": "tweet",
+  "name": "Kellan",
+  "handle": "@kellanhenneberry",
+  "initials": "KH",
+  "text": "this changes the workflow",
+  "stats": {
+   "replies": 128,
+   "reposts": 412,
+   "likes": 1200,
+   "views": 98000
+  }
+ }
+}

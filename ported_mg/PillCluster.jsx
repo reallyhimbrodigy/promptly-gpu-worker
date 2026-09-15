@@ -358,7 +358,7 @@ function useMGPhase(timing, { defaultEnterFrames, defaultExitFrames }) {
       // linear average ON THE FIRST FRAME, so it made its one consumer
       // (PillMarquee) step WORSE, 0.30 -> 0.41 peak_step. Same finding as the
       // zoom cap, same fix — one profile for all motion in this codebase.
-      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.25) : void 0
+      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.25) : undefined
     }
   );
   const exitProgress = interpolate(
@@ -370,7 +370,7 @@ function useMGPhase(timing, { defaultEnterFrames, defaultExitFrames }) {
       extrapolateRight: "clamp",
       // Departure: the same bounded-velocity profile, skewed late so the exit
       // accelerates away rather than crawling off.
-      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.75) : void 0
+      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.75) : undefined
     }
   );
   return {
@@ -509,8 +509,8 @@ var PillCluster = ({
       boxShadow: `0 10px 26px rgba(0,0,0,0.4), 0 0 22px ${accentColor}55, inset 0 1px 0 rgba(255,255,255,0.4)`
     } : {
       background: neutralBg,
-      backdropFilter: glass ? "blur(16px) saturate(140%)" : void 0,
-      WebkitBackdropFilter: glass ? "blur(16px) saturate(140%)" : void 0,
+      backdropFilter: glass ? "blur(16px) saturate(140%)" : undefined,
+      WebkitBackdropFilter: glass ? "blur(16px) saturate(140%)" : undefined,
       border: "1.5px solid rgba(255,255,255,0.22)",
       boxShadow: "0 10px 26px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.18)"
     };
@@ -540,7 +540,7 @@ var PillCluster = ({
         lineHeight: Math.max(1, tagMetrics[i].lineHeight),
         // White accent ink keeps the neutral shadow (the dark
         // halo is what makes light ink read on a dark chip).
-        textShadow: isAccent && accentInk !== "#FFFFFF" ? void 0 : textShadow
+        textShadow: isAccent && accentInk !== "#FFFFFF" ? undefined : textShadow
       }}
     >
                   {tag}
@@ -550,4 +550,14 @@ var PillCluster = ({
         </div>
       </div>
     </AbsoluteFill>;
+};
+
+
+// ── ChatCut adapter (generated) ──────────────────────────────────────────────
+// Root must be a plain div per the MG contract; AbsoluteFill may only be an
+// inner layer. Editable values arrive on item.props.
+const Component = ({ item }) => {
+  const rootStyle = { position: "absolute", inset: 0, backgroundColor: "transparent" };
+  const p = (item && item.props) || {};
+  return <div style={rootStyle}><PillCluster {...p} /></div>;
 };

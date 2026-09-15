@@ -90,3 +90,11 @@ cert_cap_rendertime_app.py
 cert_dwell_pair_app.py
 .last_deployed_commit
 _asset_inventory.json
+
+# Render-check evidence, regenerable by `modal run chatcut_job_app.py::rendercheck`.
+# The SHEET FRAMES are evidence, not source: each is one ChatCut render of one
+# component, and they are rebuilt whenever the registry changes. chatcut_registry
+# .json IS committed — it is the artifact the image mounts and the smoke diffs
+# against, and a registry that cannot be diffed is a registry nobody can check.
+catalogue_stills/
+chatcut_mg/

@@ -145,7 +145,7 @@ var SAFE_TEXT_WIDTH = CANVAS_WIDTH - 2 * H_TEXT_MARGIN;
 var _ctx;
 var _measureCache = /* @__PURE__ */ new Map();
 function getCtx() {
-  if (_ctx !== void 0) return _ctx;
+  if (_ctx !== undefined) return _ctx;
   try {
     const canvas = document.createElement("canvas");
     _ctx = canvas.getContext("2d");
@@ -159,7 +159,7 @@ var canvasMeasurer = (word, fontSize, font) => {
   const spacingPx = (font.letterSpacingEm ?? 0) * fontSize;
   const key = `${font.fontFamily}|${font.fontWeight}|${fontSize}|${spacingPx}|${text}`;
   const hit = _measureCache.get(key);
-  if (hit !== void 0) return hit;
+  if (hit !== undefined) return hit;
   const ctx = getCtx();
   if (!ctx) return text.length * fontSize * 0.62 + spacingPx * text.length;
   ctx.font = `${font.fontWeight} ${fontSize}px ${font.fontFamily}`;
@@ -174,7 +174,7 @@ var canvasMeasurer = (word, fontSize, font) => {
   _measureCache.set(key, width);
   return width;
 };
-var _graphemeSeg = typeof Intl !== "undefined" && Intl.Segmenter ? new Intl.Segmenter(void 0, { granularity: "grapheme" }) : null;
+var _graphemeSeg = typeof Intl !== "undefined" && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : null;
 var CHARWRAP_FALLBACK_STYLE = {
   whiteSpace: "normal",
   overflowWrap: "anywhere",
@@ -478,4 +478,14 @@ var StickyNotes = ({
   })}
       </div>
     </AbsoluteFill>;
+};
+
+
+// ── ChatCut adapter (generated) ──────────────────────────────────────────────
+// Root must be a plain div per the MG contract; AbsoluteFill may only be an
+// inner layer. Editable values arrive on item.props.
+const Component = ({ item }) => {
+  const rootStyle = { position: "absolute", inset: 0, backgroundColor: "transparent" };
+  const p = (item && item.props) || {};
+  return <div style={rootStyle}><StickyNotes {...p} /></div>;
 };

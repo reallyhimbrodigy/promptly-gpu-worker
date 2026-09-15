@@ -3997,7 +3997,7 @@ KNOWLEDGE_TOOLS = [{
                                      "enum": ["small", "medium", "large",
                                               "dominant"],
                                      "description":
-                                         "OPTIONAL. How much frame height this "
+                                         "REQUIRED when this beat is ruled `text` or `card` — a placement missing it is a HALF RULING and is refused here, where it costs one line. How much frame height this "
                                          "takes."
                                          + control_teach("size", "text")[1]},
                                  "case": {
@@ -4005,7 +4005,7 @@ KNOWLEDGE_TOOLS = [{
                                      "enum": ["upper", "lower", "mixed",
                                               "title"],
                                      "description":
-                                         "OPTIONAL. The letter case of the "
+                                         "REQUIRED when this beat is ruled `text` or `card` — a placement missing it is a HALF RULING and is refused here, where it costs one line. The letter case of the "
                                          "words on screen. ALL CAPS is not the "
                                          "default; it is one of four answers."
                                          + control_teach("case", "text")[1]},
@@ -4015,7 +4015,7 @@ KNOWLEDGE_TOOLS = [{
                                               "lower_third", "full_frame",
                                               "corner"],
                                      "description":
-                                         "OPTIONAL. Which band of the frame. "
+                                         "REQUIRED when this beat is ruled `text` or `card` — a placement missing it is a HALF RULING and is refused here, where it costs one line. Which band of the frame. "
                                          "Captions own the bottom and the "
                                          "speaker's face the upper-middle, so "
                                          "a choice here is a choice about what "
@@ -4027,7 +4027,7 @@ KNOWLEDGE_TOOLS = [{
                                               "white_on_black",
                                               "black_on_white", "accent"],
                                      "description":
-                                         "OPTIONAL. How it reads against the "
+                                         "REQUIRED when this beat is ruled `text` or `card` — a placement missing it is a HALF RULING and is refused here, where it costs one line. How it reads against the "
                                          "footage. white_on_footage burns the "
                                          "words straight onto the picture and "
                                          "is what most reference text does; "
@@ -4043,7 +4043,7 @@ KNOWLEDGE_TOOLS = [{
                                  "hold_s": {
                                      "type": "number",
                                      "description":
-                                         "OPTIONAL. Seconds on screen. Shorter "
+                                         "REQUIRED when this beat is ruled `text` or `card` — a placement missing it is a HALF RULING and is refused here, where it costs one line. Seconds on screen. Shorter "
                                          "than the component's own entrance "
                                          "means it never resolves — StatCard's "
                                          "count-up lands at 0.8s and its label "
@@ -10972,6 +10972,40 @@ def half_ruling_refusal(v):
             f"the build follows the field, so this would silently place "
             f"nothing. Drop 'sfx' from treatment, or leave the field blank and "
             f"it will be filled in as 'yes'.")
+    # ── THE CONTROLS ARE PART OF THE RULING, NOT OF THE BUILD ──────────────
+    # Ruled 2026-09-13 after the plan-first run: the pipeline ruled this clip
+    # in 5 turns and handed ChatCut a plan with `size`, `hold_s` and `colour`
+    # NULL, so the executing agent had to decide them — and deciding is the
+    # thing that costs 700 of the 728 seconds. A plan with holes is not a plan;
+    # it is a plan plus three decisions, and the time comes back.
+    #
+    # WHY IT IS SAFE TO REFUSE HERE, which is the trap the sfx note above
+    # names: `sfx_name` is DERIVABLE, so refusing it would pre-empt a live
+    # deriver and make the demand unsatisfiable. These five have NO deriver —
+    # `_derive_sfx_name` and `_derive_card_hero` are the only two in this file.
+    # What they have is a silent BUILDER DEFAULT, and a silent default is a
+    # vote for the incumbent: the overlay renders at whatever size the builder
+    # picked and the ledger records the ruling as complete.
+    #
+    # NOT FILLED FROM THE CORPUS. `control_teach` hands the agent the reference
+    # distribution so it can choose; filling the field FROM that distribution
+    # would make the corpus INSTRUCT, which is the standing law it must never
+    # do. The agent picks. The corpus only says what the references did.
+    if why is None and ("text" in tr or "card" in tr):
+        _missing = [f for f in ("size", "case", "where", "colour", "hold_s")
+                    if str(v.get(f) or "").strip() == ""]
+        if _missing:
+            why = (
+                f"beat {v.get('beat')}: ruled "
+                f"{'text' if 'text' in tr else 'card'} with "
+                f"{', '.join(_missing)} unanswered. These are not build "
+                f"details — they are how the words READ: how much frame they "
+                f"take, their letter case, which band they sit in, how they "
+                f"hold against the footage, and how long the viewer has to "
+                f"read them. Left blank they are chosen by a builder default "
+                f"nobody ruled, and a downstream executor has to decide them "
+                f"instead. The reference distributions for each are in your "
+                f"context. Answer all of them.")
     if why is None and "card" in tr:
         # THE ACCEPTANCE GATE MUST ASK FOR WHAT THE SCHEMA
         # OFFERS. It demanded `card_type` — a field b13730c

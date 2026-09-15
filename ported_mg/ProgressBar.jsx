@@ -369,7 +369,7 @@ function useMGPhase(timing, { defaultEnterFrames, defaultExitFrames }) {
       // linear average ON THE FIRST FRAME, so it made its one consumer
       // (PillMarquee) step WORSE, 0.30 -> 0.41 peak_step. Same finding as the
       // zoom cap, same fix — one profile for all motion in this codebase.
-      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.25) : void 0
+      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.25) : undefined
     }
   );
   const exitProgress = interpolate(
@@ -381,7 +381,7 @@ function useMGPhase(timing, { defaultEnterFrames, defaultExitFrames }) {
       extrapolateRight: "clamp",
       // Departure: the same bounded-velocity profile, skewed late so the exit
       // accelerates away rather than crawling off.
-      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.75) : void 0
+      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.75) : undefined
     }
   );
   return {
@@ -442,7 +442,7 @@ var ProgressBar = (props) => {
   const effFillColor = fillColor ?? (trackColor === DEFAULT_TRACK ? "#FFFFFF" : inkFor(trackColor));
   const { containerStyle, wrapperStyle } = resolveMGPosition(
     { anchor, offsetX, offsetY, scale },
-    void 0,
+    undefined,
     "ProgressBar"
   );
   const { fps } = useVideoConfig2();
@@ -453,7 +453,7 @@ var ProgressBar = (props) => {
   if (!visible) return null;
   const K = mgSchedule({ fps, window: exitStartFrame, authoredEnd: PULSE_END });
   const k = K(1);
-  const isValueMode = "value" in props && props.value !== void 0;
+  const isValueMode = "value" in props && props.value !== undefined;
   const targetPercent = isValueMode ? Math.max(0, Math.min(1, props.value / props.total)) : Math.max(0, Math.min(1, (props.percentage ?? 0) / 100));
   const trackSpring = spring({
     fps,
@@ -666,3 +666,13 @@ function withAlpha(color, alpha) {
   }
   return color;
 }
+
+
+// ── ChatCut adapter (generated) ──────────────────────────────────────────────
+// Root must be a plain div per the MG contract; AbsoluteFill may only be an
+// inner layer. Editable values arrive on item.props.
+const Component = ({ item }) => {
+  const rootStyle = { position: "absolute", inset: 0, backgroundColor: "transparent" };
+  const p = (item && item.props) || {};
+  return <div style={rootStyle}><ProgressBar {...p} /></div>;
+};

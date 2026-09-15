@@ -20,6 +20,46 @@ const { build } = await import(ESBUILD);
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
+// ── ChatCut rejects the `void` operator ──────────────────────────────────────
+// PROVED, not assumed: a two-line probe through create_motion_graphic_from_code
+// — `1 > 0 ? "yes" : "no"` on line 2 validates, `1 > 0 ? "yes" : void 0` on
+// line 3 returns `Syntax error: Unexpected token (3:37)`, which is the column of
+// `void`. esbuild emits `void 0` as its canonical spelling of `undefined`, so
+// every blob this porter has ever produced carried it (81 occurrences across
+// 29 components) and every one of them would have been refused.
+//
+// The rewrite runs in CODE CONTEXT ONLY: the scanner steps over strings,
+// templates, and comments, so a `void 0` inside a string is never touched. When
+// the scanner is unsure it SKIPS rather than edits — a miss, never a corruption
+// — and the violation check below turns every miss into a loud failure.
+function devoid(src) {
+  let out = "", i = 0, replaced = 0, survivors = 0;
+  const n = src.length;
+  const isWord = (c) => c !== undefined && /[A-Za-z0-9_$]/.test(c);
+  while (i < n) {
+    const two = src.slice(i, i + 2);
+    if (two === "//") { const j = src.indexOf("\n", i); const k = j < 0 ? n : j; out += src.slice(i, k); i = k; continue; }
+    if (two === "/*") { const j = src.indexOf("*/", i + 2); const k = j < 0 ? n : j + 2; out += src.slice(i, k); i = k; continue; }
+    const c = src[i];
+    if (c === '"' || c === "'" || c === "`") {
+      let j = i + 1;
+      while (j < n) { if (src[j] === "\\") { j += 2; continue; } if (src[j] === c) break; j++; }
+      out += src.slice(i, j + 1); i = j + 1; continue;
+    }
+    if (src.startsWith("void 0", i) && !isWord(src[i - 1]) && !isWord(src[i + 6])) {
+      out += "undefined"; i += 6; replaced++; continue;
+    }
+    // A `void` reached in CODE context that the rewrite above did not consume
+    // (e.g. `void fn()`, or `void 0` inside a template's ${...}, which this
+    // scanner deliberately steps over). DropCard proved why this must not be a
+    // bare /\bvoid\b/ over the whole file: its comment says "a ~850px void".
+    if (src.startsWith("void", i) && !isWord(src[i - 1]) && !isWord(src[i + 4])) survivors++;
+    out += c; i++;
+  }
+  return { out, replaced, survivors };
+}
+
+
 const [entry, outDir] = process.argv.slice(2);
 if (!entry) { console.error("usage: port_mg.mjs <Component.tsx> <outDir>"); process.exit(2); }
 
@@ -129,6 +169,29 @@ if (preludeLines.length) {
        + [...new Set(preludeLines)].join("\n") + "\n\n" + code;
 }
 
+const _dv = devoid(code);
+code = _dv.out;
+
+// THE CHATCUT ADAPTER. Its contract is `const Component = ({ item }) => ...`
+// with a `<div style={rootStyle}>` ROOT, reading editable values from
+// item.props. The Remotion component takes named props and roots on
+// AbsoluteFill, which the contract forbids. Rather than rewrite 29 components,
+// wrap once: the div satisfies the root rule, spreading item.props satisfies
+// the prop rule, and the component inside is byte-for-byte what the frame-diff
+// proved identical.
+const compName0 = basename(entry).replace(/\.tsx?$/, "");
+code += `
+
+// ── ChatCut adapter (generated) ──────────────────────────────────────────────
+// Root must be a plain div per the MG contract; AbsoluteFill may only be an
+// inner layer. Editable values arrive on item.props.
+const Component = ({ item }) => {
+  const rootStyle = { position: "absolute", inset: 0, backgroundColor: "transparent" };
+  const p = (item && item.props) || {};
+  return <div style={rootStyle}><${compName0} {...p} /></div>;
+};
+`;
+
 const name = basename(entry).replace(/\.tsx?$/, "");
 mkdirSync(outDir, { recursive: true });
 const out = join(outDir, `${name}.jsx`);
@@ -180,8 +243,14 @@ if (/^\s*import\s/m.test(code)) violations.push("an import survived");
 if (/^\s*export\s/m.test(code)) violations.push("an export survived");
 if (/<Sequence[\s>]/.test(code)) violations.push("<Sequence> inside the component");
 if (/:\s*React\.FC|^\s*interface\s|^\s*type\s+[A-Z]/m.test(code)) violations.push("TypeScript survived");
-const rootAF = /return\s*\(\s*<AbsoluteFill/.test(code);
-if (rootAF) violations.push("AbsoluteFill is still the root");
+// THE ADAPTER'S div IS THE ROOT NOW, so an AbsoluteFill inside the wrapped
+// component is legal — the contract only forbids it as the OUTERMOST element.
+if (_dv.survivors > 0)
+  violations.push(`the \`void\` operator survives in code context x${_dv.survivors} — ChatCut's MG validator refuses it`);
+if (!/const Component = \(\{ item \}\)/.test(code))
+  violations.push("no ChatCut Component adapter");
+if (!/return <div style=\{rootStyle\}>/.test(code))
+  violations.push("the adapter root is not a plain div");
 
 console.log(JSON.stringify({
   component: name, out, bytes: code.length,

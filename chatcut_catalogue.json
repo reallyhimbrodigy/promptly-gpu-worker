@@ -1,0 +1,1038 @@
+{
+ "_conditions": {
+  "WHEN A NUMBER LANDS": [
+   "StatCard",
+   "ProgressBar",
+   "BarRace"
+  ],
+  "WHEN STEPS OR ITEMS ARE ENUMERATED": [
+   "RankedList",
+   "StickyNotes",
+   "PillCluster",
+   "PillMarquee",
+   "DropBanner",
+   "DropCard"
+  ],
+  "WHEN SOMETHING IS NAMED OR REVEALED": [
+   "PullQuote"
+  ],
+  "WHEN SOCIAL PROOF OR A MESSAGE IS QUOTED": [
+   "TweetBubble",
+   "InstagramComment",
+   "TikTokComment",
+   "IMessageBubble",
+   "ChatThread",
+   "Notification",
+   "EditorialQuote"
+  ],
+  "WHEN THE SCREEN OR APP IS THE SUBJECT": [
+   "RecordingFrame",
+   "MouseDrag"
+  ],
+  "WHEN A CLAIM GETS A VERDICT OR STAMP": [
+   "Stamp"
+  ],
+  "WHEN TIME OR SEQUENCE IS THE STORY": [
+   "Timeline",
+   "TimelineRoadmap",
+   "StepDivider",
+   "SectionDivider"
+  ],
+  "WHEN A REGION OF THE FRAME NEEDS POINTING AT": [
+   "AnnotationArrow",
+   "Reticle"
+  ]
+ },
+ "components": {
+  "AnnotationArrow": {
+   "when": "WHEN A REGION OF THE FRAME NEEDS POINTING AT",
+   "reach_for_it_instead_of": [
+    "an arrow pointing in from elsewhere"
+   ],
+   "size_band": "SMALL",
+   "still": "catalogue_stills/AnnotationArrow.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [
+    "end",
+    "start"
+   ],
+   "declared": [
+    "arrowheadSize",
+    "color",
+    "customPath",
+    "end",
+    "pathType",
+    "seed",
+    "start",
+    "strokeWidth"
+   ],
+   "example_props": {
+    "start": {
+     "x": 0.25,
+     "y": 0.35
+    },
+    "end": {
+     "x": 0.72,
+     "y": 0.62
+    },
+    "pathType": "curved-arc",
+    "color": "#C8551F",
+    "strokeWidth": 10,
+    "seed": 3,
+    "arrowheadSize": 36
+   }
+  },
+  "BarRace": {
+   "when": "WHEN A NUMBER LANDS",
+   "reach_for_it_instead_of": [],
+   "size_band": "MEDIUM",
+   "still": "catalogue_stills/BarRace.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [],
+   "declared": [
+    "accentColor",
+    "bars",
+    "maxValue",
+    "mode",
+    "textShadow",
+    "valuePrefix",
+    "valueSuffix",
+    "width"
+   ],
+   "example_props": {
+    "bars": [
+     {
+      "label": "ORGANIC",
+      "value": 82
+     },
+     {
+      "label": "PAID",
+      "value": 54
+     },
+     {
+      "label": "REFERRAL",
+      "value": 31
+     }
+    ],
+    "maxValue": 100,
+    "accentColor": "#C8551F",
+    "valueSuffix": "%"
+   }
+  },
+  "ChatThread": {
+   "when": "WHEN SOCIAL PROOF OR A MESSAGE IS QUOTED",
+   "reach_for_it_instead_of": [
+    "multi-message",
+    "exchanges"
+   ],
+   "size_band": "LARGE",
+   "still": "catalogue_stills/ChatThread.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [
+    "messages"
+   ],
+   "declared": [
+    "backgroundColor",
+    "borderRadius",
+    "header",
+    "incomingColor",
+    "incomingTextColor",
+    "messages",
+    "minHeight",
+    "outgoingColor",
+    "outgoingTextColor",
+    "showHomeIndicator",
+    "showStatusBar",
+    "statusBarTime",
+    "width"
+   ],
+   "example_props": {
+    "header": {
+     "name": "TEAM",
+     "subtitle": "iMessage",
+     "initials": "TM"
+    },
+    "messages": [
+     {
+      "sender": "them",
+      "text": "we shipped it"
+     },
+     {
+      "sender": "me",
+      "text": "numbers are up"
+     },
+     {
+      "sender": "them",
+      "text": "3x in a week"
+     }
+    ]
+   }
+  },
+  "DropBanner": {
+   "when": "WHEN STEPS OR ITEMS ARE ENUMERATED",
+   "reach_for_it_instead_of": [
+    "Edge-to-edge banner"
+   ],
+   "size_band": "unlisted",
+   "still": "catalogue_stills/DropBanner.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [
+    "title"
+   ],
+   "declared": [
+    "accentColor",
+    "cardColor",
+    "cardHeightPct",
+    "count",
+    "mutedColor",
+    "points",
+    "spokenColor",
+    "subtitle",
+    "subtitleColor",
+    "title",
+    "titleColor"
+   ],
+   "example_props": {
+    "title": "LAUNCH WEEK",
+    "subtitle": "three things shipped",
+    "points": [
+     "faster render",
+     "new editor",
+     "live preview"
+    ],
+    "accentColor": "#C8551F"
+   }
+  },
+  "DropCard": {
+   "when": "WHEN STEPS OR ITEMS ARE ENUMERATED",
+   "reach_for_it_instead_of": [
+    "the same framework as a contained floating-card version"
+   ],
+   "size_band": "unlisted",
+   "still": "catalogue_stills/DropCard.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [
+    "title"
+   ],
+   "declared": [
+    "accentColor",
+    "cardColor",
+    "cardHeightPct",
+    "labelColor",
+    "mutedColor",
+    "points",
+    "railColor",
+    "spokenColor",
+    "steps",
+    "subtitle",
+    "subtitleColor",
+    "title",
+    "titleColor",
+    "titleLead"
+   ],
+   "example_props": {
+    "title": "THE SETUP",
+    "subtitle": "what you need",
+    "steps": [
+     "upload",
+     "choose a vibe",
+     "render"
+    ],
+    "accentColor": "#C8551F"
+   }
+  },
+  "EditorialQuote": {
+   "when": "WHEN SOCIAL PROOF OR A MESSAGE IS QUOTED",
+   "reach_for_it_instead_of": [
+    "Framed/attributed quotes",
+    "An attributed framed card"
+   ],
+   "size_band": "LARGE",
+   "still": "catalogue_stills/EditorialQuote.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [
+    "text"
+   ],
+   "declared": [
+    "accentColor",
+    "author",
+    "authorColor",
+    "fontKey",
+    "fontSize",
+    "italic",
+    "lineStagger",
+    "maxWordsPerLine",
+    "role",
+    "showQuoteMark",
+    "text",
+    "textColor"
+   ],
+   "example_props": {
+    "text": "the edit is the argument",
+    "author": "REF-2",
+    "accentColor": "#C8551F"
+   }
+  },
+  "EndCard": {
+   "when": "",
+   "reach_for_it_instead_of": [],
+   "size_band": "unlisted",
+   "still": null,
+   "still_state": "ABSENT \u2014 renders empty; sample props still wrong",
+   "note": "",
+   "required": [],
+   "declared": [],
+   "example_props": {
+    "kind": "cta",
+    "title": "FOLLOW FOR MORE",
+    "lines": [
+     {
+      "text": "@promptly",
+      "icon": "at"
+     },
+     {
+      "text": "promptly.video",
+      "icon": "globe"
+     }
+    ],
+    "palette": {
+     "bg": "#14141A",
+     "fg": "#FEFCFD",
+     "accent": "#C8551F"
+    }
+   }
+  },
+  "IMessageBubble": {
+   "when": "WHEN SOCIAL PROOF OR A MESSAGE IS QUOTED",
+   "reach_for_it_instead_of": [
+    "Single message"
+   ],
+   "size_band": "LARGE",
+   "still": "catalogue_stills/IMessageBubble.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [
+    "messageType",
+    "platform",
+    "text"
+   ],
+   "declared": [
+    "messageType",
+    "platform",
+    "status",
+    "text",
+    "typewriter"
+   ],
+   "example_props": {
+    "platform": "imessage",
+    "messageType": "incoming",
+    "text": "did you see the numbers"
+   }
+  },
+  "InstagramComment": {
+   "when": "WHEN SOCIAL PROOF OR A MESSAGE IS QUOTED",
+   "reach_for_it_instead_of": [
+    "Platform cross-check: Instagram"
+   ],
+   "size_band": "MEDIUM",
+   "still": "catalogue_stills/InstagramComment.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [
+    "comment",
+    "platform",
+    "timestamp",
+    "username"
+   ],
+   "declared": [
+    "avatarColor",
+    "avatarSrc",
+    "comment",
+    "initials",
+    "likes",
+    "platform",
+    "timestamp",
+    "username"
+   ],
+   "example_props": {
+    "platform": "instagram",
+    "username": "kellan",
+    "comment": "how is this free",
+    "timestamp": "2h",
+    "likes": 412
+   }
+  },
+  "MouseDrag": {
+   "when": "WHEN THE SCREEN OR APP IS THE SUBJECT",
+   "reach_for_it_instead_of": [],
+   "size_band": "MEDIUM",
+   "still": null,
+   "still_state": "ABSENT \u2014 renders empty; sample props still wrong",
+   "note": "",
+   "required": [
+    "label"
+   ],
+   "declared": [
+    "cardColor",
+    "cardTextColor",
+    "label",
+    "regionHeight",
+    "regionWidth",
+    "showCursor"
+   ],
+   "example_props": {
+    "label": "Lace Quick Fix",
+    "cardColor": "#F2C211",
+    "cardTextColor": "#1C1C1C",
+    "regionWidth": 720,
+    "regionHeight": 360,
+    "showCursor": true
+   }
+  },
+  "NamePlate": {
+   "when": "",
+   "reach_for_it_instead_of": [],
+   "size_band": "unlisted",
+   "still": "catalogue_stills/NamePlate.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [],
+   "declared": [],
+   "example_props": {
+    "name": "KELLAN HENNEBERRY",
+    "handle": "@kellanhenneberry",
+    "accentColor": "#C8551F"
+   }
+  },
+  "Notification": {
+   "when": "WHEN SOCIAL PROOF OR A MESSAGE IS QUOTED",
+   "reach_for_it_instead_of": [
+    "Phone events",
+    "phone event",
+    "An app banner"
+   ],
+   "size_band": "unlisted",
+   "still": "catalogue_stills/Notification.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [
+    "notifications"
+   ],
+   "declared": [
+    "notifications",
+    "platform"
+   ],
+   "example_props": {
+    "notifications": [
+     {
+      "app": "apple-pay",
+      "appName": "Apple Pay",
+      "title": "Payment Received",
+      "body": "$249.00 from Kellan",
+      "timestamp": "now"
+     }
+    ]
+   }
+  },
+  "PillCluster": {
+   "when": "WHEN STEPS OR ITEMS ARE ENUMERATED",
+   "reach_for_it_instead_of": [
+    "unordered keyword tags",
+    "a small static popped-in group of 2\u20138 tags"
+   ],
+   "size_band": "SMALL",
+   "still": "catalogue_stills/PillCluster.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [],
+   "declared": [
+    "accentColor",
+    "accentEvery",
+    "fontSize",
+    "glass",
+    "tags",
+    "textColor",
+    "textShadow",
+    "width"
+   ],
+   "example_props": {
+    "tags": [
+     "FAST",
+     "CHEAP",
+     "GOOD",
+     "NO WATERMARK"
+    ],
+    "accentColor": "#C8551F",
+    "accentEvery": 2,
+    "fontSize": 48
+   }
+  },
+  "PillMarquee": {
+   "when": "WHEN STEPS OR ITEMS ARE ENUMERATED",
+   "reach_for_it_instead_of": [
+    "a continuous scrolling ticker"
+   ],
+   "size_band": "FULL-WIDTH",
+   "still": "catalogue_stills/PillMarquee.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [
+    "pills"
+   ],
+   "declared": [
+    "accentColor",
+    "colorMode",
+    "edgeFade",
+    "firstDirection",
+    "fontKey",
+    "fontSize",
+    "gap",
+    "glass",
+    "hashtag",
+    "paddingX",
+    "paddingY",
+    "palette",
+    "pillColor",
+    "pills",
+    "rowGap",
+    "rows",
+    "speed",
+    "textColor",
+    "uppercase"
+   ],
+   "example_props": {
+    "pills": [
+     "NO WATERMARK",
+     "4K EXPORT",
+     "AUTO CAPTIONS",
+     "B-ROLL"
+    ],
+    "accentColor": "#C8551F"
+   }
+  },
+  "ProgressBar": {
+   "when": "WHEN A NUMBER LANDS",
+   "reach_for_it_instead_of": [
+    "one bar toward a goal",
+    "a single quantity advancing toward a target",
+    "a straight node-to-node process rail); a single advancing quantity"
+   ],
+   "size_band": "SMALL",
+   "still": "catalogue_stills/ProgressBar.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [],
+   "declared": [],
+   "example_props": {
+    "label": "RENDERING",
+    "value": 0.68
+   }
+  },
+  "PullQuote": {
+   "when": "WHEN SOMETHING IS NAMED OR REVEALED",
+   "reach_for_it_instead_of": [
+    "The speaker's OWN sentence with no marks or name",
+    "the speaker's huge sentence"
+   ],
+   "size_band": "LARGE",
+   "still": "catalogue_stills/PullQuote.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [
+    "text"
+   ],
+   "declared": [
+    "accentColor",
+    "align",
+    "barColor",
+    "blurIn",
+    "fontKey",
+    "fontSize",
+    "highlightStyle",
+    "highlightTextColor",
+    "keywordColor",
+    "keywordScale",
+    "keywords",
+    "maxWordsPerLine",
+    "quoteMarkColor",
+    "showQuoteMark",
+    "text",
+    "textColor",
+    "textShadow",
+    "uppercase",
+    "wordReveal",
+    "wordStagger"
+   ],
+   "example_props": {
+    "text": "IT EDITS ITSELF",
+    "keywords": [
+     "EDITS"
+    ],
+    "accentColor": "#C8551F"
+   }
+  },
+  "RankedList": {
+   "when": "WHEN STEPS OR ITEMS ARE ENUMERATED",
+   "reach_for_it_instead_of": [
+    "Ordered 1-2-3 takeaways",
+    "an ordered ranked list",
+    "one ordered list revealed at once"
+   ],
+   "size_band": "MEDIUM",
+   "still": "catalogue_stills/RankedList.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [],
+   "declared": [
+    "accentColor",
+    "highlightTop",
+    "items",
+    "labelColor",
+    "order",
+    "rankFontSize",
+    "textShadow",
+    "valueColor",
+    "width"
+   ],
+   "example_props": {
+    "items": [
+     {
+      "rank": "1",
+      "label": "HOOK",
+      "value": "0-2s"
+     },
+     {
+      "rank": "2",
+      "label": "PROOF",
+      "value": "2-8s"
+     },
+     {
+      "rank": "3",
+      "label": "CLOSE",
+      "value": "8-12s"
+     }
+    ],
+    "order": "topDown",
+    "highlightTop": true,
+    "accentColor": "#C8551F"
+   }
+  },
+  "RecordingFrame": {
+   "when": "WHEN THE SCREEN OR APP IS THE SUBJECT",
+   "reach_for_it_instead_of": [
+    "Full-frame recording chrome"
+   ],
+   "size_band": "LARGE",
+   "still": "catalogue_stills/RecordingFrame.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [],
+   "declared": [
+    "accentColor",
+    "annotationFontSize",
+    "annotations",
+    "frameBorderColor",
+    "scanLineColor",
+    "scanLineCycle",
+    "showFrame",
+    "showScanLine",
+    "textColor"
+   ],
+   "example_props": {
+    "label": "REC",
+    "value": "00:14",
+    "corner": "top-left"
+   }
+  },
+  "Reticle": {
+   "when": "WHEN A REGION OF THE FRAME NEEDS POINTING AT",
+   "reach_for_it_instead_of": [
+    "A static targeting box on a spot"
+   ],
+   "size_band": "SMALL",
+   "still": "catalogue_stills/Reticle.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [],
+   "declared": [
+    "accentColor",
+    "armLength",
+    "bracketColor",
+    "label",
+    "regionHeight",
+    "regionWidth",
+    "showCrosshair",
+    "showScanline",
+    "textShadow",
+    "thickness"
+   ],
+   "example_props": {
+    "target": {
+     "x": 0.5,
+     "y": 0.45
+    },
+    "color": "#C8551F"
+   }
+  },
+  "SectionDivider": {
+   "when": "WHEN TIME OR SEQUENCE IS THE STORY",
+   "reach_for_it_instead_of": [
+    "a one-off chapter/part header with no running count"
+   ],
+   "size_band": "LARGE",
+   "still": "catalogue_stills/SectionDivider.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [
+    "title"
+   ],
+   "declared": [
+    "accentColor",
+    "align",
+    "eyebrowColor",
+    "fontKey",
+    "label",
+    "number",
+    "numberColor",
+    "scrimColor",
+    "showRule",
+    "showScrim",
+    "showVignette",
+    "textShadow",
+    "title",
+    "titleColor",
+    "titleFontSize",
+    "variant",
+    "vignetteStrength"
+   ],
+   "example_props": {
+    "title": "PART TWO",
+    "accentColor": "#C8551F"
+   }
+  },
+  "SpeechBubble": {
+   "when": "",
+   "reach_for_it_instead_of": [],
+   "size_band": "unlisted",
+   "still": null,
+   "still_state": "DISPATCHER",
+   "note": "a DISPATCHER, not a component \u2014 it delegates on `platform` to TweetBubble / InstagramComment / IMessageBubble / TikTokComment. Place one of those directly.",
+   "required": [],
+   "declared": [],
+   "example_props": {
+    "platform": "tweet",
+    "name": "Kellan",
+    "handle": "@kellanhenneberry",
+    "initials": "KH",
+    "text": "this changes the workflow",
+    "stats": {
+     "replies": 128,
+     "reposts": 412,
+     "likes": 1200,
+     "views": 98000
+    }
+   }
+  },
+  "Stamp": {
+   "when": "WHEN A CLAIM GETS A VERDICT OR STAMP",
+   "reach_for_it_instead_of": [],
+   "size_band": "MEDIUM",
+   "still": "catalogue_stills/Stamp.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [
+    "text"
+   ],
+   "declared": [
+    "color",
+    "distress",
+    "doubleRing",
+    "entryScale",
+    "fontKey",
+    "fontSize",
+    "impactFlash",
+    "mark",
+    "markColor",
+    "rotation",
+    "shockRing",
+    "size",
+    "style",
+    "subtextBottom",
+    "subtextTop",
+    "text",
+    "textColor",
+    "textShadow"
+   ],
+   "example_props": {
+    "text": "SOLD OUT",
+    "style": "seal",
+    "accentColor": "#C8551F"
+   }
+  },
+  "StatCard": {
+   "when": "WHEN A NUMBER LANDS",
+   "reach_for_it_instead_of": [
+    "Static numbers",
+    "a single headline number"
+   ],
+   "size_band": "MEDIUM",
+   "still": "catalogue_stills/StatCard.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [
+    "label",
+    "value"
+   ],
+   "declared": [
+    "accentColor",
+    "decimals",
+    "fromValue",
+    "label",
+    "labelColor",
+    "numberColor",
+    "prefix",
+    "suffix",
+    "textShadow",
+    "value"
+   ],
+   "example_props": {
+    "value": 20000000,
+    "prefix": "$",
+    "label": "RAISED IN 14 DAYS",
+    "accentColor": "#C8551F"
+   }
+  },
+  "StepDivider": {
+   "when": "WHEN TIME OR SEQUENCE IS THE STORY",
+   "reach_for_it_instead_of": [
+    "the script announcing its running position",
+    "a numbered running step"
+   ],
+   "size_band": "LARGE",
+   "still": "catalogue_stills/StepDivider.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [
+    "title"
+   ],
+   "declared": [
+    "accentColor",
+    "fontKey",
+    "kicker",
+    "kickerColor",
+    "showCount",
+    "showProgress",
+    "step",
+    "title",
+    "titleColor",
+    "titleFontSize",
+    "totalSteps",
+    "uppercase"
+   ],
+   "example_props": {
+    "title": "STEP 2",
+    "subtitle": "choose the vibe",
+    "accentColor": "#C8551F"
+   }
+  },
+  "StickyNotes": {
+   "when": "WHEN STEPS OR ITEMS ARE ENUMERATED",
+   "reach_for_it_instead_of": [
+    "Scattered hand-written notes",
+    "scattered notes",
+    "unordered parallel items"
+   ],
+   "size_band": "unlisted",
+   "still": "catalogue_stills/StickyNotes.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [
+    "notes"
+   ],
+   "declared": [
+    "noteFontFamily",
+    "noteFontSize",
+    "noteSize",
+    "notes",
+    "showFog",
+    "topOffset"
+   ],
+   "example_props": {
+    "notes": [
+     {
+      "text": "hook",
+      "color": "#FFE86B",
+      "rotation": -4
+     },
+     {
+      "text": "proof",
+      "color": "#9BE7A6",
+      "rotation": 3
+     },
+     {
+      "text": "close",
+      "color": "#FFB3C1",
+      "rotation": -2
+     }
+    ]
+   }
+  },
+  "TikTokComment": {
+   "when": "WHEN SOCIAL PROOF OR A MESSAGE IS QUOTED",
+   "reach_for_it_instead_of": [],
+   "size_band": "MEDIUM",
+   "still": "catalogue_stills/TikTokComment.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [
+    "comment",
+    "likes",
+    "platform",
+    "username"
+   ],
+   "declared": [
+    "avatarColor",
+    "avatarSrc",
+    "comment",
+    "initials",
+    "likes",
+    "platform",
+    "username"
+   ],
+   "example_props": {
+    "platform": "tiktok",
+    "username": "kellan",
+    "comment": "wait how",
+    "timestamp": "2h",
+    "likes": 98
+   }
+  },
+  "Timeline": {
+   "when": "WHEN TIME OR SEQUENCE IS THE STORY",
+   "reach_for_it_instead_of": [
+    "ordered stages of a journey with no header",
+    "the same ordered stages with NO dates",
+    "the whole multi-step process shown at once on one rail"
+   ],
+   "size_band": "MEDIUM",
+   "still": "catalogue_stills/Timeline.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [],
+   "declared": [
+    "accentColor",
+    "indexColor",
+    "labelColor",
+    "nodeSize",
+    "rowGap",
+    "steps",
+    "textShadow",
+    "trackColor",
+    "width"
+   ],
+   "example_props": {
+    "stats": [
+     {
+      "label": "2019",
+      "value": "IDEA"
+     },
+     {
+      "label": "2021",
+      "value": "BUILD"
+     },
+     {
+      "label": "2024",
+      "value": "SHIP"
+     }
+    ]
+   }
+  },
+  "TimelineRoadmap": {
+   "when": "WHEN TIME OR SEQUENCE IS THE STORY",
+   "reach_for_it_instead_of": [
+    "the same stages carrying TIME labels, or a scenic winding-path version"
+   ],
+   "size_band": "MEDIUM",
+   "still": "catalogue_stills/TimelineRoadmap.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [],
+   "declared": [
+    "accentColor",
+    "firstSide",
+    "indexColor",
+    "labelColor",
+    "nodeSize",
+    "rowHeight",
+    "steps",
+    "sublabelColor",
+    "textShadow",
+    "trackColor",
+    "width"
+   ],
+   "example_props": {
+    "stats": [
+     {
+      "label": "Q1",
+      "value": "EDITOR"
+     },
+     {
+      "label": "Q2",
+      "value": "MOBILE"
+     },
+     {
+      "label": "Q3",
+      "value": "API"
+     }
+    ]
+   }
+  },
+  "TweetBubble": {
+   "when": "WHEN SOCIAL PROOF OR A MESSAGE IS QUOTED",
+   "reach_for_it_instead_of": [],
+   "size_band": "MEDIUM",
+   "still": "catalogue_stills/TweetBubble.png",
+   "still_state": "MEASURED",
+   "note": "",
+   "required": [
+    "handle",
+    "name",
+    "platform",
+    "stats",
+    "text"
+   ],
+   "declared": [
+    "avatarColor",
+    "avatarSrc",
+    "darkMode",
+    "handle",
+    "initials",
+    "name",
+    "platform",
+    "stats",
+    "text",
+    "timestamp",
+    "verified"
+   ],
+   "example_props": {
+    "platform": "tweet",
+    "name": "Kellan",
+    "handle": "@kellanhenneberry",
+    "initials": "KH",
+    "text": "this changes the workflow",
+    "stats": {
+     "replies": 128,
+     "reposts": 412,
+     "likes": 1200,
+     "views": 98000
+    }
+   }
+  }
+ }
+}

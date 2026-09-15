@@ -1,0 +1,218 @@
+{
+ "BarRace": {
+  "content_unavailable": [
+   "bars"
+  ],
+  "state": "ABSENT",
+  "how": "own project, own empty frame, pixels diffed",
+  "detail": "0.000% px @f30, bbox None",
+  "project": "8e89313b-d8a4-414c-94d7-d510bfb3e575",
+  "uri": "https://rendererbucket-48236b1.s3.us-east-1.amazonaws.com/renders/1-day-ug7uyen9zw/out.jpeg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=ASIAZA54WGCKFOCB767R%2F20260915%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260915T002914Z&X-Amz-Expires=900&X-Amz-Security-Token=IQoJb3JpZ2luX2VjECUaCXVzLWVhc3QtMSJHMEUCIGIYPSuDNu14laLfjjaFtnopcKrVowD2swvxVpjlhgHdAiEAlKZqSfUz6ZTD%2BEzuqEnq83FL%2B1J0RY6YQreO1ujcc4YqvAQI7v%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FARAAGgw2MjA0ODE2MjIxNjQiDKMk62qOkxCUHHlUzCqQBKXq42fbSRGRKnw0BoPGAwgQLqjs6xDAU9gPiZIwXEMGQFcc%2FG0y663Eg5%2Br4NUl8xeEIR19KQNKH8oYIFViahrLC%2FCFUcOaRXCqOYh4b0QtHoqa6l4oigMfjsConM3Lqqd50A%2FEk8Y9FXJgBkIuIkEAaC7GbiNXqahu2sLD7jczEJihJSa5YtpApgkKCCbL2iG0UHPJC0Ol%2BSYZKbB0AcHHPmo3eJxo%2BqAv1Tp3FKI18eEP3SFSOsFFy%2FNwN21y1ZpjpTQkchVW5q6R44yhdOfdc2WaRa7TOEScaFZLmZlEUzn3uh2KU%2FBd%2FVmbX9H1octApAZzT2KwQ2Bo4lyFe5EZ90YNe5usemwo%2FK%2Fg%2FCa3qx0TEf0XBV%2F5mO8wCFwxgKzp3nw2GFnlVg4cwpuaKkNqmzPyM%2BbBpj8h4qQe%2B5R8dL8tI8hYQqBRl9P%2B5FDH4ivaMU6laZwPKeJITeg%2FfX3ASviVYswTI%2BcguwJSzMfsp4ENdinHWvAW8fIzU2el0U%2Fc%2FpqVrJTtm%2BikjR3REE381Mkx78i94dEwA1aeUBBvArxrmCEqv7cvefubi0EVKZzGseBvt2E%2BYgcV2Ot68VPSNRjF7c4Y7oP0CNpCiU2IBEI6ZjW5ZuAZchUfIcSMukQ21QsyWHkulFIzcX7L%2BfSY%2BNns9Ey0cpa7Mm2hNYz9JOTVCL7vRcd7qQ9yrCCGZzDftqHVBjqmAc4yp7aNfcQ2DgToBGNhVFuN%2Bcc%2ByLAccQLXCag0bDFs5VUqfrSJD%2FmoB1bvUVBzdZBVD6PekrrdNI5JT0NsIUcjpF2RjranGqq6Wvrj41DJrRWe7O5rgeFNJPEP%2FfZOnIvJRewHA9Wo9w5v2U3451V0yFE7ZSAN1qvDtsaPy2%2BSksxTRIYknETkRs%2FaqGY6IgCNXB2Gasf78jXGidxRXx6eafMSQcw%3D&X-Amz-Signature=cd66643e07f7008a980c17f32f5042469c4d0b718ff6da4fdfefdfecafc908a5&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject"
+ },
+ "DropBanner": {
+  "content_unavailable": [
+   "points"
+  ],
+  "state": "MEASURED",
+  "how": "own project, own empty frame, pixels diffed",
+  "detail": "47.030% px @f32, bbox (0, 0, 882, 742)",
+  "project": "299ac426-091b-478f-b3b8-c0d71161abf3",
+  "uri": "https://rendererbucket-48236b1.s3.us-east-1.amazonaws.com/renders/1-day-7btpogy0t6/out.jpeg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=ASIAZA54WGCKEFUOXKJD%2F20260915%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260915T002923Z&X-Amz-Expires=900&X-Amz-Security-Token=IQoJb3JpZ2luX2VjECQaCXVzLWVhc3QtMSJHMEUCIE6jLKakAJtDPNwr3JjbHqnYXihDT%2BI4%2BDv%2F3dFCFDHeAiEAohKo%2Fnp1TCiIFdQylxDmwO2gRFnoDt8D2j0xx6WDhbkqvAQI7f%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FARAAGgw2MjA0ODE2MjIxNjQiDL%2Fek9m2ojkaObUbdSqQBA4BY%2BauK4b0k8XFMQ%2BCYghdu9VfKXc6g%2FxSbXkRyWWC70%2B%2BffreUMbkUPxv35W%2FbWrzvEZhQ8QnVZL0QPW9%2BOEgYMD2fsDap%2BtldaIxLPzSXpCM2M0YjVPmzIfQnJZSCSVptoKWyb3kkdd2u3baqsS8AKkXhy88vCpL%2BkkNR21VcGFcsZln93H6mgWtCCKLcz%2FDUfqSseEo%2FIMlvDdhv773AQRVRaFob6tjuT%2Bi1QXMfuqQwLZJaN3RrYW4JuNemaCT8K0hQZXgaKOOggpm9mf3Rm3NKjrD0hRWWq8gXT3rrkIt%2FRjzxCHvgkWqxJghttaZvB6egRbSFNh0S8AzRbQYL66SeRjZk8JLW6eDED1Ggv0558Fm800tUL4XU9XtwHNG0SAKFe%2BgJpXUKCEBZM6WNi2UZ5udMoXrAnGcHJXjuS6Ywu%2FDmgjskPCBMhYWPyOsNpKSwGL3Yp4HQkpPdbj%2FtUIuXYvjHirkCwd2DItS%2BQ0sgZqTTv68W4TeeD%2BtpUrBkolvLcFDJuWD0Yok%2BIi33gPq1tJzm%2BjoIJAj03csYtj%2FTNXHda%2FERV4tHPQyXxOWQ0c4HP7Dgr1rJkGtfAXKdGuhx2%2BkiattK08z%2BuA%2BhO9X%2F5EClmgbNt3sKI3qRsTO4jzGt0WhUsaybvL6Med%2BtRkNkdceCzUMMGmsWPZW5SNioBYcnKhzV77Flyw4zDCfnqHVBjqmAXC15H5I1k2PTQN10x6kd9GuKGemKVSkcmFBVQVnmSoCEyfNAmNUSVJBpvTauVSTNGH%2F%2BCxEGyOsGP14tzNcu82yXEOUcV5Lu8U8qZwjNkJyydtobCLKfm8GtZTWUfXCGMZc%2BAEpV17lDA0IYTOSz%2FG4QW4tkkGzXLf%2B5%2BOh0P33I%2Fw%2BG%2B%2BoKi%2BwE%2B%2FejBir0TSVb2LDJPyMEYYB9M8Tbiji3u9WV0s%3D&X-Amz-Signature=be689db3cbea02230d922cd0efc735a0898a2009905c33629d561e2935ed5361&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject"
+ },
+ "DropCard": {
+  "content_unavailable": [
+   "points",
+   "steps"
+  ],
+  "state": "MEASURED",
+  "how": "own project, own empty frame, pixels diffed",
+  "detail": "39.710% px @f32, bbox (41, 73, 839, 768)",
+  "project": "7ad32d99-20bd-4932-9764-801fab2ea8c5",
+  "uri": "https://rendererbucket-48236b1.s3.us-east-1.amazonaws.com/renders/1-day-ed6ueruyky/out.jpeg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=ASIAZA54WGCKNCL2MIY5%2F20260915%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260915T002942Z&X-Amz-Expires=900&X-Amz-Security-Token=IQoJb3JpZ2luX2VjECUaCXVzLWVhc3QtMSJHMEUCIQCcLusXgd%2BegUgKSh%2Bni8saWGKmKAhgaLppCrterXIeawIgKokISPVji0%2BRPe70%2BpWjCdBWzkzrMvAe8C3JSn0EcvQqvAQI7f%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FARAAGgw2MjA0ODE2MjIxNjQiDKHtcrhGBZaRPE5P4CqQBDoazVljAmR2%2FhCxuKaPx12jrV3DeKwsqM4XE2gTDyGRun5HVhfbYaphEuxhAEUKVQFemYvdrZldM97fXo04yO9FDhmEy952K89znBqBJS%2BcqDD1uWvDRlkrcapr9o5vIUMxo1PhjdfFaf61TNzbC%2F9dn%2BAzasym9pNPGfaLxlbppmqqvr0oAQmC%2FG4DcxmdtqsCbAehEvFzO7Z9sbc4DomT8cB6i0XdxtUgjMYHBN9uyoEZvZ21Oaj%2Bs%2BLtU9O6ynT8Ls36iwv4wstpeBuzZs2XvMl2l92wxcaUZQd1Hb3b2kHqTfqsj001Qp%2FYjYCLSDsj1bWfGSExqq4ZyXkg55o965DxyHrv3umJuAFn3K0jS3HzZz3tASWF0%2BTHbDe%2FzAkrJZAWHF8%2FVRGqjor6cHBDPF%2BvGkmL0Zqe1ibKBtXbElIdqGejUD5L4PvfdF1xnt2vKsuk5ZvdS5zXNznwn1AxyaIDJSwwlkFBiTzMthx0m%2BKZ3ZHGG5Qz1vrcoyHUxVaFhjapqnKUCoQbS3g6obL8tv94fZAHyV1qNzUWy%2F%2FVlEVMjefcZGigCziCop6YrasCzM4H0SsrJjDOy5WeKmsXFp2OH%2BPD8EqrCyDvMGsYfcdNOjDKTNj%2Br6Wqg0kioGJnZOjG032RkWwAmtc4D7rZpmgzC6E99aTUJGgpbEZKGFTwHLYSYlkBt9ZZ2qLxyDC8rKHVBjqmAcxYx7FciTKHpKV4pcpsNLdyx4H4Knt3UsPyYnhKl3oyT7Cx2WQMRjyFIi5t4650m81ya5TcaDUXmAFWkY4oLZ%2Bs0fd37Du%2FMo2n1vnN%2Brpdo%2FR8qD1n0lz3Q%2BeV%2BtIzgK5fWZLu6aBMHqf13CKiUDaiFhmMOgjOsxdNFPzytLgkAt6jgf5ZA8RMjko4k3SABS47gyQhcphkdPpvHjyD1SLwlw4zxV4%3D&X-Amz-Signature=a0901bb4a4c122b295e7246c8c1966a22a57a1c1c147e5a31ed4906546e28ffd&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject"
+ },
+ "EditorialQuote": {
+  "content_unavailable": [],
+  "state": "MEASURED",
+  "how": "own project, own empty frame, pixels diffed",
+  "detail": "5.885% px @f48, bbox (0, 431, 882, 921)",
+  "project": "af16aef0-6577-47b4-824e-5032f30f3e9f",
+  "uri": "https://rendererbucket-48236b1.s3.us-east-1.amazonaws.com/renders/1-day-g7aqr5xhpa/out.jpeg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=ASIAZA54WGCKAGA4FT4J%2F20260915%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260915T002950Z&X-Amz-Expires=900&X-Amz-Security-Token=IQoJb3JpZ2luX2VjECUaCXVzLWVhc3QtMSJIMEYCIQD6paY2eH%2F8n3yo6Bu5uVPX2FESCJtmoYgLkU2e15A9mQIhAKpni6iqHxZ6B4zWc79NdqpWZu3W%2F9YbvoVxf9gIZffHKrwECO3%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEQABoMNjIwNDgxNjIyMTY0IgwTW1jf0n%2F3RnfOWvIqkAQoYCzcmDqEDpU7KE54LNf%2BHHTaml1RaOqqYT0XdL2VQ2d4VXnPAwpSwgNjXurkNCyUeQUZxD70RxmP3hreOLDo%2BzOhSh59pYW%2FE9tyLcPrwgop1qUAveCiTbYwoMhono32dG6prOGr6c0mcTUYrCzfqV7ZQVohGKwSzr5Q3FtrZaiD%2BcrebCTDPD4N4RmooqoKNksbMGcMG8ZW0Pt%2FwQpC7rZBbvwGmADXB0KmrdPcDyqefYAYpI0q9owc%2BacBCaonGYC8dozdE0fXBPdhEfIHzwniKK8UenRZ14A4hmtNgO1mvsW2dFZW7hqrxX38PuXxHWWVKzmGP2163mOdOW1BqKTvxC9iMg2m1A1lQRR%2F%2FBXvxs%2BQzs493Meom%2FnEKQj3T3p8QKgUCBsI1al0iR0ZKAbOHYSWUdiFEW23tMGZgGzPAiWusjR%2BtwNNtnqIFrTwPlEt4RRMUfDd81od4WK7NmbI%2FkDi4iZYNZeDICdZtrl0nbE2LAn9oEmUlsVX3YAAClbpqHD1Kzfvnep5ECs9Uq2BVLxu%2F%2FgQX4Y4VKFNxkPUMwo3Mb6w70QUdq0BXC1nuqX40Z2%2Bk2vqVOl%2B4BmkEL3HdCVG6guAG0YsBo1s1yggLXMLi1FBDXRrmA7z5KtnSOZEop94ofR0wY40X%2B1W15%2BC2Gppi3sNq1od6av4kyTF1EDYIA8LbpjyLUkyGdgwvaqh1QY6pQFX2fy6l8hq%2BJpdI4WB4OfbH%2FOL%2Blcq%2FomVmexLJIEGfHmYxobCQRHuZ2jxu%2BE4L9toX0dlV44zyoqznWzP5OGK6Qx%2BqMVl%2FlMILFafOQd0AjwaLBAzu0iuk6KlzQCNiMBdQGQKCDaIDdfOUgehu5mT386t%2FMk3HVSJaObSN2091KGhYXswj8lig%2FRiEe8vfRV76Q%2FyMaC4uOlZGiGqfP6WBHoUo5Y%3D&X-Amz-Signature=ebcf4b1f85467ef0b1086fa5a3e9b956369b0f3f9b2ef54ae3985f1fa72ac1f6&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject"
+ },
+ "IMessageBubble": {
+  "content_unavailable": [],
+  "state": "MEASURED",
+  "how": "own project, own empty frame, pixels diffed",
+  "detail": "0.330% px @f20, bbox (187, 696, 500, 750)",
+  "project": "1e08cf2d-922c-49bc-9afb-cd1674774e7d",
+  "uri": "https://rendererbucket-48236b1.s3.us-east-1.amazonaws.com/renders/1-day-almbnxokpc/out.jpeg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=ASIAZA54WGCKJKYXKPBP%2F20260915%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260915T002959Z&X-Amz-Expires=900&X-Amz-Security-Token=IQoJb3JpZ2luX2VjECUaCXVzLWVhc3QtMSJGMEQCIFMUhlLz62tGhYvF5oYBXyCXVmXYfLatUl4oPAUHvvOkAiB0GtSs%2BRKsPAFqLlTgwysiDDC6sAzBMgZ8Q6iOpE9n2yq8BAju%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F8BEAAaDDYyMDQ4MTYyMjE2NCIMXiiNDP688e0ajoXUKpAE3EoV6BA3ThDX%2FLCfPsoN9p5%2BHHajMRy88dnKO%2FPonSi%2FmGLulJ%2FeA8qeurhFjQUKTeUtTJU%2BjFJlXGmG%2BKx3WKZgN2g1Tlh%2FCTE%2B4cMunMqwtPJpFbpty9kIXOZMSbGzOrOl5y4CM4nPH%2FNmre7n9prywT5UPmes6qgw4ktVFqtFStwyKpGOxi1FEH4ANIiGA4cGF8vkMHNjakWyjuGaN9Wo9e5S%2BYL7enLakqI9GXL%2FnitZjThbm6qngTINVMFGhX3sbociq133eT747oEZ81yHYXHssARA5IPNu6Sr34N%2FISh4GTDgrDi8SlNuMSky%2FQwHFg4Acva43OzY2KpNvTubl8K9rMI4s3JjvoG3NdfYVfPsbDm2Uz9hR%2BMqfqPhHZra9TR5NDtJ82CYSEoDnH6vHyU4gxbE5HAWADtMKEzjULdiiqROchgHlqMXkdYJdKwEx5s2uKtVqVfip6T%2FqWs2uFkK%2Bl%2BNhSL9UmJ2dtZXmkzj%2BYmRPSU2xbdG6YRlA2sUnzVqXthioK%2Bo2e%2FbnT6uGAriZkIAxhG%2FsuMmLSCpK1jdjgt5i%2F5suda3ZfmVPUlLViYNM%2FWsP0MZ4Q6DrXwBsABRJZJjUJpY2QUJI%2Bte0IoX4boNlAITyWzIPVKq9hVOKm50g9m02rqCahSqwl7EyX5TMtZ%2BUflphLzZNDzFtL%2BCxbLIAw1flvWBXMMjMOawodUGOqcBFkmihsaJWQe6aF%2Fg%2F5V1atheAVzaP5urRd%2BUE%2BNU3uha7XAwSvJee4D8jtPB55eDrE%2B376dIWeuWI4XeVPKS5zw7D6nl4ANWIlwdcN9QNvcwC%2BpVPwk6XtWH1yPNsyc2nXwFujVQd8T7kiKJezPIiPhxIzYIBPANhqVQs8HFZIanrywx2Y1%2BTp9alBXbu9Xsxu%2FJrT38pH3LvZDaVx2KNp2OU%2FCAUmU%3D&X-Amz-Signature=29b945c4282667247d9b1242d0e4d5906188f192a1bd3cc80d17f4546412279d&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject"
+ },
+ "MouseDrag": {
+  "content_unavailable": [],
+  "state": "MEASURED",
+  "how": "own project, own empty frame, pixels diffed",
+  "detail": "1.585% px @f38, bbox (584, 814, 882, 915)",
+  "project": "4844d8d1-d0f1-4880-969c-820da173dc16",
+  "uri": "https://rendererbucket-48236b1.s3.us-east-1.amazonaws.com/renders/1-day-we1864jl9z/out.jpeg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=ASIAZA54WGCKDXAOIEJ6%2F20260915%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260915T003009Z&X-Amz-Expires=900&X-Amz-Security-Token=IQoJb3JpZ2luX2VjECUaCXVzLWVhc3QtMSJHMEUCIDIbV%2FxKHQ0bNKDjzYuQMRox1vSd4Ow8QHDZIZ3JeiXTAiEA%2Fd1WXm2x4TbfymZ970yD2HgYpOwfQKULaIsy38vf%2BugqvAQI7f%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FARAAGgw2MjA0ODE2MjIxNjQiDGdI6od0cMbSvPgEviqQBPvjaDRGpJO65RCtvkBf%2F%2F6qAaw8ttQ3V3U0CgIOK2MtIJIS2kvGiE7%2Bxt0mEmNc0k%2FmyBdpjbltXydcYr3pCYYeg0k%2FTzJ115gDwsLyAQKvc97yM4ZQny31yoAJHOiF1Cie%2B6dnkBaBsSSgO87THXWJoazHGWuXdvMXeGpaxBFgo9Ouj04pTaaDRsXdEDJc%2FLsVE1VgnxX3daWwtGGGJ1lPZ5bGtXqEKVNBeKbxI2kwky7buiKjQ%2BernL83NoSW%2FmXVMSn2l3uaMXZIzjbUV5aazJCC8wkKExC3EgQjc16Blx7VB7rA5YE86tU4kqnA8UsDyi2izKS%2FhCs7%2BcZbgko4rrboFfAsdfgsMB4XYrqwrbfPQqNndQTcIF9aMZIFmVnaQQtlrNT0rrUfa8Y6pyjmM%2B7MzgfrbuHim7lrVMqPQjb9htk64ciTT530kpqhuAmQ1tn6LveyGCBnyCIEwTh7vLZ4ixrqN1a1jwAh0xeeeV8YWJjAM%2BgSi3IpK2QQ1lxug1lLoF%2FW3N8a0Zd3HR69MTE4vpCEsXB%2BCT%2BipBopmdlag98Qbxx3UFpJsUkeZjmhdEB1h3UMC0kt8bnlic2VWkG72KoUJyLPTua7xqkYeb%2BtYk%2BvLofLUOhvz%2F2R3b29GJjKa6cbkEx6%2FH7YKY%2FzV2p4ezEt6lMNup9eCoKyVfpAA0bMcXOx8rEp2QhKKjDfq6HVBjqmAWy15CQJgI3gM9agePGqa1DTpdOrz9Evb1H4Ncq33PkiYgun21x4s6r9f%2Bc7GbfZng5lTyXArNo4OtyAOOBvOyISqNOxQyKuKZA5RHPv6Un9q3Wmuk3gVxTyIjCWwsIeDncvielam2REWzu9t0jY%2B50B6d61ZiflAAeeM%2FOgglutwtglzco48pobt9qiFuX19kGcxzlrrLnRqoCXkems%2FPU16y7kRD0%3D&X-Amz-Signature=7cacdd33c117ec45b775b6f9e857b6332affdabff66f2be970b571f536856d97&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject"
+ },
+ "NamePlate": {
+  "content_unavailable": [],
+  "state": "MEASURED",
+  "how": "own project, own empty frame, pixels diffed",
+  "detail": "3.545% px @f16, bbox (0, 1128, 447, 1239)",
+  "project": "72473bba-560b-4c28-bd02-5577659c2043",
+  "uri": "https://rendererbucket-48236b1.s3.us-east-1.amazonaws.com/renders/1-day-2wkah3xuq3/out.jpeg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=ASIAZA54WGCKJLH7QV5H%2F20260915%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260915T003029Z&X-Amz-Expires=900&X-Amz-Security-Token=IQoJb3JpZ2luX2VjECUaCXVzLWVhc3QtMSJHMEUCIQCN8DPD55a9fzUR5QbkbWx3YLUZqExKuTxuwY0QpcPCNgIgE4pgDq5snukWGEFy2Nnx9tO8oOCwl69%2Ff%2B7ihijVqdMqvAQI7v%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FARAAGgw2MjA0ODE2MjIxNjQiDDeM7brD669oGV9fLSqQBLoZii0rITeORLFB6w2l2IiKNP5FeMusXWlGUjh9tLuQ9JbCwW1%2B6RFVXzSISwa0ZVSnCVS%2F7j62SzqDYCbyosm5Ee9BwagVo%2B6%2Fqid447Pa%2BOJDiRrsrgUkaQtAF0zCIdlaa3MU2YP8NpSGaQuaPHnvAjZUjOC1WbTWHDdVOMvtuoGpcn5BQR7gqfDZpSc6B27i%2BdnxMVLTN0rXuHbcbe6%2Bmb%2BV%2F%2FrBdUG148WQndv1CIxi2VL77wqG9fUGg0VIcwXoKWoJNk5hYPBauyn4HIVO24lNTwdbOo9UvKCdIW4COyP8wcn3O5%2Fq6cclBm8YbKfzDwS3NXYoVP614Ru2CjpiHlUfs7p7FdA7Izs42gLCQsjmrALd0gSuJU7fuMaHW4ETjR0Xq76fK5uIiVb8VPWUqzEG0CF3qVwO7XRdNOZaesRT%2BRXxfZMCbqC%2FaGAKI%2BUBqtYxw3p7J20mhUoFxQvvlioEos5VviM81H5DvbEop53Onw1O%2BajKW8fxGJRdZ2qK5e%2FqMCKTc528ekDgGNUsQbplGw93zKbxOcCvVq%2FHYs3SNTN1hGYVClWptelUDcBB4x2m5MXK%2Bp6xEmv96nKJ6v85xRnzbMxJEsI5xnQHxQqiqjP4TxSxZnc%2BZI6ckc8YKymWyAz4y6jGqM4KBYWjTw61%2BEzQ8CO%2Fq2OvCVSyNozdAcm%2FJMMr2s%2BXERcEMDCDtqHVBjqmAV8uFg3bvWjuOB5gWTDAxqFdny97fjrE2hCUOpNMkqI2Jth64mKZFbr3G2Ui5ZhOBsLZdkYL6NQVD%2FAaDE5LgI3dcRda4CHawQiFsSVrM7TAH%2BYn1RlJstarpAbK18fgHKZJh7mZoO8A9Ca6azjiMZUpJgwzQ34PUqzZY7cluHYlTIBVa3g6dUL4zI3dlS8cQaqh6sGiRv1OTBlmXBgO0tsjF2dZOlM%3D&X-Amz-Signature=671061b50d3bbb63e8344b8f83454266105fc64e21fda46c67b37f6ffc146cc9&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject"
+ },
+ "PillCluster": {
+  "content_unavailable": [
+   "tags"
+  ],
+  "state": "ABSENT",
+  "how": "own project, own empty frame, pixels diffed",
+  "detail": "0.000% px @f32, bbox None",
+  "project": "e52c6291-e208-42df-88d5-788a782708a4",
+  "uri": "https://rendererbucket-48236b1.s3.us-east-1.amazonaws.com/renders/1-day-j3qmimh28i/out.jpeg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=ASIAZA54WGCKHKKITW2M%2F20260915%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260915T003038Z&X-Amz-Expires=900&X-Amz-Security-Token=IQoJb3JpZ2luX2VjECUaCXVzLWVhc3QtMSJGMEQCICcqgU8KvT0PkDQRR5W7g2YoLl1HHDE%2BJ6mFdJRIV25rAiAhFZJT3nOuh1I146QwKzE8iJON4OGZ67X9xK2XMzBgoSq8BAju%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F8BEAAaDDYyMDQ4MTYyMjE2NCIMspt3MukUUgI0hBZSKpAEPbLkvixVkzoMAVAlhmEs6mYuT21CdZu8p3AUkQ%2Fp1X%2FHxSZwkr62n50Qy3%2Bvn7%2BT7CxO6a8OHzyXy7HlVFwBEJCcIyHVMxUGm77pdJJe%2FTA1ZTQ7eF3x%2BTrG1j9jTFPdxac%2BKTs34aMnK7x9fWPEN6mHVfG9L8Eg8M%2Fo1QL55YjGTwCOC0I4FIyTUwUOsNQ82mltQE0vXYCU8RPK3Ls2Y%2BzrKodbV9QZs63%2FDd230g%2FcblHx3mR1V1r737%2BAOOr6%2FO2O1fJFhWDL38u2%2FenzeS6c0pmd50OV0MTu7QeXXVoYxbMcbgWZKHNRK%2FNt%2BzfoKLM4KbrP60do3Q%2BtbFOu%2Fa6pExqmrfUPjRk7vQZ%2Bj%2F7tqY4JYbISxlMXu%2F7AavF1IHW%2FkId394CniNs9wlv%2BOtny7rxtf1FaeHYzo4rqisOyCOCwP8JrEmRGz%2FsHx0nKvHT0P9mR2u8AzA2NFd31y0669YwgX5eI9HBEUWhoPM4fiTj42hD503hDLZhTkKsMHv40Vqj4QKYYddYYPtalIo2sym1%2Buvf7l%2F%2B7h%2FSW7kUfdSs%2BDnlBC8HKI29m1RTesKw4FntfUw85nE02B7mTb3YUIufeoz%2BKIeaICrQLQsVOzcE8lylRaSEEGZ34olD1y14tCHW8Gd2W6m34GkKkMibIujskpRGvaDrKU3vJ4%2BFUaPxb2L08WpF%2BF%2BXowbwFMJLAodUGOqcBMGoEM2fOwPMAKYy7hRdKu0O%2B4qZTaI1B%2FAL%2F67Yju1deietImGPytFutP%2Fm4zdBR7CBSlduJ1NdRrSrVHFqzLFkVlvAzs2idnHv2eHkVym%2BuMvWBBM5HK6rDCERoyfRA6zfvTAZQj55XKcIeTyHJoSvxBGpnFXrWn5sWlGww00vV94pA6bDz2tz2NxKL3UjGfb3ehAJTNTTbDhS6vzyXmQQtz0%2B%2BCFk%3D&X-Amz-Signature=2d1c87a4c0dc0eb128cb3df8c2bec9cef4326f4bf38cec1340953fad3ff9bc3b&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject"
+ },
+ "PullQuote": {
+  "content_unavailable": [],
+  "state": "MEASURED",
+  "how": "own project, own empty frame, pixels diffed",
+  "detail": "2.340% px @f48, bbox (176, 672, 705, 776)",
+  "project": "4418687b-fc50-4ca0-88bc-9ba17dd5c821",
+  "uri": "https://rendererbucket-48236b1.s3.us-east-1.amazonaws.com/renders/1-day-zqxi8kror6/out.jpeg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=ASIAZA54WGCKJ3CSNLBJ%2F20260915%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260915T003056Z&X-Amz-Expires=900&X-Amz-Security-Token=IQoJb3JpZ2luX2VjECQaCXVzLWVhc3QtMSJIMEYCIQDCtIF1PaWap2W84uLq7evUm1sEMGrojTpCnpmxXO1wNQIhAI40WvKRXa%2F3vXN3IbApup2ooNb0m92x30g%2BN856aHDtKrwECO3%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEQABoMNjIwNDgxNjIyMTY0Igwju7qLsAKIUXnMmpcqkAQBw6ccRKB9lCDby8oG4D0TMHDEmv0NqSa5q0jUdGlTlMJz3WGjQ8G9128aeNwHGraVf%2Bpfl5kRP6wWznsOIMDG8b0Z5lo36U%2B1tl8R3592oC%2Fj9Es72b9FaPpqMadf7W6v4x2EpDE6cN3zm6crMyx7CS3q5aXINGXkftFcfIr7KkwChqjSDlu4D65qehF%2BP05%2F1dl6o06CTY0vCqrFipsPiBT6MYnU5zdWGA6RBnxg%2F70a%2F%2FloNt%2F%2F5nJBoIH3PMNLjyUUnVPyNqsG4AqujRxaYwDFBcw2vlEJKsokART4DIlXJFssgeMxT18zEdWmMGx5D9Z7SWUArgfgX5v0gAvbVwVE%2F%2BgRwDsuL0yQRsya6SDysv%2B9JFDkiOly5WvXNWdqHdCSwsLGtKPj72uwPNZFI%2FCqNlaqhPI9zXtNAhwHBxoK2ongBzlLBGNj%2FJ%2BC%2B7APwE7rJctQI7Mde2SpKAdVio09bb7v9bwBjDZaphjhk4jxw6hJ0N%2FWP64ROJO8xL0lQbsLN8mlXk8Jio%2BYoQLnt2qo6bfPvPJi87wl84B2Ll3%2Fzd24bP5KDYAjhA5LtqBzSbOvY6KgcUk08RIaPCLRMGiC2N%2Fm%2BeuBsd%2F9LZ0mUXUjcVE87W7RIRkvd0qkPIyIwwAdzgHVCUrvgDLKkYz5zIyx3la3lXTg%2FFduVLIxznrGy3E7YIp6xotzeTFjx4Ew556h1QY6pQFQhTJDRDynE7MfcCTpoM8DzjirE6ojE4XnkO%2BB5UAK8X9zmP5yzbGoSxjF1yky39Seg7LtImeN9cGpUESl0thu%2BiPz8QY2HhHRkedTvjfmLUgfGE%2BO%2B4Xp7LDmtXtmaEhe5EBfULC96UmufmXKzU1wQ3BwE620G0BmtHHX3ImAD9aSrgvKBCDRZqUEZt8K6KwSvXHEiOG%2Fd5vFcbKeSnyUtZl5Fvg%3D&X-Amz-Signature=e3fe5ecd4d4c4841263d4b96a0641bd97af4d382d40f53e531d0bef309c213d0&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject"
+ },
+ "RankedList": {
+  "content_unavailable": [
+   "items"
+  ],
+  "state": "ABSENT",
+  "how": "own project, own empty frame, pixels diffed",
+  "detail": "0.000% px @f28, bbox None",
+  "project": "a4991b98-7d71-49c6-913c-47c8725e0c78",
+  "uri": "https://rendererbucket-48236b1.s3.us-east-1.amazonaws.com/renders/1-day-draeuu5xl6/out.jpeg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=ASIAZA54WGCKDXAOIEJ6%2F20260915%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260915T003105Z&X-Amz-Expires=900&X-Amz-Security-Token=IQoJb3JpZ2luX2VjECUaCXVzLWVhc3QtMSJHMEUCIDIbV%2FxKHQ0bNKDjzYuQMRox1vSd4Ow8QHDZIZ3JeiXTAiEA%2Fd1WXm2x4TbfymZ970yD2HgYpOwfQKULaIsy38vf%2BugqvAQI7f%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FARAAGgw2MjA0ODE2MjIxNjQiDGdI6od0cMbSvPgEviqQBPvjaDRGpJO65RCtvkBf%2F%2F6qAaw8ttQ3V3U0CgIOK2MtIJIS2kvGiE7%2Bxt0mEmNc0k%2FmyBdpjbltXydcYr3pCYYeg0k%2FTzJ115gDwsLyAQKvc97yM4ZQny31yoAJHOiF1Cie%2B6dnkBaBsSSgO87THXWJoazHGWuXdvMXeGpaxBFgo9Ouj04pTaaDRsXdEDJc%2FLsVE1VgnxX3daWwtGGGJ1lPZ5bGtXqEKVNBeKbxI2kwky7buiKjQ%2BernL83NoSW%2FmXVMSn2l3uaMXZIzjbUV5aazJCC8wkKExC3EgQjc16Blx7VB7rA5YE86tU4kqnA8UsDyi2izKS%2FhCs7%2BcZbgko4rrboFfAsdfgsMB4XYrqwrbfPQqNndQTcIF9aMZIFmVnaQQtlrNT0rrUfa8Y6pyjmM%2B7MzgfrbuHim7lrVMqPQjb9htk64ciTT530kpqhuAmQ1tn6LveyGCBnyCIEwTh7vLZ4ixrqN1a1jwAh0xeeeV8YWJjAM%2BgSi3IpK2QQ1lxug1lLoF%2FW3N8a0Zd3HR69MTE4vpCEsXB%2BCT%2BipBopmdlag98Qbxx3UFpJsUkeZjmhdEB1h3UMC0kt8bnlic2VWkG72KoUJyLPTua7xqkYeb%2BtYk%2BvLofLUOhvz%2F2R3b29GJjKa6cbkEx6%2FH7YKY%2FzV2p4ezEt6lMNup9eCoKyVfpAA0bMcXOx8rEp2QhKKjDfq6HVBjqmAWy15CQJgI3gM9agePGqa1DTpdOrz9Evb1H4Ncq33PkiYgun21x4s6r9f%2Bc7GbfZng5lTyXArNo4OtyAOOBvOyISqNOxQyKuKZA5RHPv6Un9q3Wmuk3gVxTyIjCWwsIeDncvielam2REWzu9t0jY%2B50B6d61ZiflAAeeM%2FOgglutwtglzco48pobt9qiFuX19kGcxzlrrLnRqoCXkems%2FPU16y7kRD0%3D&X-Amz-Signature=4163df4a85b3fea136d77aa5fe5170f0420bc029c1cd3303e0d311fe68c8c0a7&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject"
+ },
+ "RecordingFrame": {
+  "content_unavailable": [
+   "annotations"
+  ],
+  "state": "ABSENT",
+  "how": "own project, own empty frame, pixels diffed",
+  "detail": "0.185% px @f16, bbox (32, 33, 848, 1536)",
+  "project": "451c6a3f-e682-4239-b146-9399df4d61c2",
+  "uri": "https://rendererbucket-48236b1.s3.us-east-1.amazonaws.com/renders/1-day-g4n17jqllz/out.jpeg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=ASIAZA54WGCKM4DYZILG%2F20260915%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260915T003114Z&X-Amz-Expires=900&X-Amz-Security-Token=IQoJb3JpZ2luX2VjECQaCXVzLWVhc3QtMSJHMEUCIQCUcwdGSKQxdoocwxPvJLdlY1I7DDzd1IOPF%2B6I8LMGLgIgSJKi%2BE1NdZaqMpvcymqA2rg3i9RidIofOVlZlQF2OkQqvAQI7f%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FARAAGgw2MjA0ODE2MjIxNjQiDOkB%2FK4gVmvpG8ViWiqQBItZlxZ0%2ByKFQYnjPBFfszJ4zr5%2FF5%2F%2FJ2dcekEgpQku7sjKHUjJ7C7c7QPAiHljwly%2BQKig4Hoh%2FFl5xDI5sK08I2PB4sS4kZTmT43pzxMKK8ES501fXryKGQQl2oyN73%2FELiJ96Sty7nozg5WWimvTq%2FPLHq2KaLp5pFsCTryuNZ7bBlRpsDRkuonlFJ1bPosBnKFg56oYyWeiq653jji8%2FwOgo7llqeu9bWnOnNJSnLsWoL8IkAL72JSBB%2BEJlS4MSltBjVz2z9%2BSvxgNecoOZ5mR7tn1Ov%2FQeoFsL8leMyKK2JO5w5Cbwa8cXlLgMtbMJMi5U0jIERAdQex6xGmnOJrtONdAvq8OLPMSyMBwQDGWU75i%2B0VQf40rmQ2alrvIetBBoBJrgZgAH%2FOf1sPs3n8UbGyIHiE1ZVTElNqQwdHsNGo%2BCQipFOQhAIHs5OoEWmAFXw8hvs41v42pwcsR6HP3BFZvhSlMdhfR2qKUCq69PUU08a7Gu8RuQtL03EOiq0JX%2FDpWPyebO%2BqX8Y65DoB9k%2Fuolmo8hcngyZEId%2BFYw1Ld31G8brrYcZrJNAHwgI4SStHqbGp608PgDoAE1iCVe6I6TbtM7vOrWxx8y83KcQSjCW53xzKXKtFEQUYsNG6GYV64a6N%2BfjroMVMBg1mCUg5Q9IQnXBEQLdwFbemfFb4NGp%2Fj2b3WmketADCAl6HVBjqmAQbFctzGvwkYHb3RGUj62psr6aePtqxRq70mSDFGaGpVcJR0AxXc2gynrjohEtJ4Sk70Vy6J%2BitU7bPdVEdgJowWTv4MsoNPSPIHYPFmPf3zqCjVRnA1jwKrqzhY6ZDH%2FYkzrHYF5Msr29AadLMimXz92LQPgI%2Fk72W2zooI65%2FaUdt0U1AjmhmcZZqdWcFqvK4OYw0DOBjnRKRFOscLp5HHjfuHYZk%3D&X-Amz-Signature=6b9195f936fbb866360851bf606bf896f01e55a5aed0f240e45d2ccb6f1566ff&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject"
+ },
+ "Reticle": {
+  "content_unavailable": [],
+  "state": "MEASURED",
+  "how": "own project, own empty frame, pixels diffed",
+  "detail": "0.644% px @f24, bbox (183, 423, 698, 1023)",
+  "project": "98ff72ed-83ca-4c55-918e-4e527b398481",
+  "uri": "https://rendererbucket-48236b1.s3.us-east-1.amazonaws.com/renders/1-day-mhfpsggkit/out.jpeg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=ASIAZA54WGCKCD2NM3MM%2F20260915%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260915T003124Z&X-Amz-Expires=900&X-Amz-Security-Token=IQoJb3JpZ2luX2VjECUaCXVzLWVhc3QtMSJIMEYCIQDMvtpinkRA%2B2chy916OW0tjqokKWdwYlhqElLek8fvbgIhANFjTguDn1fsNby6Oum5b3HwjIdKFkqoKGJ7ugc54BoJKrwECO3%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEQABoMNjIwNDgxNjIyMTY0Igyywz9vkXR7Y%2BuGSXsqkAR7FNABfAjkBZg0i9IQ20Ybz2CPmoEOHRyIkJcmlMwdLneEc3lWl5pbuh9rQHCROezATZXyLROLrXyFRgEVqHWk5aJn8uOfbYfMWUZU7Vx0b10E0Y2XN%2F5awpWPNKaQfiFDq4Dhe8JumrhJegajyld7D9LhOXhjmPa7iDuVQ%2F7nPPVLP9HxMdYWTQyUxFHieaKrcNBwJwPVSboJ57VSVfnfQSwPSKRH6M8gb%2Fk%2F%2FDeGWh82GJryRal5WtHEt0f%2F8gxqrZ%2Bn0HisFogfUHVb5DBxqMiXpG9EHnWKXT1kZBcKOahb%2B%2B62Bcme3i9FMAIvCuLRN1bM8tsTzPFK%2FNPdEuTzzFEnngczrmPHwSDIZixJF7YTkjRMToS8T9X%2FEe8a3npfDFUoLF9Bsj3XzbVSqT7cOyACezGfdlmNfkrAOGk8bzegjlbKq%2B6vprwD%2BHBY2wOyBOnvUvWN2VscqP2YNL%2Fn%2FqCCLJDGuyrfQoEagWH86w7g8a8qo8mR4Gd9oxHVXIPJ%2BN2jBZ64r3zcb9izamV9O9omlTWoI%2Bf7nnUKNArSz51FpveUl05Lr20MxINbhpTQcrWmmrdPJYCTFnT5EEAWRW3M1FPVL5tHTIco7WT0oyrGg2yTX9YAdq9PcUQTCgcCIciYup5a6p7VKPC26YH2U7bp6aBC4Bq6jE9DE6qvIoENammtOaYfGRX9Xgg4k5gwyKyh1QY6pQGKJCEIBARr3R621nt9wZIh3yZpAu4neKmsWuiiSRxpB%2FtKt%2FWlkN7kAX8tZSJGLsfUt1nggY5QR6s7ejCTDKfVIxRL89D%2BGMZbrX49XnvHKLqd7WGm5CQKBxT98pAqYDTz%2FL8nbCuRM23u%2BmO0n8f1ZGfpRiPjSlRjSESVIgloFoVYD9H5gx3QJrTb4r4vPrFop2epdR40rbRcJrHmzQxdY1NT9fA%3D&X-Amz-Signature=9451b0808abdcb7fae1c0d3a4f725cea29624e8ad1694dba90ec70ea959439e5&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject"
+ },
+ "SectionDivider": {
+  "content_unavailable": [],
+  "state": "MEASURED",
+  "how": "own project, own empty frame, pixels diffed",
+  "detail": "99.956% px @f58, bbox (0, 0, 882, 1568)",
+  "project": "b3c00661-0d6b-4425-8841-bbc173e77567",
+  "uri": "https://rendererbucket-48236b1.s3.us-east-1.amazonaws.com/renders/1-day-p3gm1nmf57/out.jpeg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=ASIAZA54WGCKPLWNYFHJ%2F20260915%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260915T003136Z&X-Amz-Expires=900&X-Amz-Security-Token=IQoJb3JpZ2luX2VjECQaCXVzLWVhc3QtMSJIMEYCIQDrMMnO5lMdK7hOOEyUtzV60XGtvsfGUWm36R8MT0M4sgIhAKSY2iaaDk4vYvl6FLx6xVtksP9ICfteKu02Op4rRUv5KrwECO3%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEQABoMNjIwNDgxNjIyMTY0IgymQuyWglbKX2fP%2FeUqkAQ6hL3egkZO4TUvwdmUt4%2Bs8ZOmxyYS%2BCAi0f%2BBbTED3EBYtHYAkIaheG%2BRIZKb0dq6ZnoDHqfH6SrY9xxWp0hf4nq5NI6%2B4FYMReCVq6D8zHoy4dihzafylbiTXZxTyc5n6WP0Vu4TRvQt%2BRJ4UKtT2CQardZFFbWugROuX3yWLV4eyDBJ4E7Vvbt9As7BoQpn1mixqa5g59j4WNoEAC4MDODmhhCfbhf7XD7QChW7kIBaZfPqlzQyWtipsw4PFwLo9w0DuAQKeQSRamuXUMGX4PgEsZn5X7796SMTpMnxchKF0bF46oCSCvgKZ6R2XYc1sJbte38BwLKHadZ%2FZb5kHONcVftjQm1zETvI%2B4Ihosqesim8KfFOjlXLxAyn6K7tNtHUAN53Ncj3S7uKerglKMWp1BLmD0S%2FJQcBoOonFZNhoIjjMOUhKvW6TYvwAdOwTxEwWGkJuaWK5t1zwQzWfavREK0QiNx7SbCxJZ%2BcPm%2FBuucUXaNFsUOxUMIKmz1vvJV2FVYAySgSv4dKtOsqrwaJj0wv1U6YfYMBtrsXUthRALOSRacwR1rb4AkEi%2BlEsK2aOoxa1HIwqxxCxVq%2BKnbjgwsFx2%2B7Qfe5NII6Qv8VJTcl2v7eqzisp0j1BwdjjyGWre%2FvBWNMO9b9ewppHm0pXHYJhk51NVNUX%2BZOQdUGwnSvXptMkVxLHGXhyDsw46Gh1QY6pQEg%2F0VCAZ%2Fv5O6zrd1z7np4YTQyOa%2BIM7TQt%2Bnixr7c8s2UXqXD6muvBUqJJ0Bq9YRyNH2zZrWI8MLw7QvRJ165nZmpjppP0Ehsw%2FsYncGSulPPzNNdYlPLR58gAiLQJNM3FO1cpj0kG1%2FN8IEQuCutj3eskQHBsKXnpyTiAZmbTWWlYzzx5lGZQQYXNCJC8sM1UIY0mwEQONxBJ0YTgSPSGHDzrSw%3D&X-Amz-Signature=565583659b6f442b7f28336ed244dc14254c819b99e139b6056f8ea79d8a29be&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject"
+ },
+ "Stamp": {
+  "content_unavailable": [],
+  "state": "MEASURED",
+  "how": "own project, own empty frame, pixels diffed",
+  "detail": "4.840% px @f38, bbox (60, 496, 822, 951)",
+  "project": "9a7c52d7-aa10-4f45-bda9-bee4301f1569",
+  "uri": "https://rendererbucket-48236b1.s3.us-east-1.amazonaws.com/renders/1-day-pwcp5tg062/out.jpeg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=ASIAZA54WGCKJBKL6P5Q%2F20260915%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260915T003157Z&X-Amz-Expires=900&X-Amz-Security-Token=IQoJb3JpZ2luX2VjECQaCXVzLWVhc3QtMSJIMEYCIQDLBTnR48BLhh6uqLt5sqEHoniZTylBFcwRUcmkpaVPKgIhAOc87L%2FPC4lm0munrCr4n7IozVc0X0R9ctcYUyPFfT2QKrwECO3%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEQABoMNjIwNDgxNjIyMTY0IgxbnCdBs2ed2t3YqWsqkAQA01%2ByMEHKlklsl6OKbqmpUmNvXyL7tRc6qttarn6IQiQBF8AkkuEtw4TrSyGkmLixElR27B5X4go8vGFZq5MKJvmIOPzNnfygLcsxpE%2BF2nMuHLv014Ff9fdV2npknCw8q3yrlvIcy%2FrUO84IVN4tS5Ce07em%2FSlNY5376bpe142bgVF8fAxBjvpUfM89uFkXY6Mp6%2FYkmcRLddS8E%2Br%2Boh135n4YRz86v3wh1xnG9E2J%2FPOkEVVWnEuJ1U0lmJp%2F%2FFzS1lODyKaL7oJaKefTfU1dMPDPGA2MHUvtpQekDfjasmGNFwE6YtV9G4zPVzKtTt6gix%2BdFeJ1edlLS9HJKrp8cQiyVxN2HQcr7j4YXfCEtbnXt9iuzIc7cIFPJcfpmmGD24u8I5h4Ylm4UIofW9pthpvIAtjK1DQTUpJu9XXBsEL5U%2FbEvzUK7fg3ndWHWP75CYpWg7nRwbBPx5eebq8do7PXjGJj%2BB3J4tMTcgTBSpNzdVYEUgYqmltOGGJJoq2GtzimGbj%2BH7jn7em8SKQqPT4z8CcCr0rbUX8Bqv7e1iwIzhXm2YnrV%2BnRtsBLZr9sR3UNOKs173C3ip3Z%2B3XUpSPrOGNpBowZNegfjfrss%2FGuNDNHoNAcfWU%2BKaEgc%2FIZM8pIKcWOCeFHedzCBYwCJnCzrbquozIWgkZdE7NrlWe3D4U2eeAlP1P1h5gwyKGh1QY6pQG5j6%2FVpsG4U0ASYKZ82G9Mmpg1D9DJiL9iyYU1rmX4kuzxkWg1uNXAq%2FGiknZoQ%2Bcnvqw0tlAnBSeKkSxg5BviIKxufJw7pclpZWNiyDsf8GEGwuaoF1O2Tkr1Sn1K6tjwoKM%2FM1AN7NInBpq4ByyHt4u6y3lFJdRoWdZvBjuUQG91UtBWU03v1MalcQ2Bi9eYnHVVT0qh7%2FTeavLOIBTzicYzvpc%3D&X-Amz-Signature=e687a6f8fa937453d63fa1f9da82683269c39d4471cf4906e1bded7da15d1ba9&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject"
+ },
+ "StatCard": {
+  "content_unavailable": [],
+  "state": "MEASURED",
+  "how": "own project, own empty frame, pixels diffed",
+  "detail": "9.710% px @f40, bbox (25, 602, 857, 848)",
+  "project": "7321a72a-d7a9-4b11-80fd-7156e7389b4d",
+  "uri": "https://rendererbucket-48236b1.s3.us-east-1.amazonaws.com/renders/1-day-zqdbhsmcwa/out.jpeg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=ASIAZA54WGCKD66OACWQ%2F20260915%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260915T003206Z&X-Amz-Expires=900&X-Amz-Security-Token=IQoJb3JpZ2luX2VjECUaCXVzLWVhc3QtMSJHMEUCIQDSeiANxJSoNw94wA1SSMc2rk0X6Il2WCCYI2qUTo5GbAIgJbmPqD1kI7weyU2HdoOsH1rcmnd3j5OfRsVGIl4%2Fj%2B4qvAQI7v%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FARAAGgw2MjA0ODE2MjIxNjQiDDz3cDOFiID7wDSZfCqQBF2H%2FxEJLRWwlGhUTfBDABHt42s%2BwRQwheoCbX9NA%2Bzp6nGhS3GnqzrSvzJGuZgx%2BDHqNMIMOZLq529C805ZRi%2FrYKR7Id6pNQk3T5PBu%2BKoPBuvFlnl3F0QKONXsOliwkxPvuq850dBm7yJjDwlXj5CyZv9UDaPdZ7mn9N4To75Mg7LVFACrd%2BEI2PRuw8keY4p3Ema%2BoGII9Dx4pSrVL8zS0jLSMA84H%2Ft2fnYqARwcpmpYoS8zt7Fbar6bNe6Y8HjJ1Jm%2FY%2F2vg7IZRK2WW2Foy5gDQMrk3cylZSfrCDphi7jnuH552BUFa1Beh24jS6fjUZLz6Q0OOyOv0%2FvVy4MyZttoSnY%2F0k0Psf6UfTy%2Bf3X05gNSsKCMht%2BDaaDKWXiHOEM7HiSPGE8XUApH8Lsn32ozVHhHcs%2F4BNvHMbk%2BX8tb1da8VwM1mFvgLVRptcgnVFXwe8rWPMeUzH3t%2BeUyXYea0fqf7iUA2E%2BxVjlBfCB4bZ0bXXjtBJr1cNx3LWKdYPsUbF1C8k0ovwe8QRpowi47ABNe7IA%2F0L8R0AbXOnzQvV7BIrXmbZ2lVRhfDQNuNqIQcfbIWJqzlohZx1FF5pgHBMnP2QMf2bKG5mui85k8pUFtxr2SI6IjzrWu8z2bo3AAx7YOmKClx3lWHA3S0cI9VEF9JxvfBDa6P6e8geIb3VTHHkPYDa6%2FkinJTD8tKHVBjqmAWmt6DxOZe2obalNcNqT5ObIp6vf97rI5hnphwbre5qcTvsiXrt05MwbD3%2Fp11sCffNyQ5h%2BOMsJ26tYyyIEOOo0FqjSVZ8gOIN8HGjjMgj0fvNWnp%2B5Wb5wMY1ZbyNBkYCoxr46%2BhCxjPHRQlEaPgv%2BLAPrKF1Gz3qE5DGf1LJYfWtT9rMMRkms7K9TlVtRMFcW6LRphQURkuDxQRyapaFBBEiisnQ%3D&X-Amz-Signature=581ae007e23aa6a4486856eb8033cf67b36c3bd238c41a6008394a9acc1f586d&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject"
+ },
+ "StepDivider": {
+  "content_unavailable": [],
+  "state": "MEASURED",
+  "how": "own project, own empty frame, pixels diffed",
+  "detail": "3.467% px @f56, bbox (225, 582, 656, 850)",
+  "project": "8f906994-016e-4a4f-88e8-53c8337e44ba",
+  "uri": "https://rendererbucket-48236b1.s3.us-east-1.amazonaws.com/renders/1-day-c8dspeobbk/out.jpeg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=ASIAZA54WGCKD66OACWQ%2F20260915%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260915T003213Z&X-Amz-Expires=900&X-Amz-Security-Token=IQoJb3JpZ2luX2VjECUaCXVzLWVhc3QtMSJHMEUCIQDSeiANxJSoNw94wA1SSMc2rk0X6Il2WCCYI2qUTo5GbAIgJbmPqD1kI7weyU2HdoOsH1rcmnd3j5OfRsVGIl4%2Fj%2B4qvAQI7v%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FARAAGgw2MjA0ODE2MjIxNjQiDDz3cDOFiID7wDSZfCqQBF2H%2FxEJLRWwlGhUTfBDABHt42s%2BwRQwheoCbX9NA%2Bzp6nGhS3GnqzrSvzJGuZgx%2BDHqNMIMOZLq529C805ZRi%2FrYKR7Id6pNQk3T5PBu%2BKoPBuvFlnl3F0QKONXsOliwkxPvuq850dBm7yJjDwlXj5CyZv9UDaPdZ7mn9N4To75Mg7LVFACrd%2BEI2PRuw8keY4p3Ema%2BoGII9Dx4pSrVL8zS0jLSMA84H%2Ft2fnYqARwcpmpYoS8zt7Fbar6bNe6Y8HjJ1Jm%2FY%2F2vg7IZRK2WW2Foy5gDQMrk3cylZSfrCDphi7jnuH552BUFa1Beh24jS6fjUZLz6Q0OOyOv0%2FvVy4MyZttoSnY%2F0k0Psf6UfTy%2Bf3X05gNSsKCMht%2BDaaDKWXiHOEM7HiSPGE8XUApH8Lsn32ozVHhHcs%2F4BNvHMbk%2BX8tb1da8VwM1mFvgLVRptcgnVFXwe8rWPMeUzH3t%2BeUyXYea0fqf7iUA2E%2BxVjlBfCB4bZ0bXXjtBJr1cNx3LWKdYPsUbF1C8k0ovwe8QRpowi47ABNe7IA%2F0L8R0AbXOnzQvV7BIrXmbZ2lVRhfDQNuNqIQcfbIWJqzlohZx1FF5pgHBMnP2QMf2bKG5mui85k8pUFtxr2SI6IjzrWu8z2bo3AAx7YOmKClx3lWHA3S0cI9VEF9JxvfBDa6P6e8geIb3VTHHkPYDa6%2FkinJTD8tKHVBjqmAWmt6DxOZe2obalNcNqT5ObIp6vf97rI5hnphwbre5qcTvsiXrt05MwbD3%2Fp11sCffNyQ5h%2BOMsJ26tYyyIEOOo0FqjSVZ8gOIN8HGjjMgj0fvNWnp%2B5Wb5wMY1ZbyNBkYCoxr46%2BhCxjPHRQlEaPgv%2BLAPrKF1Gz3qE5DGf1LJYfWtT9rMMRkms7K9TlVtRMFcW6LRphQURkuDxQRyapaFBBEiisnQ%3D&X-Amz-Signature=527b52d234187ac874b998ac78c9257f542c58c2fede0d0f81ef7a121db2ec0f&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject"
+ },
+ "Timeline": {
+  "content_unavailable": [
+   "steps"
+  ],
+  "state": "MEASURED",
+  "how": "own project, own empty frame, pixels diffed",
+  "detail": "12.896% px @f26, bbox (137, 466, 731, 934)",
+  "project": "23a31d51-e3a5-465a-84b4-cd53a0d28846",
+  "uri": "https://rendererbucket-48236b1.s3.us-east-1.amazonaws.com/renders/1-day-ga2c8dztsc/out.jpeg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=ASIAZA54WGCKITJUYWAN%2F20260915%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260915T003224Z&X-Amz-Expires=900&X-Amz-Security-Token=IQoJb3JpZ2luX2VjECUaCXVzLWVhc3QtMSJHMEUCICGV731%2B9UaQfb2jtAbSimW2mXIZGJBY8VZV69OnGCGeAiEA27%2FzQCUdgNcQYedh4UjXYkkJvWKjR9SRTjxlArcS%2BDcqvAQI7f%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FARAAGgw2MjA0ODE2MjIxNjQiDK1BC4LOdUQ8sq7g1SqQBDYNYr3v6joAfSN%2FjlXaoUhs%2FpBfMMP1JS0%2BrQQH52x3e6AYd6W20IoVyAG6WvAUmFCeQTZznRYlW2zH%2BRIsEp7lXedfYLy9UBjfCkjquuEJtL7LSAhfIcv65bXkmchm0IB%2Fm3bd%2BRN%2FNKIgTczE5%2B3hXdydI24MR4Iz3O%2FppXHMplYBF7WhuVdPHjrGsxgG%2BrvIr1JZJntd%2FiWaVAbaecpEUeCGgRMWLbvbH8Ch9M3RBVjGNSXj0Oi%2BhN8RzYHVOTHbOUlYtaza5tWjvP9sTVU5pK2gf%2B2%2FBQVcXgV6mRsLeydPOE0pZPgpAlUdU8jHAwfq4xw7CdtKOZ08ipjHqUlfKNkGUpkEZrPIk4tjnqmiA5M0FX55qJ5OzaC%2FZo9Ns%2FUvj3Y6GSsPygxJ%2F4buvvgBJ1gSM1U90F0CAqcOH%2FxKgqz8KZwiv1oIo%2Fouh%2FSh8L73MRDzcGCHheew8W%2FklfhLhGU47wc7fWq%2Bkqt1P0Ng78jgcVssqL%2FPz0Gq7H2LM30DFKbErimywuV1jiSlQYUTJrz1l7A2aZ0myqw7e%2B1RYVzeMlUMGRCQCehB0xdTkh5zAYqlWAxcK3w3EuBaUn16ETf9ufEAK05h9o6aEtLLxFBXHthleERTq40MUoCN21O5TRDI7YCEZlj2bk8RCrDoZaAhwMMe12zVPlN4WpwcCR6ujDsxEgYF6eqSW1H6czCorqHVBjqmAdDE2tIazzqKrGBYoSK8hl4zBgjnazOEoYCbR97FEtK2Bl3YHxsCJoTeQM8SWtjhv84HORZIfdBoMn83ZoPd0gBHesL%2FQwuZgUMNpkBOVkVzs9l1jiQRRAYmY6UDSvGBZQTH%2B%2F8NfzRXoRO7%2FtT03kzKcIue1TETEtAS32Ek9D0JaHR53%2FnYYYQjh8ROo8rfBUnctTJmne6eAW3jYaA35ShwwNtWILk%3D&X-Amz-Signature=c20ca3689dad7ce7330a22f007c5af63a22ce921be7fba9000b0c77920f43c35&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject"
+ },
+ "TimelineRoadmap": {
+  "content_unavailable": [
+   "steps"
+  ],
+  "state": "MEASURED",
+  "how": "own project, own empty frame, pixels diffed",
+  "detail": "2.693% px @f26, bbox (167, 262, 655, 1092)",
+  "project": "7bd03121-2d39-4a61-8b8b-6f5b694bd50d",
+  "uri": "https://rendererbucket-48236b1.s3.us-east-1.amazonaws.com/renders/1-day-4126cpx24p/out.jpeg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=ASIAZA54WGCKNHIFWHNE%2F20260915%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260915T003235Z&X-Amz-Expires=900&X-Amz-Security-Token=IQoJb3JpZ2luX2VjECUaCXVzLWVhc3QtMSJIMEYCIQDRpOhW%2B4GlLcR1lT0AWnvxUknDIfzo9CWyCOz83CLQdgIhAMRhp0abLHllBRnFCRjvyBnSGgC2ubMtNHmYLqGx7LqfKrwECO7%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEQABoMNjIwNDgxNjIyMTY0IgxARxwF2g5WXpHBXjUqkATTCfNrSXxVdep9OyncWEuGyYy%2FqOEzvlcPM%2B3Reg6%2FIilzU9CRtW8WQLXWt3PLaufA%2Fv%2B5mZG%2ByGI0p5IjDgSbhXgE5kBqDNcuVrucJzpX7gPAfBdHL2iqg5AD8vyqwslP3m5%2BuotcOhbn6CljI4Vq%2BFlxtg3DtmhpFqyiONyBTjVKMIWxOEVQ9zg3evsLzRKlXE2xIkY7dqbwkMcXLQWlJpDCBIg67lWQVO1%2FNDm2MTfup5xL1k2SsZ89syPu%2FxjyHKqg3%2Fwq5FR3kWzVKVMN0xuQMewrnTWnqRRUvnNKlVIr4afH%2FHuk0O5W919FmJ8pB67fQlSh9SJNgt72sjmwboNkTLAQ1msvkvbIEAvxKW1cpAqk7%2BTg0nIq%2FBZiWOaeXqkhNsZwbo0iw9T7sUfRspYVNcl1eMQb6sLNQAd8Tghjh53jBieqOpcFtYXxxVPGlNb0QuFa7o192cja0s%2Fhb8jhl6%2B%2FXVd6OTM5ErgyFtQfOQP2kBhXdzbG3YufH8hmzBEvnsOQejNcESJtQyhtTO1TGvsxXTjJ7UAaw6VFvavTqB%2B2PbwIBJLfAI2qnzT0DkiGWj2oFOWSKWlt68Kctrrgwmg8BISAB7rfN%2FPCRCjFesqqAQLcsZHQ0F6sPwQDg1O7tNfND1x3%2F4EOsTRwE9x8MXANJdVB3qvWgpGpeaB%2Fjq%2Fq5kLRFVp8ai29LTUwpbCh1QY6pQE%2FVesFZzd6QPDcHLReT7RVAmrobghP70i1nPmOFHPMwZOqYLRlWWOpCKcClStjGMUjXUbxClkUt%2BY6N2g4%2B0c3TCNLi1dGqj0TjcYdLMPC75Ebg2H39K28ICrILV6Cu2xavWhgCi39dAUflaWzQmjXIYH3szy0%2F0bi5ZZqJK5qOxcRbnxi1Rhlqq4bv%2B%2BcncduZLhlxvkgasittApv5cAgsCcyV4M%3D&X-Amz-Signature=df6849ba8c5f6c71cbe05d9092f0448d22be0e5d669c7d4b134ecb06a27c9ea6&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject"
+ },
+ "AnnotationArrow": {
+  "state": "REFUSED",
+  "how": "not registrable",
+  "detail": "{'reason': 'structured props ChatCut cannot express', 'detail': 'end: { x: number, start: { x: number'}"
+ },
+ "ChatThread": {
+  "state": "REFUSED",
+  "how": "not registrable",
+  "detail": "{'reason': 'structured props ChatCut cannot express', 'detail': 'header: ChatThreadHeader, messages: ChatMessage[]'}"
+ },
+ "EndCard": {
+  "state": "REFUSED",
+  "how": "not registrable",
+  "detail": "{'reason': 'structured props ChatCut cannot express', 'detail': 'palette: { bg: string'}"
+ },
+ "InstagramComment": {
+  "state": "REFUSED",
+  "how": "not registrable",
+  "detail": "{'reason': 'the blob reads an identifier ChatCut does not have', 'detail': 'cancelRender (line 384), setTimeout (line 398), Image (line 399), clearTim"
+ },
+ "Notification": {
+  "state": "REFUSED",
+  "how": "not registrable",
+  "detail": "{'reason': 'structured props ChatCut cannot express', 'detail': 'notifications: NotificationItem[]'}"
+ },
+ "PillMarquee": {
+  "state": "REFUSED",
+  "how": "not registrable",
+  "detail": "{'reason': 'structured props ChatCut cannot express', 'detail': 'pills: string[]'}"
+ },
+ "ProgressBar": {
+  "state": "REFUSED",
+  "how": "not registrable",
+  "detail": "{'reason': 'structured props ChatCut cannot express', 'detail': 'formatValue: (current: number) => string, percentage: never'}"
+ },
+ "SpeechBubble": {
+  "state": "REFUSED",
+  "how": "not registrable",
+  "detail": "{'reason': 'not a single component', 'detail': 'a DISPATCHER, not a component \u2014 it switches on `platform` to TweetBubble / InstagramComment / IMessage"
+ },
+ "StickyNotes": {
+  "state": "REFUSED",
+  "how": "not registrable",
+  "detail": "{'reason': 'structured props ChatCut cannot express', 'detail': 'notes: StickyNote[]'}"
+ },
+ "TikTokComment": {
+  "state": "REFUSED",
+  "how": "not registrable",
+  "detail": "{'reason': 'the blob reads an identifier ChatCut does not have', 'detail': 'cancelRender (line 384), setTimeout (line 398), Image (line 399), clearTim"
+ },
+ "TweetBubble": {
+  "state": "REFUSED",
+  "how": "not registrable",
+  "detail": "{'reason': 'structured props ChatCut cannot express', 'detail': 'stats: { replies: number'}"
+ }
+}

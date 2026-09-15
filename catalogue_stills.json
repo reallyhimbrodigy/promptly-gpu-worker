@@ -1,0 +1,176 @@
+{
+ "AnnotationArrow": {
+  "still": "catalogue_stills/AnnotationArrow.png",
+  "bytes": 44019,
+  "empty_control_bytes": -1,
+  "state": "CONTROL_ABSENT"
+ },
+ "BarRace": {
+  "still": "catalogue_stills/BarRace.png",
+  "bytes": 90491,
+  "empty_control_bytes": 37837,
+  "state": "MEASURED"
+ },
+ "ChatThread": {
+  "still": "catalogue_stills/ChatThread.png",
+  "bytes": 82951,
+  "empty_control_bytes": -1,
+  "state": "CONTROL_ABSENT"
+ },
+ "DropBanner": {
+  "still": "catalogue_stills/DropBanner.png",
+  "bytes": 68035,
+  "empty_control_bytes": 55666,
+  "state": "MEASURED"
+ },
+ "DropCard": {
+  "still": "catalogue_stills/DropCard.png",
+  "bytes": 96881,
+  "empty_control_bytes": 54644,
+  "state": "MEASURED"
+ },
+ "EditorialQuote": {
+  "still": "catalogue_stills/EditorialQuote.png",
+  "bytes": 161475,
+  "empty_control_bytes": 37837,
+  "state": "MEASURED"
+ },
+ "EndCard": {
+  "still": "catalogue_stills/EndCard.png",
+  "bytes": 37837,
+  "empty_control_bytes": 37837,
+  "state": "BLANK"
+ },
+ "IMessageBubble": {
+  "still": "catalogue_stills/IMessageBubble.png",
+  "bytes": 48456,
+  "empty_control_bytes": 41381,
+  "state": "MEASURED"
+ },
+ "InstagramComment": {
+  "still": "catalogue_stills/InstagramComment.png",
+  "bytes": 74311,
+  "empty_control_bytes": 67851,
+  "state": "MEASURED"
+ },
+ "MouseDrag": {
+  "still": "catalogue_stills/MouseDrag.png",
+  "bytes": 37837,
+  "empty_control_bytes": 37837,
+  "state": "BLANK"
+ },
+ "NamePlate": {
+  "still": "catalogue_stills/NamePlate.png",
+  "bytes": 43814,
+  "empty_control_bytes": 37837,
+  "state": "MEASURED"
+ },
+ "Notification": {
+  "still": "catalogue_stills/Notification.png",
+  "bytes": 62941,
+  "empty_control_bytes": 37837,
+  "state": "MEASURED"
+ },
+ "PillCluster": {
+  "still": "catalogue_stills/PillCluster.png",
+  "bytes": 177793,
+  "empty_control_bytes": 37837,
+  "state": "MEASURED"
+ },
+ "PillMarquee": {
+  "still": "catalogue_stills/PillMarquee.png",
+  "bytes": 311212,
+  "empty_control_bytes": -1,
+  "state": "CONTROL_ABSENT"
+ },
+ "ProgressBar": {
+  "still": "catalogue_stills/ProgressBar.png",
+  "bytes": 93837,
+  "empty_control_bytes": 60225,
+  "state": "MEASURED"
+ },
+ "PullQuote": {
+  "still": "catalogue_stills/PullQuote.png",
+  "bytes": 123745,
+  "empty_control_bytes": 37837,
+  "state": "MEASURED"
+ },
+ "RankedList": {
+  "still": "catalogue_stills/RankedList.png",
+  "bytes": 112211,
+  "empty_control_bytes": 37837,
+  "state": "MEASURED"
+ },
+ "RecordingFrame": {
+  "still": "catalogue_stills/RecordingFrame.png",
+  "bytes": 48018,
+  "empty_control_bytes": 48018,
+  "state": "BLANK"
+ },
+ "Reticle": {
+  "still": "catalogue_stills/Reticle.png",
+  "bytes": 77179,
+  "empty_control_bytes": 77179,
+  "state": "BLANK"
+ },
+ "SectionDivider": {
+  "still": "catalogue_stills/SectionDivider.png",
+  "bytes": 626906,
+  "empty_control_bytes": 592160,
+  "state": "MEASURED"
+ },
+ "SpeechBubble": {
+  "still": "catalogue_stills/SpeechBubble.png",
+  "bytes": 37837,
+  "empty_control_bytes": 37837,
+  "state": "BLANK"
+ },
+ "Stamp": {
+  "still": "catalogue_stills/Stamp.png",
+  "bytes": 485081,
+  "empty_control_bytes": -1,
+  "state": "CONTROL_ABSENT"
+ },
+ "StatCard": {
+  "still": "catalogue_stills/StatCard.png",
+  "bytes": 116988,
+  "empty_control_bytes": 37837,
+  "state": "MEASURED"
+ },
+ "StepDivider": {
+  "still": "catalogue_stills/StepDivider.png",
+  "bytes": 100844,
+  "empty_control_bytes": 58632,
+  "state": "MEASURED"
+ },
+ "StickyNotes": {
+  "still": "catalogue_stills/StickyNotes.png",
+  "bytes": 118733,
+  "empty_control_bytes": -1,
+  "state": "CONTROL_ABSENT"
+ },
+ "TikTokComment": {
+  "still": "catalogue_stills/TikTokComment.png",
+  "bytes": 49946,
+  "empty_control_bytes": 43950,
+  "state": "MEASURED"
+ },
+ "Timeline": {
+  "still": "catalogue_stills/Timeline.png",
+  "bytes": 128323,
+  "empty_control_bytes": 128323,
+  "state": "BLANK"
+ },
+ "TimelineRoadmap": {
+  "still": "catalogue_stills/TimelineRoadmap.png",
+  "bytes": 147056,
+  "empty_control_bytes": 147056,
+  "state": "BLANK"
+ },
+ "TweetBubble": {
+  "still": "catalogue_stills/TweetBubble.png",
+  "bytes": 60271,
+  "empty_control_bytes": -1,
+  "state": "CONTROL_ABSENT"
+ }
+}

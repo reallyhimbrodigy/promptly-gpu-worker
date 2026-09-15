@@ -341,7 +341,7 @@ function useMGPhase(timing, { defaultEnterFrames, defaultExitFrames }) {
       // linear average ON THE FIRST FRAME, so it made its one consumer
       // (PillMarquee) step WORSE, 0.30 -> 0.41 peak_step. Same finding as the
       // zoom cap, same fix — one profile for all motion in this codebase.
-      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.25) : void 0
+      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.25) : undefined
     }
   );
   const exitProgress = interpolate(
@@ -353,7 +353,7 @@ function useMGPhase(timing, { defaultEnterFrames, defaultExitFrames }) {
       extrapolateRight: "clamp",
       // Departure: the same bounded-velocity profile, skewed late so the exit
       // accelerates away rather than crawling off.
-      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.75) : void 0
+      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.75) : undefined
     }
   );
   return {
@@ -498,7 +498,7 @@ var StatCard = ({
 }) => {
   const { containerStyle, wrapperStyle } = resolveMGPosition(
     { anchor, offsetX, offsetY, scale },
-    void 0,
+    undefined,
     "StatCard"
   );
   const { fps, width } = useVideoConfig2();
@@ -522,8 +522,8 @@ var StatCard = ({
   });
   const easedCount = easeOutCubic(countProgress);
   const currentValue = fromValue + (value - fromValue) * easedCount;
-  const display = decimals !== void 0 ? currentValue.toFixed(decimals) : Math.round(currentValue).toLocaleString();
-  const finalDisplay = decimals !== void 0 ? value.toFixed(decimals) : Math.round(value).toLocaleString();
+  const display = decimals !== undefined ? currentValue.toFixed(decimals) : Math.round(currentValue).toLocaleString();
+  const finalDisplay = decimals !== undefined ? value.toFixed(decimals) : Math.round(value).toLocaleString();
   const prefixMetrics = mgTextMetrics(prefix ?? "");
   const suffixMetrics = mgTextMetrics(suffix ?? "");
   const prefixFont = mgTextFont(prefix ?? "", "anton");
@@ -681,4 +681,14 @@ var StatCard = ({
         </MotionBlurWrap>
       </div>
     </AbsoluteFill3>;
+};
+
+
+// ── ChatCut adapter (generated) ──────────────────────────────────────────────
+// Root must be a plain div per the MG contract; AbsoluteFill may only be an
+// inner layer. Editable values arrive on item.props.
+const Component = ({ item }) => {
+  const rootStyle = { position: "absolute", inset: 0, backgroundColor: "transparent" };
+  const p = (item && item.props) || {};
+  return <div style={rootStyle}><StatCard {...p} /></div>;
 };
