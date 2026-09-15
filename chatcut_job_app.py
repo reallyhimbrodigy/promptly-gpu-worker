@@ -60,13 +60,18 @@ IMG = (
     # fail-safe to None. Mirrors modal_app.py's wget block exactly.
     .run_commands(
         "mkdir -p /models/face_detector /models/east",
-        "wget -q -O /models/face_detector/deploy.prototxt "
+        # curl, NOT wget. modal_app.py's block uses wget because THAT image
+        # apt-installs it; this base has curl only, and the build died at
+        # "wget: not found" — a command copied with its surroundings left
+        # behind. -fsSL so a redirect body or a 404 page cannot land as a
+        # "model" that then fails at runtime as a missing detector.
+        "curl -fsSL -o /models/face_detector/deploy.prototxt "
         "https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/"
         "face_detector/deploy.prototxt",
-        "wget -q -O /models/face_detector/res10_300x300_ssd_iter_140000.caffemodel "
+        "curl -fsSL -o /models/face_detector/res10_300x300_ssd_iter_140000.caffemodel "
         "https://raw.githubusercontent.com/opencv/opencv_3rdparty/"
         "dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel",
-        "wget -q -O /models/east/frozen_east_text_detection.pb "
+        "curl -fsSL -o /models/east/frozen_east_text_detection.pb "
         "https://d1iax8jos987n3.cloudfront.net/models/east/"
         "frozen_east_text_detection.pb",
         # VERIFY THEY LANDED. A truncated or HTML fetch must fail at BUILD, not
@@ -2473,7 +2478,28 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
         _t = time.mktime(time.strptime(_x_amz.group(1), "%Y%m%dT%H%M%SZ"))
         _left = int(_t - time.timezone + int(_x_amz.group(2)) - time.time())
     if _left is None:
-        print("  CLIP URL        : ABSENT expiry — cannot check staleness")
+        # A URL WITH NO EXPIRY IS THE ANSWER, NOT A GAP. This bucket's policy
+        # allows ONLY the CloudFront service principal, so a presigned S3 URL
+        # is refused by design and every one this harness minted had a clock on
+        # it — three runs were launched against a URL with under twenty minutes
+        # left and one expired mid-session. The distribution (E1LT8PUEHV3OVA,
+        # d1iax8jos987n3.cloudfront.net) serves the same objects unsigned, so
+        # the CDN URL has no expiry to check and no re-minting to forget.
+        import urllib.request as _ur
+        try:
+            _rq = _ur.Request(clip_url, method="HEAD")
+            with _ur.urlopen(_rq, timeout=30) as _rs:
+                _code = _rs.status
+        except Exception as _e:                                   # noqa: BLE001
+            raise SystemExit(
+                "REFUSING TO LAUNCH: the clip URL carries no expiry and a HEAD "
+                "on it failed (%s). An unreachable source dies in the container "
+                "with nothing in the results Dict." % _e)
+        if _code != 200:
+            raise SystemExit(
+                "REFUSING TO LAUNCH: the clip URL carries no expiry and HEAD "
+                "returned %s." % _code)
+        print("  CLIP URL        : MEASURED  no expiry, HEAD 200 (CDN)")
     elif _left <= 0:
         raise SystemExit(
             f"REFUSING TO LAUNCH: the clip URL expired {-_left}s ago. The "
