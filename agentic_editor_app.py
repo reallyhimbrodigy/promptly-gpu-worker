@@ -12179,6 +12179,7 @@ def edit(source_key: str, brief: str,
          exec_model: str = MODEL,
          recent_styles: str = "",
          offer_readers: bool = False,
+         plan_only: bool = False,
          prefix_removals: str = "") -> dict:
     """`recent_styles`: this user's last caption picks, most recent FIRST,
     comma-separated.
@@ -14246,6 +14247,42 @@ def edit(source_key: str, brief: str,
                                                _cap_frames, fps=_cap_fps,
                                                text_overlays=_text_overlays,
                                                tight_cut_overlays=_tc_overlays), fh)
+            # ── PLAN-ONLY STOPS HERE ────────────────────────────────────
+            # Everything above this line is a DECISION; everything below is a
+            # RENDER. The ChatCut path reads six things out of this run —
+            # the rulings, beats, source_duration_s, keep_spans, the caption
+            # style and page count, and caption_composited — and NEVER OPENS
+            # THE RENDERED FILE. It rebuilds the edit in ChatCut from the
+            # rulings. So the 117.9s of builds plus 29.5s unattributed produce
+            # an mp4 that is measured, inspected and thrown away.
+            #
+            # The caption values were the only reason this looked entangled:
+            # `led["caption_render"]` is written on the line AFTER
+            # `_mark(led, "build_alpha_layer", ...)`, so style and pages read
+            # as outputs of a 37.9s render when they are decided right here,
+            # before it starts.
+            if plan_only:
+                led["caption_render"] = {
+                    "seq": led.get("_render_seq", 0),
+                    "style": _cap_style, "fps": _cap_fps,
+                    "pages": len(_cap_pages), "frames": _cap_frames,
+                    "text_overlays": len(_text_overlays),
+                    "tight_cut_overlays": len(_tc_overlays),
+                    "state": "PLANNED_NOT_RENDERED",
+                }
+                led["caption_composited"] = bool(_cap_pages)
+                # no _mark here: the dispatcher already times this as
+                # `tool:execute_plan`, and a second timer over the same span
+                # would double-count it in wall_by_stage.
+                return {"plan_only": True,
+                        "built": [],
+                        "keep_spans": led.get("keep_spans"),
+                        "caption_style": _cap_style,
+                        "caption_pages": len(_cap_pages),
+                        "why": "PLAN ONLY. The rulings, the cut and the caption "
+                               "choice are decided and recorded; no video was "
+                               "rendered because this run's consumer rebuilds "
+                               "the edit itself. Say DONE."}
             _cap_t0 = time.time()
             _cap_res = render_remotion_batch(led=led, jobs=[{
                 "id": "captions", "composition": "PromptlyOverlay",
@@ -16424,6 +16461,26 @@ def edit(source_key: str, brief: str,
                 # the one thing marked cache_control — written once,
                 # read on every turn after.
                 + "\n\n" + ruling_time_knowledge())
+    _PLAN_ONLY_NOTE = (
+        "\n\nTHIS RUN IS PLAN-ONLY, AND IT CHANGES YOUR LAST STEP.\n"
+        "`execute_plan` records the cut and the caption choice and STOPS — no "
+        "video is rendered, because the consumer of this run rebuilds the edit "
+        "itself from your rulings. So:\n"
+        "  - there is no file to verify, and `inspect_output` is NOT available;\n"
+        "  - ignore every instruction above that tells you to verify the "
+        "output or to re-run until the speech is intact;\n"
+        "  - after `execute_plan` returns, say DONE.\n"
+        "Your rulings are the deliverable. They are no less binding for not "
+        "being rendered here — everything you decide is built downstream, and "
+        "anything you leave out cannot be.\n")
+    if plan_only:
+        # APPENDED TO THE CACHED PREFIX, which is correct here: plan_only is
+        # constant for the whole run, so the prefix stays stable and the cache
+        # is written once. The lesson that made this worth stating — changing
+        # the TOOL LIST mid-run invalidated the cache and turned a 6,594-token
+        # write into 43,222, 74% of that run's cost. A block that never changes
+        # within a run is safe to cache; one that changes per turn is not.
+        sys_text = sys_text + _PLAN_ONLY_NOTE
     sys_blocks = [{"type": "text", "text": sys_text,
                    "cache_control": {"type": "ephemeral"}}]
     # THE SCHEMA IS CONSTANT FOR THE WHOLE RUN, and the gate moved into the
@@ -16469,6 +16526,14 @@ def edit(source_key: str, brief: str,
     # state ACTUALLY USED is recorded in the ledger below.
     _judgment_only = "haiku" in str(model).lower() and not offer_readers
     tools = TOOLS + (list(KNOWLEDGE_TOOLS) if use_knowledge else [])
+    if plan_only:
+        # inspect_output PROBES THE RENDERED FILE. With no render there is no
+        # file, so offering it would buy a turn, a tool call and an error. It
+        # is removed rather than left to fail — a tool whose precondition this
+        # path never satisfies is not a capability, it is a trap.
+        tools = [t for t in tools if t.get("name") != "inspect_output"]
+        print("  PLAN ONLY       : execute_plan stops after the decisions; "
+              "inspect_output withdrawn (%d tools)" % len(tools), flush=True)
     # THE READERS COME OUT FOR THE JUDGMENT-ONLY ROLE.
     #
     # MEASURED, rounds 12 and 13: Sonnet called read_knowledge and search_skills
@@ -16652,6 +16717,14 @@ def edit(source_key: str, brief: str,
             fail("model_call_failed", e)
             break
         _mark(led, "model_thinking", _tm0)
+        # PER-TURN, NOT JUST SUMMED. `model_thinking` was one accumulated
+        # number — 179.84s across five turns — so "is one turn dominating or is
+        # it evenly spread" could not be answered from the record, and the
+        # answer decides whether the target is a prompt or the prefix. The
+        # per-turn TOKENS were already here and said turn 1 produced 14,611 of
+        # 15,891 output tokens; the seconds beside them make that a measurement
+        # rather than an inference from a generation rate nobody recorded.
+        led.setdefault("turn_seconds", []).append(round(time.time() - _tm0, 2))
         u = getattr(r, "usage", None)
         if u:
             led["tokens"]["in"] += getattr(u, "input_tokens", 0) or 0
@@ -19148,6 +19221,30 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     _cv = list(r.get("contract_violations") or [])
     print(f"  CONTRACT VIOLATIONS: {len(_cv)}"
           + ("".join(f"\n     - {c}" for c in _cv) if _cv else "  — none"))
+    # PER-TURN MODEL TIME, BESIDE THE TOKENS. A counter that reaches the
+    # ledger and no output answers nothing — round 29 ran specifically to learn
+    # whether a gate fired and could not, because the number was recorded and
+    # printed nowhere. So the seconds and the tokens are printed together, and
+    # the share is of the model time rather than of the wall, because that is
+    # the question: which TURN is the thinking.
+    _ts = (r.get("ledger") or {}).get("turn_seconds") or []
+    _tn = (r.get("ledger") or {}).get("turns") or []
+    if _ts:
+        _tt = sum(_ts) or 1.0
+        print("  MODEL TIME BY TURN: %.1fs over %d turn(s)" % (sum(_ts), len(_ts)))
+        for _i, _sec in enumerate(_ts):
+            _t = _tn[_i] if _i < len(_tn) else {}
+            _tools = ",".join(_t.get("tools") or []) or "(no tool)"
+            _out = _t.get("out_tokens")
+            print("     turn %d  %7.2fs  %5.1f%%  out=%-7s %s"
+                  % (_i + 1, _sec, 100 * _sec / _tt,
+                     _out if _out is not None else "?", _tools))
+        _peak = max(range(len(_ts)), key=lambda i: _ts[i])
+        print("     PEAK: turn %d at %.0f%% of model time — %s"
+              % (_peak + 1, 100 * _ts[_peak] / _tt,
+                 "one turn dominates, so the target is THAT turn's prompt"
+                 if _ts[_peak] / _tt > 0.5 else
+                 "spread across turns, so the prefix is the suspect"))
     _wbs = (r.get("ledger") or {}).get("wall_by_stage") or {}
     _tot = float(r.get("wall_s") or 0) or 1.0
     if _wbs:
