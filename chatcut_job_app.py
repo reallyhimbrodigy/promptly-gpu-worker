@@ -981,19 +981,51 @@ SHEET_RULE = (
     "same words twice. This is checked after the run.\n\n")
 
 
-def _mcp_call(tok, name, args):
-    """One ChatCut tool call at module level, for the harness's own checks."""
+def _mcp_call(tok, name, args, expect=None):
+    """One ChatCut tool call at module level, for the harness's own checks.
+
+    IT RAISES RATHER THAN RETURNING THE ENVELOPE. The first version fell back
+    to the raw result when it could not parse the text block — so
+    `preview_timeline` came back as an envelope, `.get("timeline")` was None,
+    `entries` was EMPTY, and hop 3 reported all twelve adds as never placed on
+    a timeline that demonstrably held sixteen. A FALSE RED, which is the same
+    failure as a false green wearing the other sign: the instrument failed and
+    blamed the thing it was measuring.
+
+    So `expect` names the key the caller needs, and its absence is an error
+    that says what DID come back instead of a zero that reads like a finding.
+    Content blocks may also arrive as `resource`/`json` rather than `text`.
+    """
     r = mcp_rpc(tok, "tools/call", {"name": name, "arguments": args}, 900)
     if r.get("error"):
         raise RuntimeError("%s failed: %s" % (name, r["error"]))
     out = r.get("result") or {}
-    txt = "".join(c.get("text") or "" for c in (out.get("content") or []))
-    if txt.strip().startswith("{"):
-        try:
-            return json.loads(txt)
-        except Exception:                                         # noqa: BLE001
-            pass
-    return out
+    parsed = None
+    for c in (out.get("content") or []):
+        t = c.get("text")
+        if not t and isinstance(c.get("resource"), dict):
+            t = c["resource"].get("text")
+        if not t and isinstance(c.get("json"), (dict, list)):
+            parsed = c["json"]
+            break
+        if t and t.strip().startswith("{"):
+            try:
+                parsed = json.loads(t)
+                break
+            except Exception:                                     # noqa: BLE001
+                continue
+    if parsed is None and isinstance(out, dict) and (
+            expect is None or expect in out):
+        parsed = out
+    if parsed is None or (expect is not None and expect not in parsed):
+        raise RuntimeError(
+            "%s returned nothing this reader could use%s. Keys seen: %s. "
+            "First 240 chars: %r"
+            % (name, (" (no %r)" % expect) if expect else "",
+               sorted(parsed or out)[:12] if isinstance(parsed or out, dict)
+               else type(parsed or out).__name__,
+               json.dumps(parsed if parsed is not None else out)[:240]))
+    return parsed
 
 
 def verify_hops_3_and_4(tok, stage, plan):
@@ -1023,8 +1055,10 @@ def verify_hops_3_and_4(tok, stage, plan):
     pid = stage["projectId"]
     try:
         tl = _mcp_call(tok, "preview_timeline",
-                       {"projectId": pid, "views": ["timeline"], "limit": 100})
+                       {"projectId": pid, "views": ["timeline"], "limit": 100},
+                       expect="timeline")
         entries = ((tl.get("timeline") or {}).get("entries") or [])
+        _total = ((tl.get("timeline") or {}).get("totalEntries"))
     except Exception as e:                                        # noqa: BLE001
         res["hop3"] = {"state": "FAILED",
                        "why": "could not read the timeline: %s" % e}
@@ -1032,12 +1066,30 @@ def verify_hops_3_and_4(tok, stage, plan):
 
     items = [e for e in entries if e.get("kind") == "item"]
     miss3 = vc.hop3_placed(man, entries)
+    if miss3 and not items:
+        # NOT A PLACEMENT FAILURE — A READ FAILURE. Every add missing and zero
+        # items read is the instrument, not the edit, and calling it FAILED
+        # here would blame the run for the reader's silence.
+        res["hop3"] = {"state": "FAILED",
+                       "why": "the timeline read returned ZERO items (%s total "
+                              "entries) — this is the reader failing, not the "
+                              "placements" % _total}
+        res["hop4"] = {"state": "ABSENT",
+                       "why": "hop 3 could not read the timeline"}
+        return res
     res["hop3"] = {
         "state": "FAILED" if miss3 else "MEASURED",
-        "why": ("%d add(s) never became an item: %s"
-                % (len(miss3), "; ".join("CALL %s adds[%s] %s"
-                                         % (r["call"], r["slot"], w)
-                                         for r, w in miss3))
+        # THE DENOMINATOR IS IN THE MESSAGE. Without it, "12 adds never
+        # became an item" cannot be told apart from "the reader saw nothing",
+        # which is exactly how the false red read as a placement failure.
+        "why": ("%d of %d add(s) never became an item — the timeline read "
+                "returned %d item(s) of %s total: %s"
+                % (len(miss3),
+                   len([r for r in man if r["type"] != "effect"]),
+                   len(items), _total,
+                   "; ".join("CALL %s adds[%s] %s"
+                             % (r["call"], r["slot"], w)
+                             for r, w in miss3))
                 if miss3 else
                 "%d planned add(s), %d item(s) on the timeline"
                 % (len([r for r in man if r["type"] != "effect"]), len(items)))}
@@ -1093,6 +1145,165 @@ def verify_hops_3_and_4(tok, stage, plan):
                 if bad4 else
                 "every item carries the asset and the overrides the plan named")}
     return res
+
+
+def _gray(path, w=270, h=480):
+    """One frame as raw 8-bit gray at a fixed size. None if it cannot be read."""
+    r = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", path, "-vf",
+         "scale=%d:%d,format=gray" % (w, h), "-frames:v", "1",
+         "-f", "rawvideo", "-"], capture_output=True, timeout=120)
+    if r.returncode != 0 or len(r.stdout or b"") != w * h:
+        return None
+    return r.stdout
+
+
+def _fetch(uri, path):
+    import urllib.request as _u
+    try:
+        with _u.urlopen(uri, timeout=180) as resp, open(path, "wb") as fh:
+            fh.write(resp.read())
+        return os.path.getsize(path) > 2000
+    except Exception:                                             # noqa: BLE001
+        return False
+
+
+def _chain_items(tok, stage):
+    """The timeline's items, for hop 5. ABSENT rather than [] on failure, so a
+    read that did not happen cannot read as a composition with nothing in it."""
+    try:
+        tl = _mcp_call(tok, "preview_timeline",
+                       {"projectId": stage["projectId"], "views": ["timeline"],
+                        "limit": 100}, expect="timeline")
+        return [e for e in ((tl.get("timeline") or {}).get("entries") or [])
+                if e.get("kind") == "item"]
+    except Exception:                                             # noqa: BLE001
+        return None
+
+
+def verify_hop5_composition(tok, stage, plan, items):
+    """HOP 5 — no frame ships with two placements' pixels on top of each other.
+
+    THIS IS COMPOSED-AGAINST-COMPOSED, which is why it works where the earlier
+    attempt did not. That one compared a placement's band against the SOURCE
+    frame and was defeated by the zoom: `shape: "payoff"` ramps the
+    magnification, so a fixed-scale comparison never registers and an 11.75%
+    residual swamped every overlay. Here the two frames are renders of the SAME
+    composition with ONE TRACK HIDDEN — identical geometry, identical zoom — so
+    the difference between them is exactly that track's pixels. No registration,
+    no bands, no guessing.
+
+    ONE PREVIEW PER TRACK, not per pair: with N overlay tracks it is N+1
+    renders and every pairwise intersection comes out of those.
+
+    AND IT IS A GATE. A frame carrying two placements over each other fails the
+    run. A measurement that could not be taken is ABSENT and also fails — the
+    whole point is that nothing ships unchecked.
+    """
+    import sys as _sys
+    _sys.path.insert(0, "/root")
+    import verify_chain as vc
+    out = {"state": "ABSENT", "why": "not attempted", "detail": []}
+    if not (plan and stage and items):
+        out["why"] = "no plan, prestage or items"
+        return out
+    pid = stage["projectId"]
+    man = vc.plan_manifest(plan)
+
+    # the frames worth checking: where two or more overlay items coincide
+    ov = [it for it in items
+          if (it.get("trackAlias") or "") not in ("V1", "A1")]
+    if len(ov) < 2:
+        return {"state": "MEASURED", "why": "fewer than two overlay items — "
+                                            "nothing can collide", "detail": []}
+    tracks = sorted({it.get("trackId") for it in ov if it.get("trackId")})
+    best, bestn = None, 0
+    for f in range(0, max((it.get("timelineRange") or {}).get("toFrame", 0)
+                          for it in ov), 8):
+        n = sum(1 for it in ov
+                if (it.get("timelineRange") or {}).get("fromFrame", 0) <= f
+                < (it.get("timelineRange") or {}).get("toFrame", 0))
+        if n > bestn:
+            best, bestn = f, n
+    if best is None or bestn < 2:
+        return {"state": "MEASURED", "why": "no frame carries two overlays",
+                "detail": []}
+
+    os.makedirs("/work/hop5", exist_ok=True)
+
+    def shot(tag):
+        pv = _mcp_call(tok, "preview_timeline",
+                       {"projectId": pid, "views": ["viewer"],
+                        "viewerFrames": [best]}, expect="viewer")
+        uris = []
+
+        def walk(o):
+            if isinstance(o, dict):
+                for k, v in o.items():
+                    if k in ("uri", "url") and isinstance(v, str) \
+                            and v.startswith("http"):
+                        uris.append(v)
+                    else:
+                        walk(v)
+            elif isinstance(o, list):
+                for v in o:
+                    walk(v)
+        walk(pv)
+        if not uris:
+            return None
+        p2 = "/work/hop5/%s.jpg" % tag
+        return p2 if _fetch(uris[0], p2) else None
+
+    try:
+        base = shot("all")
+        g_all = _gray(base) if base else None
+        if g_all is None:
+            out["why"] = ("could not render the all-visible frame at %d — the "
+                          "composition is UNCHECKED" % best)
+            return out
+        masks = {}
+        for t in tracks:
+            _mcp_call(tok, "edit_track", {"projectId": pid, "action": "update",
+                                          "trackId": t,
+                                          "json": json.dumps({"hidden": True})})
+            try:
+                p3 = shot("no_%s" % t[:8])
+                g = _gray(p3) if p3 else None
+            finally:
+                _mcp_call(tok, "edit_track",
+                          {"projectId": pid, "action": "update", "trackId": t,
+                           "json": json.dumps({"hidden": False})})
+            if g is None:
+                out["why"] = ("could not render with track %s hidden — the "
+                              "composition is UNCHECKED" % t[:8])
+                return out
+            masks[t] = bytes(1 if abs(g_all[i] - g[i]) > 24 else 0
+                             for i in range(len(g_all)))
+        hits = []
+        for i, t1 in enumerate(tracks):
+            for t2 in tracks[i + 1:]:
+                m1, m2 = masks[t1], masks[t2]
+                both = sum(1 for k in range(len(m1)) if m1[k] and m2[k])
+                area = min(sum(m1), sum(m2)) or 1
+                frac = both / float(area)
+                out["detail"].append(
+                    "frame %d  %s vs %s  %d px shared (%.1f%% of the smaller)"
+                    % (best, t1[:8], t2[:8], both, frac * 100))
+                if both > 200 and frac > 0.06:
+                    hits.append((t1, t2, both, frac))
+        out["state"] = "FAILED" if hits else "MEASURED"
+        out["why"] = (
+            "%d pair(s) overlap at frame %d: %s"
+            % (len(hits), best,
+               "; ".join("%s/%s share %d px (%.0f%% of the smaller)"
+                         % (a[:8], b[:8], n, f * 100) for a, b, n, f in hits))
+            if hits else
+            "%d overlay track(s) checked at frame %d, none share pixels"
+            % (len(tracks), best))
+    except Exception as e:                                        # noqa: BLE001
+        out["state"] = "FAILED"
+        out["why"] = "%s: %s — the composition is UNCHECKED" % (type(e).__name__, e)
+    return out
 
 
 def build_system_prompt():
@@ -1630,12 +1841,26 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     # confirm the StatCard. It was right, and nothing acted on it. A placement
     # the agent intended and cannot confirm is a DEFECT, not a note.
     out["chain"] = verify_hops_3_and_4(tok, _stage, plan)
-    for _h in ("hop3", "hop4"):
+    out["chain"]["hop5"] = verify_hop5_composition(
+        tok, _stage, plan, out["chain"].pop("_items", None) or _chain_items(
+            tok, _stage))
+    for _h in ("hop3", "hop4", "hop5"):
         print("  %s           : %s  %s"
               % (_h.upper(), out["chain"][_h]["state"], out["chain"][_h]["why"]),
               flush=True)
-    for _l in out["chain"].get("detail") or []:
+    for _l in (out["chain"].get("detail") or []) + \
+              (out["chain"]["hop5"].get("detail") or []):
         print("      %s" % _l, flush=True)
+    # A GATE, NOT A REPORT. A run whose placements cannot be confirmed, or
+    # whose frames carry two things on top of each other, does not pass —
+    # whatever the agent exported. The deliverable is the edit that was ruled,
+    # and an unverified one is not it.
+    _failed = [h for h in ("hop3", "hop4", "hop5")
+               if out["chain"][h]["state"] != "MEASURED"]
+    out["chain"]["gate"] = "FAILED" if _failed else "PASSED"
+    if _failed:
+        print("  CHAIN GATE      : FAILED on %s — the edit is NOT confirmed"
+              % ", ".join(_failed), flush=True)
 
     out["visual_pass"] = {
         "read_source_sheet": _saw_sheet,

@@ -29,9 +29,46 @@ import json
 import re
 
 # The frame is 1080x1920. A placement's band is where its pixels must appear.
-BANDS = {"upper_third": (0.00, 0.36), "centre": (0.32, 0.68),
-         "center": (0.32, 0.68), "lower_third_safe": (0.58, 0.94),
+# THE RULED BANDS — where a TITLE sits, because a title is positioned by a
+# property rather than by its own geometry.
+BANDS = {"upper_third": (0.00, 0.36), "lower_third_safe": (0.58, 0.94),
          "lower_third": (0.58, 0.94), "full": (0.0, 1.0)}
+
+
+def measured_bands(rows_path=None):
+    """{component: (y0, y1)} as a FRACTION of frame height, from the bboxes the
+    render check actually measured.
+
+    NOT A GUESSED TABLE. The first version of the collision check invented a
+    caption band of 0.52-0.70 and therefore found NO collision between the card
+    and the captions — the one collision that had actually shipped. The real
+    numbers, from sheet/rows.json:
+
+        StatCard          y  602- 848   0.314-0.442
+        caption:TwoTone   y  704- 787   0.367-0.410
+        caption:Pulse     y 1160-1240   0.604-0.646
+
+    TwoTone sits INSIDE StatCard. And the two caption styles are 200px apart
+    from each other, which is why one guessed "caption band" could never have
+    been right for both.
+    """
+    import os
+    p = rows_path or os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "sheet", "rows.json")
+    try:
+        rows = json.load(open(p, encoding="utf-8"))
+    except Exception:                                            # noqa: BLE001
+        return {}
+    out = {}
+    for name, v in rows.items():
+        if v.get("state") != "MEASURED":
+            continue
+        m = re.search(r"bbox \((\d+), (\d+), (\d+), (\d+)\)",
+                      str(v.get("detail") or ""))
+        if m:
+            _, y0, _, y1 = (int(g) for g in m.groups())
+            out[name] = (y0 / 1920.0, y1 / 1920.0)
+    return out
 
 
 def plan_manifest(plan_text):
@@ -190,6 +227,106 @@ def hop3_placed(manifest, timeline_entries):
         if not hit:
             missing.append((r, "no item starts at frame %s" % r["from"]))
     return missing
+
+
+def band_of(row, meas):
+    """Where this placement's pixels actually land, as (y0, y1) fractions.
+
+    A registered component is measured from its own render. A title is placed
+    by a PROPERTY, so its ruled band is the truth. Anything unknown claims the
+    WHOLE FRAME — an unknown position must not read as "somewhere harmless".
+
+    THE OFFSET IS APPLIED LAST, ALWAYS. The first version returned early on the
+    component-name match and only applied `offsetY` on a later branch, so a
+    card that had been deliberately moved reported its ORIGINAL band — the
+    resolver computed a shift of 152px and the detector then judged the card as
+    if it had never moved. A band model that ignores the property which
+    repositions the thing is describing where it used to be.
+    """
+    a = row.get("asset") or ""
+    base = None
+    for name, b in meas.items():
+        if name in a:
+            base = b
+            break
+    if base is None and (row.get("overrides") or {}).get("value") is not None:
+        base = meas.get("StatCard", (0.0, 1.0))
+    if base is None:
+        base = BANDS.get(row.get("band"), (0.0, 1.0))
+    dy = float((row.get("overrides") or {}).get("offsetY") or 0) / 1920.0
+    return (base[0] + dy, base[1] + dy)
+
+
+def free_offset(row, others, meas, height=1920, clear=0.05):
+    """The smallest offsetY that clears `row` of every band in `others`.
+
+    A REFUSAL NOTHING CAN SATISFY IS A DEAD END. The planner knows every band,
+    so where a region is contested it should PLACE the card clear rather than
+    hand the conflict onward; the refusal is reserved for a frame with no free
+    region at all, which is a real editorial fact about that moment.
+    """
+    b = band_of(row, meas)
+    h = b[1] - b[0]
+    blocked = [band_of(o, meas) for o in others]
+    # try every 1% step, nearest-first, keeping the card fully on screen
+    for step in range(0, int(height * 0.7), 8):
+        for sign in (1, -1):
+            dy = sign * step
+            lo = b[0] + dy / float(height)
+            hi = lo + h
+            if lo < 0.02 or hi > 0.98:
+                continue
+            # CLEAR BY MORE THAN THE DETECTOR TOLERATES. Resolving to
+            # exactly the 2% seam leaves the layout one wrapped line from a
+            # collision; 5% is a gap you can see.
+            if all(min(hi, ob[1]) - max(lo, ob[0]) <= -clear for ob in blocked):
+                return dy
+    return None
+
+
+def collisions(manifest, meas=None):
+    """Every placement against every OTHER placement in the same window.
+
+    THE CARD LANDED ON THE CAPTIONS. StatCard occupies y 0.314-0.442 and
+    caption:TwoTone occupies 0.367-0.410 — the caption sits INSIDE the card —
+    and both were live for frames 526-608. At 562 the caption word "FIVE" sits
+    directly over the card's "5", at 585 "EDIT", at 600 "NOTHING".
+
+    NOTHING CHECKED ACROSS FAMILIES. The title loop knew about titles, the
+    caption section about captions, the card rode the graphics pass, and no
+    reader held two of them at once. Every gate was within a family.
+
+    This runs at PLAN TIME, before anything is registered or placed, because a
+    composition that cannot work is cheapest to refuse before it is built. It
+    catches only what a plan can PREDICT: it cannot know that text will wrap or
+    that a counting number will grow. The pixel gate at review time covers
+    that, and the two together are the property.
+    """
+    meas = meas if meas is not None else measured_bands()
+    live = [r for r in manifest
+            if r["type"] == "motion-graphic" and r["from"] is not None]
+    out = []
+    for i, a in enumerate(live):
+        a0, a1 = a["from"], a["from"] + (a["dur"] or 0)
+        ab = band_of(a, meas)
+        for b in live[i + 1:]:
+            b0, b1 = b["from"], b["from"] + (b["dur"] or 0)
+            if b0 >= a1 or a0 >= b1:
+                continue                      # never on screen together
+            bb = band_of(b, meas)
+            lo, hi = max(ab[0], bb[0]), min(ab[1], bb[1])
+            if hi - lo <= 0.02:               # a 2% seam is not a collision
+                continue
+            out.append({
+                "a": a["slot"], "b": b["slot"],
+                "frames": (max(a0, b0), min(a1, b1)),
+                "overlap": round(hi - lo, 3),
+                "why": "slots %d and %d are both on screen for frames %d-%d "
+                       "and their MEASURED bands overlap by %.0f%% of the "
+                       "frame height (%.3f-%.3f vs %.3f-%.3f)"
+                       % (a["slot"], b["slot"], max(a0, b0), min(a1, b1),
+                          (hi - lo) * 100, ab[0], ab[1], bb[0], bb[1])})
+    return out
 
 
 def hop4_carries(manifest, items_by_from):

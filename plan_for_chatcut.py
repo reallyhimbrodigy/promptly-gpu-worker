@@ -519,6 +519,13 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
     # does not reach the plan RAISES, exactly like the two clock refusals: a
     # placement with nowhere to land is not a smaller edit, it is an edit
     # nobody ruled.
+    # THE CAPTION STYLE, HOISTED. The card has to clear it, and the caption
+    # section is emitted three hundred lines later — so the fact that decides
+    # the card's position was not in scope where the card is placed. That is
+    # the same shape as the collision itself: two families, and no reader that
+    # held both.
+    _cap_style = (((led.get("caption_render") or {}).get("style")
+                   or led.get("caption_style") or "") if _wants_captions else "")
     _ruled, _emitted = {}, {}
     for p in rows:
         for t in (p.get("treatment") or []):
@@ -603,6 +610,35 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
                     "the beat at %.2fs is ruled `card` and %s" % (p["src_t0"], _why))
             _ci = _idx[0]
             _idx[0] += 1
+            # PLACE IT CLEAR. The card's own band is measured; so are the
+            # caption's and every other component's. Where the region is
+            # contested, shift the card rather than hand the conflict onward.
+            try:
+                import verify_chain as _vc2
+                _meas = _vc2.measured_bands()
+                _self = {"type": "motion-graphic", "asset": "StatCard",
+                         "overrides": _ov, "band": None, "slot": _ci,
+                         "from": f0, "dur": f1 - f0}
+                _others = [{"type": "motion-graphic", "asset": "", "band":
+                            p.get("where"), "overrides": None, "slot": -1,
+                            "from": f0, "dur": f1 - f0}]
+                if _cap_style:
+                    _others.append({"type": "motion-graphic",
+                                    "asset": "caption:%s" % _cap_style,
+                                    "band": None, "overrides": None,
+                                    "slot": -2, "from": 0, "dur": 10 ** 6})
+                _dy = _vc2.free_offset(_self, _others, _meas)
+                if _dy is None:
+                    raise Incomplete(
+                        "the card ruled at %.2fs has nowhere to sit: its own "
+                        "band, the title's and the caption's leave no free "
+                        "region in the frame. That is an editorial fact about "
+                        "this moment, not a layout bug — the beat is carrying "
+                        "more than the frame holds." % p["src_t0"])
+                if _dy:
+                    _ov = dict(_ov, offsetY=_dy)
+            except ImportError:
+                pass
             L += [f"    THIS BEAT IS ALSO RULED `card`: "
                   f"{p.get('card_condition')!r} — a SECOND placement, in the "
                   f"same window, on StatCard.",
@@ -613,8 +649,10 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
                   f"      from                   : {f0}",
                   f"      durationInFrames       : {f1 - f0}",
                   f"      propertyOverrides      : {json.dumps(_ov)}",
-                  f"      (StatCard anchors CENTRE by default and the title "
-                  f"sits in the upper third, so they do not collide)",
+                  f"      (offsetY is COMPUTED, not chosen: the card's "
+                  f"measured band, the title's and the caption's were checked "
+                  f"against each other and this is the nearest position that "
+                  f"clears both. Do not move it.)",
                   ""]
             # reviewed at its own settled frame — StatCard counts IN over
             # `enterFrames` (32 by default), so 8 frames in shows a half-counted
@@ -839,7 +877,36 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
               "  they are their own surface — so do not go looking for a "
               "caption track either."]
     L += [""]
-    return "\n".join(L)
+    # ── TWO THINGS MAY NOT BE RULED INTO ONE REGION ────────────────────────
+    # Checked on the finished plan, across ALL families at once, because that
+    # is the reader nothing had: the title loop knew titles, the caption
+    # section knew captions, the card rode the graphics pass, and no reader
+    # ever held two of them together. StatCard occupies y 0.314-0.442 and
+    # caption:TwoTone 0.367-0.410 — measured from their own renders, not
+    # guessed — and both were live for frames 526-608. The card shipped with
+    # caption words across its number.
+    #
+    # REFUSED HERE because it is the cheapest place and it is deterministic: no
+    # asset registered, no call made, no render spent. What a plan CANNOT
+    # predict — text wrapping, a counting number growing, a caption line
+    # running long — is the review gate's job, and the two together are the
+    # property.
+    _txt = "\n".join(L)
+    try:
+        import verify_chain as _vc
+    except ImportError:
+        _vc = None
+    if _vc is not None:
+        _col = _vc.collisions(_vc.plan_manifest(_txt))
+        if _col:
+            raise Incomplete(
+                "TWO PLACEMENTS ARE RULED INTO ONE REGION:\n  %s\n"
+                "Both would be on screen together and their measured bands "
+                "overlap, so one lands on top of the other. Move one of them, "
+                "shorten a window so they do not coincide, or drop one — but "
+                "do not ship a frame with two things in the same place."
+                % "\n  ".join(c["why"] for c in _col))
+    return _txt
 
 
 if __name__ == "__main__":
