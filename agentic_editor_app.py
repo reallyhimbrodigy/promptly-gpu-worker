@@ -18991,6 +18991,7 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
          route: bool = False,
          src_url: str = "", out_url: str = "", out_key: str = "",
          recent_styles: str = "",
+         plan_only: bool = False,
          prefix_removals: str = ""):
     # PRESIGN LOCALLY, where the credentials belong. The container receives two
     # URLs that each permit exactly one operation on exactly one key, and
@@ -19042,6 +19043,7 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
                     max_iters=iters, use_knowledge=knowledge, effort=effort,
                     model=model, route_models=route,
                     recent_styles=recent_styles,
+                    plan_only=plan_only,
                     prefix_removals=prefix_removals)
 
     # ── THE RESULT, PERSISTED — not only its printed summary ────────────────
