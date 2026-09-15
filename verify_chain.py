@@ -375,3 +375,42 @@ def hop4_carries(manifest, items_by_from):
                 bad.append((r, "%s is %r on the item and %r in the plan"
                                % (k, got[k], v)))
     return bad
+
+
+def masks_overlap(masks, min_px=200, min_frac=0.06):
+    """[(a, b, shared_px, fraction)] for every pair of track masks that share
+    pixels — HOP 5's judgment, extracted so it can be proven on a known-bad
+    case without a render.
+
+    `masks` is {track: bytes-or-list of 0/1}. The fraction is of the SMALLER
+    mask, because a caption word overlapping a full-frame graphic is the
+    caption's problem at 100% and the graphic's at 2%.
+    """
+    ks = sorted(masks)
+    hits = []
+    for i, a in enumerate(ks):
+        for b in ks[i + 1:]:
+            m1, m2 = masks[a], masks[b]
+            n = min(len(m1), len(m2))
+            both = sum(1 for k in range(n) if m1[k] and m2[k])
+            area = min(sum(m1[:n]), sum(m2[:n])) or 1
+            frac = both / float(area)
+            if both > min_px and frac > min_frac:
+                hits.append((a, b, both, frac))
+    return hits
+
+
+def sits_on(band, occupied_names, band_fraction, tol=0.02):
+    """[(name, overlap)] for every occupied band this placement intrudes into —
+    HOP 6's judgment, extracted for the same reason.
+
+    `band_fraction` maps a band name to its (y0, y1) fractions, so the caller
+    supplies PRODUCTION's table rather than this module inventing one.
+    """
+    out = []
+    for name in sorted(occupied_names or ()):
+        lo, hi = band_fraction(name)
+        ov = min(band[1], hi) - max(band[0], lo)
+        if ov > tol:
+            out.append((name, ov))
+    return out

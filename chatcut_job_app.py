@@ -48,7 +48,34 @@ IMG = (
     # pillow AND numpy. Adding only pillow was a half-fix: the agent's command
     # is `from PIL import Image; import numpy as np`, so the identical error
     # came back on the next run. A fix aimed at the first line of a traceback.
-    .pip_install("pillow", "numpy")
+    .pip_install("pillow", "numpy", "opencv-python-headless")
+    # THE REAL DETECTORS, NOT INVENTED ZONES. The sweep's face and burned-text
+    # legs were judging against constants I made up — a face zone of 0.04-0.34
+    # that reported "30% overlap" for every title, and an edge-density scan
+    # whose min-to-max union covered 0.284-0.667 so everything overlapped. Two
+    # guessed bands, after a guessed caption band had already let the card ship
+    # on top of the captions. This repo has both detectors already: the res10
+    # SSD face detector handler.py has used since forever, and burned_text.py's
+    # EAST text-region detector, calibrated with its own thresholds and
+    # fail-safe to None. Mirrors modal_app.py's wget block exactly.
+    .run_commands(
+        "mkdir -p /models/face_detector /models/east",
+        "wget -q -O /models/face_detector/deploy.prototxt "
+        "https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/"
+        "face_detector/deploy.prototxt",
+        "wget -q -O /models/face_detector/res10_300x300_ssd_iter_140000.caffemodel "
+        "https://raw.githubusercontent.com/opencv/opencv_3rdparty/"
+        "dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel",
+        "wget -q -O /models/east/frozen_east_text_detection.pb "
+        "https://d1iax8jos987n3.cloudfront.net/models/east/"
+        "frozen_east_text_detection.pb",
+        # VERIFY THEY LANDED. A truncated or HTML fetch must fail at BUILD, not
+        # silently at runtime where the detector would return None and the leg
+        # would read ABSENT for a reason nobody could see.
+        "test $(stat -c%s /models/east/frozen_east_text_detection.pb) -gt 90000000",
+        "test $(stat -c%s /models/face_detector/"
+        "res10_300x300_ssd_iter_140000.caffemodel) -gt 5000000",
+    )
     .run_commands(
         "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -",
         "apt-get install -y nodejs",
@@ -131,6 +158,10 @@ JSON""",
                     "/root/turn_clock.py", copy=True)
     .add_local_file(os.path.join(_HERE, "verify_chain.py"),
                     "/root/verify_chain.py", copy=True)
+    .add_local_file(os.path.join(_HERE, "burned_text.py"),
+                    "/root/burned_text.py", copy=True)
+    .add_local_file(os.path.join(_HERE, "face_bands.py"),
+                    "/root/face_bands.py", copy=True)
     .add_local_file(os.path.join(_HERE, "reference_index.json"),
                     "/craft/reference_index.json", copy=True)
 )
@@ -1289,18 +1320,19 @@ def verify_hop5_composition(tok, stage, plan, items):
                 return out
             masks[t] = bytes(1 if abs(g_all[i] - g[i]) > 24 else 0
                              for i in range(len(g_all)))
-        hits = []
-        for i, t1 in enumerate(tracks):
-            for t2 in tracks[i + 1:]:
-                m1, m2 = masks[t1], masks[t2]
-                both = sum(1 for k in range(len(m1)) if m1[k] and m2[k])
-                area = min(sum(m1), sum(m2)) or 1
-                frac = both / float(area)
-                out["detail"].append(
-                    "frame %d  %s vs %s  %d px shared (%.1f%% of the smaller)"
-                    % (best, t1[:8], t2[:8], both, frac * 100))
-                if both > 200 and frac > 0.06:
-                    hits.append((t1, t2, both, frac))
+        # THE JUDGMENT LIVES IN verify_chain SO IT CAN BE PROVEN WITHOUT A
+        # RENDER. A gate whose decision only runs inside a Modal container,
+        # against live pixels, can only ever be tested by spending a run — and
+        # a gate that has only ever passed is untested.
+        hits = vc.masks_overlap(masks)
+        for _a, _b, _n, _f in [(t1, t2, None, None) for i, t1 in
+                               enumerate(tracks) for t2 in tracks[i + 1:]]:
+            m1, m2 = masks[_a], masks[_b]
+            _both = sum(1 for k in range(len(m1)) if m1[k] and m2[k])
+            _area = min(sum(m1), sum(m2)) or 1
+            out["detail"].append(
+                "frame %d  %s vs %s  %d px shared (%.1f%% of the smaller)"
+                % (best, _a[:8], _b[:8], _both, _both / float(_area) * 100))
         out["state"] = "FAILED" if hits else "MEASURED"
         out["why"] = (
             "%d pair(s) overlap at frame %d: %s"
@@ -1313,6 +1345,95 @@ def verify_hop5_composition(tok, stage, plan, items):
     except Exception as e:                                        # noqa: BLE001
         out["state"] = "FAILED"
         out["why"] = "%s: %s — the composition is UNCHECKED" % (type(e).__name__, e)
+    return out
+
+
+def verify_hop6_clear(plan, source="/work/source.mp4"):
+    """HOP 6 — nothing sits on the speaker's face or on the source's own text.
+
+    REAL DETECTORS, NOT INVENTED ZONES. The sweep's first attempt at these two
+    legs judged against constants I made up: a face zone of 0.04-0.34 that
+    reported "30% overlap" for every title, and an edge-density text scan whose
+    min-to-max union covered 0.284-0.667 so everything overlapped. Both were
+    guesses, and a guessed band had already let the card ship on top of the
+    captions.
+
+    This repo had both answers the whole time — the res10 SSD face detector
+    handler.py has used for months, and burned_text.py's EAST text-region
+    detector with its own calibrated thresholds. Their constants are copied
+    verbatim and pinned by smoke_bands_match_production.py.
+
+    THREE STATES, and ABSENT FAILS. A detector that could not load returns None
+    and this reports ABSENT — because "we could not look" must not read the
+    same as "nothing is in the way", which is the whole lesson of the alpha
+    guard.
+    """
+    import sys as _sys
+    _sys.path.insert(0, "/root")
+    import verify_chain as vc
+    out = {"state": "ABSENT", "why": "not attempted", "detail": []}
+    if not (plan and os.path.exists(source)):
+        out["why"] = "no plan or no source on disk"
+        return out
+    man = vc.plan_manifest(plan)
+    meas = vc.measured_bands()
+    vis = [r for r in man if r["type"] == "motion-graphic" and r["from"] is not None]
+    if not vis:
+        return {"state": "MEASURED", "why": "no visual placements", "detail": []}
+
+    try:
+        import face_bands as fb
+        import burned_text as bt
+    except Exception as e:                                        # noqa: BLE001
+        out["why"] = "detectors could not be imported (%s) — UNCHECKED" % e
+        return out
+
+    # sample at each placement's own settled moment, not on a fixed grid
+    ts = sorted({round((r["from"] + min(12, (r["dur"] or 0) // 2)) / 30.0, 2)
+                 for r in vis})
+    traj = fb.detect_face_positions(source, ts)
+    if traj is None:
+        out["why"] = ("the face detector could not load (cv2 or the model is "
+                      "missing) — the face leg is UNCHECKED, not clear")
+        return out
+    nfound = sum(1 for p in traj if p.get("found"))
+    burned = None
+    try:
+        burned = bt.detect_burned_in_text(source)
+    except Exception:                                             # noqa: BLE001
+        burned = None
+    if burned is None:
+        out["why"] = ("the EAST text detector returned nothing (model missing "
+                      "or unreadable) — the burned-text leg is UNCHECKED")
+        return out
+    # the field is `source_text_regions` — the bands a camera or overlay must
+    # AVOID. `bands` does not exist on this dict, and reading a key that is not
+    # there would have returned an empty set: a clean zero from a reader that
+    # found no input, which is the most expensive result to trust.
+    bbands = set(burned.get("source_text_regions") or ())
+
+    bad = []
+    for r in vis:
+        t0 = r["from"] / 30.0
+        t1 = (r["from"] + (r["dur"] or 0)) / 30.0
+        occ = fb.face_occupied_bands(traj, t0, t1)
+        b = vc.band_of(r, meas)
+        for name, ov in vc.sits_on(b, occ | bbands, fb.band_to_fraction):
+            bad.append((r["slot"], name,
+                        "face" if name in occ else "source text", ov))
+        out["detail"].append(
+            "slot%-3s band %.3f-%.3f  face bands %s  source-text bands %s"
+            % (r["slot"], b[0], b[1], sorted(occ) or "none",
+               sorted(bbands) or "none"))
+    out["state"] = "FAILED" if bad else "MEASURED"
+    out["why"] = (
+        "%d placement(s) sit on something: %s"
+        % (len(bad), "; ".join("slot%s over the %s (%s band, %.0f%%)"
+                               % (s, k, n, o * 100) for s, n, k, o in bad))
+        if bad else
+        "faces found in %d of %d sampled frames; source text in %s; no "
+        "placement overlaps either"
+        % (nfound, len(traj), sorted(bbands) or "no band"))
     return out
 
 
@@ -1865,7 +1986,12 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     # whose frames carry two things on top of each other, does not pass —
     # whatever the agent exported. The deliverable is the edit that was ruled,
     # and an unverified one is not it.
-    _failed = [h for h in ("hop3", "hop4", "hop5")
+    out["chain"]["hop6"] = verify_hop6_clear(plan)
+    print("  HOP6           : %s  %s" % (out["chain"]["hop6"]["state"],
+                                         out["chain"]["hop6"]["why"]), flush=True)
+    for _l in out["chain"]["hop6"].get("detail") or []:
+        print("      %s" % _l, flush=True)
+    _failed = [h for h in ("hop3", "hop4", "hop5", "hop6")
                if out["chain"][h]["state"] != "MEASURED"]
     out["chain"]["gate"] = "FAILED" if _failed else "PASSED"
     if _failed:
