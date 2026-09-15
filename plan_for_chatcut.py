@@ -135,6 +135,102 @@ FAMILY_MAP = {
 }
 
 
+# ── PRODUCTION'S GRACEFUL PLACEMENT, PORTED ─────────────────────────────────
+# handler.py has carried this ladder for months and this lane could not use it,
+# because the plan is built offline and `agentic_editor_app.py` produces no
+# `face_traj` and no `source_text_regions`. The detectors now run once in the
+# image (`chatcut_job_app.py::detect`) and the answer travels with the ruling,
+# so the plan can do what the pipeline does.
+#
+# THE RULE IS NOT "FAIL". A graphic with nowhere clear is REPOSITIONED in time
+# and, if nothing clears, DROPPED with a sentence the user reads — because
+# nothing failed: a component was considered and not placed, which is a
+# decision an editor makes constantly.
+MG_REPOSITION_STEP_S = 0.25          # verbatim, handler.py
+MG_MIN_WINDOW_S = 0.8                # verbatim, handler.py
+
+
+def _regions(led=None):
+    """{face_traj, source_text_regions} FROM THE RULING, or a named absence.
+
+    NO FILESYSTEM FALLBACK. The first version fell back to a regions.json
+    sitting beside this module, and that is a global implicit input: every plan
+    built anywhere would pick up whichever clip's face trajectory happened to
+    be adjacent. It showed up immediately — a smoke about CLOCKS started
+    dropping its synthetic graphics, because they were being judged against the
+    blue-shirt speaker's face. One clip's face applied to another video is
+    worse than no face data at all, because the second case fails open and says
+    so while the first is confidently wrong.
+
+    Regions belong to a CLIP, so they travel with the ruling for that clip.
+    Absent, the ladder fails open exactly as production does with no face data,
+    and the plan prints the ABSENT state rather than implying it looked.
+    """
+    r = dict((led or {}).get("regions") or {})
+    if not r:
+        return {"face_state": "ABSENT", "text_state": "ABSENT",
+                "why": "the ruling carries no regions — run "
+                       "`modal run chatcut_job_app.py::detect` and attach them"}
+    return r
+
+
+def _band_clear(band_name, t0, t1, traj, burned):
+    """Is `band_name` clear of the face over [t0,t1] and un-owned by the source?
+
+    handler.py's `band_overlap`, verbatim: a 600px window around each detected
+    face centre, its mean fractional coverage of the band, clear at or below
+    MG_FACE_CLEAR_THRESHOLD.
+    """
+    import face_bands as fb
+    if band_name in (burned or ()):
+        return False
+    pts = [p for p in (traj or [])
+           if p.get("found") and (t0 - 0.5) <= float(p.get("t") or 0.0) <= (t1 + 0.5)]
+    if not pts:
+        return True                      # fail-open on face data, as production does
+    y0, y1 = fb.MG_FACE_BAND_YRANGES[band_name]
+    FH = 600.0
+    cov = sum(max(0.0, min(y1, float(p.get("cy") or 960.0) + FH / 2.0)
+                  - max(y0, float(p.get("cy") or 960.0) - FH / 2.0)) / FH
+              for p in pts) / len(pts)
+    return cov <= fb.MG_FACE_CLEAR_THRESHOLD
+
+
+def place_gracefully(band_name, t0, t1, traj, burned):
+    """THE LADDER: placed -> repositioned -> dropped. Never raises.
+
+    REPOSITION CONTRACTS THE END, NEVER THE START. The anchor is where the
+    planner grounded the beat; only the end moves, looking for a sub-window in
+    which the band is clear. The face moves during a shot, so a shorter window
+    often has a clear band the full one does not — and grounding survives by
+    construction rather than by a second check. Verbatim from handler.py.
+    """
+    if _band_clear(band_name, t0, t1, traj, burned):
+        return "placed", t1, None
+    end = t1
+    while (end - t0) - MG_REPOSITION_STEP_S >= MG_MIN_WINDOW_S:
+        end -= MG_REPOSITION_STEP_S
+        if _band_clear(band_name, t0, end, traj, burned):
+            return "repositioned", end, None
+    return "dropped", t1, "unfittable"
+
+
+def unplaced_note(said):
+    """The sentence a user reads when a beat was deliberately left bare.
+
+    Verbatim from handler.py's `_mg_unplaced_note`: names the moment in the
+    USER'S words, never a component type, never an error code, never failure
+    language.
+    """
+    _s = str(said or "").strip()
+    if _s:
+        return ("I wanted a graphic on \u201c%s\u201d \u2014 the frame is too "
+                "tight there for one to sit clear of your face, so I let the "
+                "line carry it." % _s)
+    return ("One beat was too tight for a graphic to sit clear of your face, "
+            "so I let the line carry it.")
+
+
 def _card_overrides(hero, label):
     """`card_hero` -> StatCard's (value, suffix), or a named refusal.
 
@@ -526,6 +622,15 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
     # held both.
     _cap_style = (((led.get("caption_render") or {}).get("style")
                    or led.get("caption_style") or "") if _wants_captions else "")
+    # THE REGIONS, AND WHAT THE LADDER DECIDED. A beat whose graphic has
+    # nowhere clear is not a failure and not a silent omission — it is dropped
+    # and NAMED, in the user's own words, exactly as the pipeline does.
+    _reg = _regions(led)
+    _traj = _reg.get("face_traj")
+    _burned = list(_reg.get("source_text_regions") or ())
+    _regions_state = "%s/%s" % (_reg.get("face_state", "ABSENT"),
+                                _reg.get("text_state", "ABSENT"))
+    _unplaced = []
     _ruled, _emitted = {}, {}
     for p in rows:
         for t in (p.get("treatment") or []):
@@ -569,6 +674,20 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
         # placed the video, skipped the title, previewed, exported and exited 0.
         # The presentational values move BELOW the call and are marked as
         # already baked into the asset, so nothing dilutes the instruction.
+        # ── THE LADDER, BEFORE ANYTHING IS EMITTED ──────────────────────
+        _band_name = "top" if str(p.get("where") or "").startswith("upper") \
+            else ("bottom" if "lower" in str(p.get("where") or "") else "center")
+        _out, _newend, _why = place_gracefully(_band_name, _tl0, _tl1,
+                                               _traj, _burned)
+        if _out == "dropped":
+            _unplaced.append((p.get("text_content"), _band_name, _tl0, _tl1))
+            for _t in ("text", "card"):
+                if _t in tr:
+                    _emitted[_t] = _emitted.get(_t, 0) + 1
+            n -= 1
+            continue
+        if _out == "repositioned":
+            f1 = int(round(min(_newend + 1.0 / fps, _timeline_end) * fps))
         _gi = _idx[0]
         _idx[0] += 1
         L += [(f"  GRAPHIC {n} — the asset ALREADY EXISTS. PLACE IT."
@@ -877,6 +996,21 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
               "  they are their own surface — so do not go looking for a "
               "caption track either."]
     L += [""]
+    if _unplaced:
+        L += ["", "## 2z. BEATS LEFT BARE — considered and not placed", "",
+              "  The face and the source's own burned-in text own every band "
+              "over these",
+              "  moments, so a graphic would have sat on the speaker or on his "
+              "existing",
+              "  captions. Nothing failed: a component was considered and not "
+              "placed, which",
+              "  is a decision an editor makes constantly. Detector state: "
+              "%s." % _regions_state, ""]
+        for _txt, _bn, _a2, _b2 in _unplaced:
+            L += ["    %.2fs-%.2fs  %r  (wanted the %s band)"
+                  % (_a2, _b2, _txt, _bn),
+                  "      %s" % unplaced_note(_txt), ""]
+
     # ── TWO THINGS MAY NOT BE RULED INTO ONE REGION ────────────────────────
     # Checked on the finished plan, across ALL families at once, because that
     # is the reader nothing had: the title loop knew titles, the caption

@@ -2224,6 +2224,78 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
 
 
 
+# NO SECRETS. This fetches a public CDN URL and runs two local models; it
+# touches neither ChatCut nor Anthropic, and a function that asks for
+# credentials it does not use is a function that fails for the wrong reason.
+@app.function(image=IMG, timeout=900)
+def detect_regions(clip_url: str, duration_s: float = 0.0):
+    """The face trajectory and the source's own text bands, for PLAN TIME.
+
+    THE PLAN IS BUILT OFFLINE AND THE MODELS LIVE IN THIS IMAGE. Production
+    routes a placement around the speaker's face and the source's burned-in
+    text before anything is built; this lane could not, because
+    `agentic_editor_app.py` produces no `face_traj` and no
+    `source_text_regions` and the translator has neither cv2 nor the weights.
+    So the detectors run here, once, and the answer travels with the ruling.
+
+    Returns a JSON-safe dict, and NAMES its absences: a detector that could not
+    load reports so rather than returning an empty trajectory, because "no
+    faces found" and "we did not look" must not be the same value.
+    """
+    import sys as _sys
+    _sys.path.insert(0, "/root")
+    # /work IS NOT THERE YET IN THIS FUNCTION. `edit` creates it; this one runs
+    # on its own and curl exited 23 (write error) on a directory that does not
+    # exist — a failure that reads like a bad URL and is not.
+    os.makedirs("/work", exist_ok=True)
+    subprocess.run(["curl", "-fsSL", "-o", "/work/src.mp4", clip_url],
+                   check=True, timeout=600)
+    _d = duration_s or float(subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "csv=p=0", "/work/src.mp4"],
+        capture_output=True, text=True).stdout.strip() or 0.0)
+    out = {"duration_s": _d, "face_state": "ABSENT", "text_state": "ABSENT",
+           "face_traj": None, "source_text_regions": None}
+    try:
+        import face_bands as fb
+        ts = [round(i * 0.25, 2) for i in range(int(max(1.0, _d) / 0.25) + 1)]
+        traj = fb.detect_face_positions("/work/src.mp4", ts)
+        if traj is None:
+            out["face_why"] = "cv2 or the res10 model is missing"
+        else:
+            out["face_traj"] = traj
+            out["face_state"] = "MEASURED"
+            out["faces_found"] = sum(1 for p in traj if p.get("found"))
+            out["face_sampled"] = len(traj)
+    except Exception as e:                                        # noqa: BLE001
+        out["face_why"] = "%s: %s" % (type(e).__name__, str(e)[:160])
+    try:
+        import burned_text as bt
+        b = bt.detect_burned_in_text("/work/src.mp4")
+        if b is None:
+            out["text_why"] = "the EAST model is missing or unreadable"
+        else:
+            out["source_text_regions"] = list(b.get("source_text_regions") or ())
+            out["text_state"] = "MEASURED"
+            out["has_burned_captions"] = bool(b.get("has_burned_captions"))
+    except Exception as e:                                        # noqa: BLE001
+        out["text_why"] = "%s: %s" % (type(e).__name__, str(e)[:160])
+    print("  DETECT          : face=%s (%s/%s found)  text=%s %s"
+          % (out["face_state"], out.get("faces_found"), out.get("face_sampled"),
+             out["text_state"], out.get("source_text_regions")), flush=True)
+    return out
+
+
+@app.local_entrypoint()
+def detect(clip_url: str = "", out: str = "/tmp/bs/regions.json"):
+    r = detect_regions.remote(clip_url)
+    with open(out, "w", encoding="utf-8") as fh:
+        json.dump(r, fh, indent=1)
+    print("WROTE %s  face=%s text=%s regions=%s"
+          % (out, r["face_state"], r["text_state"],
+             r.get("source_text_regions")))
+
+
 @app.function(image=IMG, timeout=3600,
               secrets=[modal.Secret.from_name("chatcut-oauth"),
                        modal.Secret.from_name("anthropic-api-key")])

@@ -93,6 +93,20 @@ def titles_from(rows):
 def main(result_json):
     os.makedirs(OUT, exist_ok=True)
     d = json.load(open(result_json, encoding="utf-8"))
+    # THE REGIONS TRAVEL WITH THE RULING, because they belong to THIS clip. The
+    # translator takes them from the ledger and nowhere else — a regions file
+    # picked up off the filesystem would apply one video's face to another.
+    _rp = f"{OUT}/regions.json"
+    if os.path.exists(_rp):
+        d.setdefault("ledger", {})["regions"] = json.load(
+            open(_rp, encoding="utf-8"))
+        print("  REGIONS     : %s face / %s text %s"
+              % (d["ledger"]["regions"].get("face_state"),
+                 d["ledger"]["regions"].get("text_state"),
+                 d["ledger"]["regions"].get("source_text_regions")))
+    else:
+        print("  REGIONS     : ABSENT — no %s; the ladder will fail open and "
+              "the plan will say so" % _rp)
     json.dump(d, open(f"{OUT}/plan.json", "w"))
 
     sys.path.insert(0, HERE)
