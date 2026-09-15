@@ -933,16 +933,19 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
     # knows those frames.
     if _settle:
         _fr = sorted(set(_settle))[:9]      # the viewer takes at most 9
-        L += ["  REVIEW THESE FRAMES — one preview_timeline call, these exact "
-              "numbers:",
-              "      viewerFrames: %s" % json.dumps(_fr),
-              "  They are the SETTLED frames of the graphics above — past each "
-              "entrance and",
-              "  before each exit, so an animation mid-flight is not read as a "
-              "defect. Do not",
-              "  pick your own and do not call preview_timeline twice: it "
-              "returns at most 9",
-              "  frames and these are the %d that carry the placements." % len(_fr), ""]
+        # A STARTING POINT, NOT A RATION. These were "do not pick your own and
+        # do not call preview_timeline twice" — bounding how often the agent
+        # could LOOK, which was a wall problem being solved by taking away the
+        # thing that makes it an editor. The settled frames are worth naming
+        # because the planner knows where each graphic lands; what the agent
+        # does after seeing them is its own business.
+        L += ["  THE SETTLED FRAMES of the graphics above — past each entrance "
+              "and before each",
+              "  exit, so an animation mid-flight is not read as a defect:",
+              "      %s" % json.dumps(_fr),
+              "  These are a STARTING POINT. Scrub wherever you like with "
+              "preview_timeline —",
+              "  any moment, as often as you need. Nobody is counting.", ""]
     L += ["## 3. WHAT IS NOT IN THIS EDIT", "",
           f"  Exactly {n} motion graphic{'' if n == 1 else 's'}. A second one is "
           f"the thing ruled out.",

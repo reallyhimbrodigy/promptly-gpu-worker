@@ -43,6 +43,11 @@ def fn_source(name):
     return ""
 
 
+def _re_sub_scrub(s):
+    """Remove every invitation to look freely — the mutation for the scrub leg."""
+    return re.sub(r"scrub|as often as you need", "xxxx", s, flags=re.I)
+
+
 def legs():
     bad = []
     p1 = fn_source("pass1_message")
@@ -84,10 +89,16 @@ def legs():
     if "plan" not in p1:
         bad.append(("plan", "the plan is not in message 1"))
 
-    # NO-FETCH — the turn ends after the placements
-    if "YOUR TURN ENDS" not in SRC:
-        bad.append(("no-fetch", "pass 1 is not told its turn ends after "
-                                "placing, so it will go looking"))
+    # THE EDIT IS SENT — a head start, NOT a gag. An earlier version of this
+    # leg demanded "YOUR TURN ENDS ... do not preview", which bounded how often
+    # the agent could LOOK. That was a wall problem solved by removing the
+    # thing that makes it an editor. What must hold is that the harness SENDS
+    # the edit, and that the agent is told it may scrub freely.
+    if "RENDERED AND SENT TO YOU" not in SRC:
+        bad.append(("served", "pass 1 is not told the edit will be sent to it"))
+    if not re.search(r"scrub|as often as you need", SRC, re.I):
+        bad.append(("scrub", "nothing tells the agent it may look wherever and "
+                             "as often as it wants"))
 
     # PASS 2 — frames the harness fetched
     if "_edit_frames" not in SRC or "preview_timeline" not in fn_source(
@@ -105,7 +116,7 @@ if __name__ == "__main__":
         print("  [ok] the source arrives as a frame sequence, not one tile")
         print("  [ok] the transcript is served with it, time-aligned")
         print("  [ok] the plan is in the same message")
-        print("  [ok] pass 1's turn ENDS after placing — nothing to fetch")
+        print("  [ok] the edit is SENT to it, and it may scrub freely")
         print("  [ok] the harness renders and sends the edit for pass 2")
 
     print("\n  RED PROOF")
@@ -119,8 +130,8 @@ if __name__ == "__main__":
              "source"),
             ("the transcript dropped",
              lambda s: s.replace("t_start", "unused_key"), "words"),
-            ("the turn-end instruction gone",
-             lambda s: s.replace("YOUR TURN ENDS", "CARRY ON"), "no-fetch")):
+            ("the scrub invitation gone",
+             lambda s: _re_sub_scrub(s), "scrub")):
         _orig = globals()["SRC"]
         globals()["SRC"] = mutate(_orig)
         globals()["TREE"] = ast.parse(globals()["SRC"])

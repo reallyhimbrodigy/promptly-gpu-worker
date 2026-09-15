@@ -550,7 +550,11 @@ NEEDED_TOOLS = [
     # Every tool it was offered for those jobs was a tool it could spend a turn
     # on. What is left is: place, look, fix, deliver.
     "edit_item",          # place, and fix by `updates` on the one revision
-    "preview_timeline",   # look at the composed frames
+    "preview_timeline",   # scrub: any frame, any moment, as often as needed —
+                          # and views:["transcript"] for the words against the
+                          # TIMELINE, mapped through trim, offset and rate
+    "read_captions",      # the viewer-facing caption Cards at any frame, with
+                          # their timing, layout, line count and overflow
     "inspect_item",       # a named defect may need one item's full state
     "edit_asset",         # ...or a property on the asset behind it
     "submit_export",      # deliver
@@ -1048,17 +1052,22 @@ TWO_TURN_LOOP = (
     "component, where it sits, when it runs — and send them in the calls the "
     "plan names (usually one for the items, a second for any EFFECT, because "
     "an effect names an item that must already exist).\n\n"
-    "  THEN YOUR TURN ENDS. Do not preview, do not fetch a frame, do not read "
-    "a file, do not check your work. The edit will be RENDERED AND SENT TO "
-    "YOU as the next message. Anything you do between your last placement and "
-    "that message is a turn spent on something you are about to be given.\n\n"
+    "  THEN THE EDIT IS RENDERED AND SENT TO YOU. You do not have to go and "
+    "get it — the next message carries your timeline with everything on it. "
+    "That is a HEAD START, not a limit.\n\n"
     "  PASS 2 — YOU WATCH THE EDIT, THEN FIX IT IN ONE BATCH. The next "
     "message carries frames of your timeline with everything on it. Judge the "
-    "COMPOSED PICTURE — tool results cannot show you a collision. Fix what is "
-    "wrong in ONE edit_item call: a graphic colliding with another or with "
-    "the captions, something illegible or off-frame, something on the "
-    "speaker's face, a title on the wrong moment, wrong size, drift. If it is "
-    "right, submit the export and stop.\n\n"
+    "COMPOSED PICTURE — tool results cannot show you a collision.\n\n"
+    "  AND SCRUB WHEREVER YOU WANT. `preview_timeline` is yours: ask for any "
+    "moment, at any time, as often as you need. If a frame looks wrong, look "
+    "at the frames either side of it. If an entrance looks late, look at the "
+    "frames it enters over. If you cannot tell whether two things collide, "
+    "ask for that exact frame. The frames you were sent are a starting point "
+    "and nothing more — an editor scrubs, and nobody is counting your looks.\n\n"
+    "  Then fix what is wrong in ONE edit_item call: a graphic colliding with "
+    "another or with the captions, something illegible or off-frame, something "
+    "on the speaker's face, a title on the wrong moment, wrong size, drift. If "
+    "it is right, submit the export and stop.\n\n"
     "  PASS 3 — ONLY ON A DEFECT YOU CAN NAME. If you take one, your final "
     "message must name the defect, the frame you saw it in, and what you "
     "changed. Unnamed, it is the same as not taking it: the run reports the "
@@ -1906,11 +1915,32 @@ def pass2_message(frames, plan_frames):
                "and concentrated where the picture CHANGES most, which is "
                "where entrances, exits and collisions happen. Timeline frames "
                "%s. This is what the viewer sees.\n\n"
-               "Look at it and fix what is wrong: a graphic colliding with "
-               "another or with the captions, something illegible, something "
-               "off-frame, something sitting on the speaker's face, a title on "
-               "the wrong moment, wrong size, drift. Make EVERY correction in "
-               "ONE edit_item call.\n\n"
+               "THESE ARE A STARTING POINT. `preview_timeline` is yours — ask "
+               "for any moment, as often as you need. If something looks "
+               "wrong, look at the frames either side of it; if an entrance "
+               "looks late, look at the frames it enters over; if you cannot "
+               "tell whether two things collide, ask for that exact frame. "
+               "Nobody is counting your looks.\n\n"
+               "Then fix what is wrong: a graphic colliding with another or "
+               "with the captions, something illegible, something off-frame, "
+               "something sitting on the speaker's face, a title on the wrong "
+               "moment, wrong size, drift. Make EVERY correction in ONE "
+               "edit_item call.\n\n"
+               "FOR THE AUDIO, what you can actually inspect:\n"
+               "  - `preview_timeline` with views:[\"transcript\"] and a frame "
+               "range gives you the words against the TIMELINE, mapped through "
+               "each item's trim, source offset and rate — so you can check a "
+               "title lands on the line it was written for.\n"
+               "  - `read_captions` with atFrame or fromFrame/toFrame gives the "
+               "viewer-facing caption Cards at that moment, with their timing, "
+               "line count and overflow state.\n"
+               "  - `inspect_item` reports an item's fades and audio state.\n"
+               "  - AND THE RENDERED EDIT IS ON DISK at /work/edit.mp4, with "
+               "ffmpeg and ffprobe available. There is no waveform tool and no "
+               "level meter on this surface, so if you need to know whether a "
+               "sound effect actually lands where you put it, measure it: "
+               "`ffmpeg -ss T -t 0.3 -i /work/edit.mp4 -af volumedetect -f "
+               "null -` reads the level in a window.\n\n"
                "If it is right, submit the export. A further pass is only for "
                "a defect you can NAME — and if you take one, say which frame "
                "you saw it in and what you changed."
@@ -2573,10 +2603,11 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
             # NAMED, NOT SILENT. An agent told nothing would export blind.
             send(_message([{"type": "text", "text":
                             "The edit could not be rendered for you to look "
-                            "at, so you have NOT seen it. Fetch the frames "
-                            "yourself with preview_timeline at %s before you "
-                            "export, and say in your final message that the "
-                            "harness could not show you the edit."
+                            "at, so you have NOT seen it. Scrub it yourself "
+                            "with preview_timeline — %s is a reasonable place "
+                            "to start, and look at whatever else you need — "
+                            "then say in your final message that the harness "
+                            "could not show you the edit."
                             % ", ".join(str(f) for f in _want[:9])}]))
         close()
 
