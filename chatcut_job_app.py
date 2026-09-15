@@ -116,8 +116,15 @@ JSON""",
     # components, labelled with their size band; the JSON carries the WHEN
     # condition each answers, the 37 selection arrows, and props known to render
     # because they are the props that produced the still.
-    .add_local_file(os.path.join(_HERE, "component_sheet.png"),
+    # THE SHEET THE AGENT SEES MUST BE THE SHEET THAT WAS PROVEN. This mounted
+    # `component_sheet.png` — a file from the day before, built before the bake
+    # and before the caption styles. The inventory built from actual renders is
+    # sheet/INVENTORY.png, and it was never wired: the agent was choosing from
+    # a stale picture while the proven one sat on disk beside it.
+    .add_local_file(os.path.join(_HERE, "sheet", "INVENTORY.png"),
                     "/craft/component_sheet.png", copy=True)
+    .add_local_file(os.path.join(_HERE, "sheet", "sheet.json"),
+                    "/craft/component_sheet.json", copy=True)
     .add_local_file(os.path.join(_HERE, "chatcut_catalogue.json"),
                     "/craft/chatcut_catalogue.json", copy=True)
     .add_local_file(os.path.join(_HERE, "turn_clock.py"),
@@ -995,28 +1002,39 @@ def build_system_prompt():
     # actually needs, and they have sat in a document `read_knowledge` was
     # called ZERO times on. In the context, not on the to-do list — the same
     # move as the craft documents above.
+    # BUILT FROM WHAT DREW, not from the old catalogue. `chatcut_catalogue.json`
+    # named 29 components — including SpeechBubble, which is REFUSED and cannot
+    # be placed — and named NONE of the nine caption styles, which is exactly
+    # the set that was built to be offered. So the agent was shown one thing it
+    # could not use and none of the nine it should have picked from.
+    # sheet.json is written by the render check: every entry in it has a real
+    # frame and a WHEN condition, and nothing that failed to draw is in it.
     try:
-        _cat = json.load(open("/craft/chatcut_catalogue.json", encoding="utf-8"))
-        _cond = _cat.get("_conditions") or {}
-        _comp = _cat.get("components") or {}
+        _sh = json.load(open("/craft/component_sheet.json", encoding="utf-8"))
+        _entries = _sh.get("entries") or []
+        if not _entries:
+            raise ValueError("sheet.json carries no entries")
         _lines = ["\n\n===== THE COMPONENT LIBRARY =====\n",
-                  "Every one of these is ALREADY REGISTERED in your project. You "
-                  "place it by assetId and you never author component code.\n",
-                  "/craft/component_sheet.png is one image of all of them — READ "
-                  "IT before you choose, the way you read the source sheet.\n"]
-        for _h, _cs in _cond.items():
-            _lines.append("  %s\n      %s\n" % (
-                _h, ", ".join("%s (%s)" % (c, (_comp.get(c) or {}).get(
-                    "size_band", "?")) for c in _cs)))
-        _arrows = [(c, v["reach_for_it_instead_of"]) for c, v in _comp.items()
-                   if v.get("reach_for_it_instead_of")]
-        if _arrows:
-            _lines.append("\n  REACH FOR IT INSTEAD OF — the catalogue's own "
-                          "discriminators:\n")
-            for _c, _a in sorted(_arrows):
-                _lines.append("      %-18s not: %s\n" % (_c, "; ".join(_a[:4])))
+                  _sh.get("header", "") + "\n",
+                  "Every one is ALREADY REGISTERED in your project. You place it "
+                  "by assetId and you never author component code.\n",
+                  "/craft/component_sheet.png is one image of all %d — READ IT "
+                  "before you choose, the way you read the source sheet. The "
+                  "picture is how you pick; the lines below are its index.\n"
+                  % len(_entries)]
+        _by = {}
+        for _e2 in _entries:
+            _by.setdefault(_e2.get("when", "?"), []).append(_e2)
+        for _h in sorted(_by):
+            _lines.append("  %s\n" % _h)
+            for _e2 in sorted(_by[_h], key=lambda x: x["name"]):
+                _lines.append("      %-22s %-7s %s\n"
+                              % (_e2["name"], _e2.get("size", "?"),
+                                 _e2.get("claim", "")))
         parts.append("".join(_lines))
     except Exception as _e:                                       # noqa: BLE001
+        # ABSENT IS NAMED, NOT SILENT. A library that failed to load and a
+        # library with nothing in it read the same from downstream.
         parts.append("\n\n===== THE COMPONENT LIBRARY : ABSENT (%s) =====\n"
                      "The agent will be choosing from names alone.\n" % _e)
     parts.append(

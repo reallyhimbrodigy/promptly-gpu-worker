@@ -483,6 +483,7 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
                 _ruled[t] = _ruled.get(t, 0) + 1
 
     L += ["## 2. THE GRAPHICS — motion graphics on V2", ""]
+    _settle = []
     n = 0
     for p in rows:
         tr = [t for t in (p.get("treatment") or []) if t != "none"]
@@ -543,6 +544,9 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
               f"    hold          : {p.get('hold_s')}",
               f"    why           : {p.get('why')}",
               ""]
+        # 8 frames past the entrance, or the midpoint on a short graphic —
+        # whichever still lands inside the window.
+        _settle.append(min(f0 + 8, max(f0, (f0 + f1) // 2)))
         for _t in ("text", "card"):
             if _t in tr:
                 _emitted[_t] = _emitted.get(_t, 0) + 1
@@ -691,8 +695,32 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
         L += ["", f"  THE PLAN NAMES {_idx[0]} adds. One edit_item call, "
               f"{_idx[0]} elements.", ""]
     L += ["  If the timeline afterwards holds fewer items than that, the edit "
-          "is incomplete and you are not done.",
-          "", "## 3. WHAT IS NOT IN THIS EDIT", "",
+          "is incomplete and you are not done.", ""]
+
+    # ── THE FRAMES TO REVIEW, CHOSEN HERE ───────────────────────────────────
+    # The agent previewed TWICE — `viewerFrameCount: 16` (silently capped at 9)
+    # and then six hand-picked frames — because nothing told it which moments
+    # mattered. That is two preview calls, two curl batches and two reads for
+    # one review, and it is the same shape as the sfx and item ids: a question
+    # the plan can already answer being handed to the agent to work out.
+    #
+    # The SETTLED frame of a graphic is where it should be judged: a few frames
+    # after its entrance, before its exit, so an entrance animation is not
+    # mistaken for a defect. This file knows every graphic's window, so it
+    # knows those frames.
+    if _settle:
+        _fr = sorted(set(_settle))[:9]      # the viewer takes at most 9
+        L += ["  REVIEW THESE FRAMES — one preview_timeline call, these exact "
+              "numbers:",
+              "      viewerFrames: %s" % json.dumps(_fr),
+              "  They are the SETTLED frames of the graphics above — past each "
+              "entrance and",
+              "  before each exit, so an animation mid-flight is not read as a "
+              "defect. Do not",
+              "  pick your own and do not call preview_timeline twice: it "
+              "returns at most 9",
+              "  frames and these are the %d that carry the placements." % len(_fr), ""]
+    L += ["## 3. WHAT IS NOT IN THIS EDIT", "",
           f"  Exactly {n} motion graphic{'' if n == 1 else 's'}. A second one is "
           f"the thing ruled out.",
           ("  You author no component code and you import no media — both are "
