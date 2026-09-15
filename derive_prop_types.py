@@ -19,8 +19,15 @@ import os
 import re
 import sys
 
-ROOT = ("/Users/zaclibman/promptly-gpu-worker/promptly-gpu-worker/src/remotion"
-        "/src/motion-graphics")
+_SRC = "/Users/zaclibman/promptly-gpu-worker/promptly-gpu-worker/src/remotion/src"
+ROOT = _SRC + "/motion-graphics"
+# THE CAPTION STYLES ARE COMPONENTS TOO. Zac's nine (CleanCut, Cove, Gadzhi,
+# Lumen, Prime, Pulse, Quintessence, TwoTone, TypewriterReveal) live in a
+# sibling tree and take `pages: TikTokPage[]` — the SAME structured-content
+# shape the bake was built for. Mapping them onto ChatCut's 26 presets would
+# have thrown away the word-level motion that makes them Zac's; registering
+# them as components keeps it. So the interface walk covers both trees.
+ROOTS = [ROOT, _SRC + "/captions"]
 
 # TIMING DEFAULTS THAT ARE NOT ZERO. `useMGPhase` computes durationFrames from
 # durationMs; at 0 the component is out of phase before `value` is read, so a
@@ -39,7 +46,8 @@ REAL_DEFAULTS = {"startMs": 0, "durationMs": 4000, "scale": 1,
 
 def _interfaces():
     out = {}
-    for d, _, fs in os.walk(ROOT):
+    for _r in ROOTS:
+      for d, _, fs in os.walk(_r):
         if "types.ts" not in fs:
             continue
         src = open(os.path.join(d, "types.ts"), encoding="utf-8").read()
@@ -52,7 +60,8 @@ def _interfaces():
                 src, re.S):
             out[m.group(1)] = (m.group(2) or "", m.group(3))
     # the shared bases the components extend
-    for extra in ("shared/types.ts", "shared/positioning.ts"):
+    for extra in ("shared/types.ts", "shared/positioning.ts",
+                  "../captions/shared/types.ts"):
         p = os.path.join(ROOT, extra)
         if os.path.exists(p):
             src = open(p, encoding="utf-8").read()
@@ -92,7 +101,8 @@ def _aliases():
     findings and only one of them is about ChatCut.
     """
     out = {}
-    for d, _, fs in os.walk(ROOT):
+    for _r in ROOTS:
+      for d, _, fs in os.walk(_r):
         for f in fs:
             if not f.endswith(".ts") and not f.endswith(".tsx"):
                 continue

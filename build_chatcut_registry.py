@@ -245,13 +245,20 @@ def _param_defaults(code, name):
     if not m:
         # THE THREE THAT TAKE `(props)` DIRECTLY destructure in the body, and
         # their defaults live there instead. Same question, second spelling.
-        m2 = re.search(r"var " + re.escape(name) + r" = \(props\)\s*=>(.*?)\n  \};",
+        # `(props)` OR `(__own)` — the wrap renames an inner parameter that
+        # collides with ChatCut's static `props.X` match, so both spellings
+        # are the same signature. And BOTH EARLY RETURNS MUST RETURN A PAIR:
+        # they returned a bare {} while every caller unpacks two, so the first
+        # component to reach this path died on "not enough values to unpack"
+        # — in the function whose whole job is to survive a missing list.
+        m2 = re.search(r"var " + re.escape(name)
+                       + r" = \((?:props|__own)\)\s*=>(.*?)\n  \};",
                        code, re.S)
         if not m2:
-            return {}
-        m = re.search(r"const \{(.*?)\} = props", m2.group(1), re.S)
+            return {}, {}
+        m = re.search(r"const \{(.*?)\} = (?:props|__own)", m2.group(1), re.S)
         if not m:
-            return {}
+            return {}, {}
     # THE RAW EXPRESSION, NOT ONLY LITERALS. `size = d.size` is a parameter
     # default too, and dropping it because it is not a literal is what left
     # Stamp registered at diameter 0.
@@ -410,7 +417,7 @@ def build(verbose=True):
                 "detail": ", ".join("%s (line %d)" % (x["name"], x["line"])
                                     for x in free)}
             continue
-        read = set(re.findall(r"\bprops\.([A-Za-z_$][\w$]*)", code))
+        read = set(re.findall(r"\bprops\??\.([A-Za-z_$][\w$]*)", code))
         undeclared = sorted(read - set(p["key"] for p in props))
         if undeclared:
             refused[n] = {"reason": "the code reads a prop that cannot be typed",

@@ -26,6 +26,24 @@ CONTROLS = ("size", "case", "where", "colour", "hold_s")
 TO_PROP = {"where": "band", "size": "size", "hold_s": "holdSeconds",
            "colour": "textColor"}
 
+# `colour` IS A TREATMENT, NOT A COLOUR. The planner's field is a closed enum
+# of four semantic tokens — white_on_footage, white_on_black, black_on_white,
+# accent — each naming how the words READ against the picture. `textColor` on
+# the house title is a ChatCut `color` property, which takes a hex. Mapping the
+# name straight across would have posted the string "white_on_footage" into a
+# colour field: a value the schema cannot mean, from a field match that checked
+# names, units and clock and never checked VOCABULARIES.
+#
+# Two of the four need a PLATE behind the words, and TITLE_PROPS has no plate
+# property — text, band, size, holdSeconds, textColor, accentColor and nothing
+# else. So they are refused rather than flattened to their text colour, which
+# would silently drop the thing that makes them legible on a busy frame.
+COLOUR_TOKENS = {
+    "white_on_footage": {"textColor": "#FFFFFF"},
+    "accent": {"textColor": "#C8551F"},          # the video's own accent
+}
+COLOUR_NEEDS_PLATE = {"white_on_black", "black_on_white"}
+
 
 def titles_from(rows):
     """One entry per ruled `text`/`card` beat, carrying its own controls.
@@ -48,6 +66,23 @@ def titles_from(rows):
                 % (p.get("src_t0", -1), "+".join(tr), ", ".join(miss)))
         ctl = {TO_PROP[c]: p[c] for c in CONTROLS if c in TO_PROP}
         ctl["holdSeconds"] = float(ctl["holdSeconds"])
+        _tok = str(p.get("colour") or "").strip()
+        if _tok in COLOUR_NEEDS_PLATE:
+            raise SystemExit(
+                "REFUSING: beat at %.2fs is ruled colour=%s, which puts the "
+                "words on a solid plate so they survive a busy frame. The "
+                "house title component has no plate property, so staging it "
+                "would drop the plate and keep only the text colour — the "
+                "ruling delivered as its own weaker half."
+                % (p.get("src_t0", -1), _tok))
+        if _tok not in COLOUR_TOKENS:
+            raise SystemExit(
+                "REFUSING: beat at %.2fs is ruled colour=%r, which is not one "
+                "of the planner's four tokens %s. An unmapped token posted "
+                "into a ChatCut `color` property is a value the schema cannot "
+                "mean." % (p.get("src_t0", -1), _tok,
+                           sorted(set(COLOUR_TOKENS) | COLOUR_NEEDS_PLATE)))
+        ctl.update(COLOUR_TOKENS[_tok])
         txt = p.get("text_content") or ""
         if str(p.get("case") or "").lower() == "upper":
             txt = txt.upper()

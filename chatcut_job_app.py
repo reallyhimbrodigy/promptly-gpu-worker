@@ -108,6 +108,8 @@ JSON""",
     # streaming ~20KB of JSX as tool arguments. That JSON was 37% of the wall.
     .add_local_file(os.path.join(_HERE, "chatcut_registry.json"),
                     "/craft/chatcut_registry.json", copy=True)
+    .add_local_file(os.path.join(_HERE, "chatcut_registry_baked.json"),
+                    "/craft/chatcut_registry_baked.json", copy=True)
     # THE CATALOGUE — the library the agent SEES before it chooses. A bare enum
     # is a list of words: two rounds read 1-of-29 selected and StatCard x4
     # because the prefix named StatCard and nothing else. One sheet, 26
@@ -825,8 +827,19 @@ def prestage(access_token, title_text, controls=None, source_path=None,
     # exists to remove, and a silent partial registry looks exactly like a
     # complete one.
     registered, reg_failed = {}, {}
+    # THE BAKED REGISTRY, AND THE RIGHT LEVEL OF IT. This read the file and
+    # iterated it directly — but the file is {"components": ..., "refused": ...},
+    # so every iteration handed a two-key envelope where a component was
+    # expected. It also read the UNBAKED registry, whose list components carry
+    # their content as an empty string. Both fixed here, with the same accessor
+    # the render check uses, so the thing that is PROVEN to draw is the thing
+    # that gets staged.
     try:
-        _reg = json.load(open("/craft/chatcut_registry.json", encoding="utf-8"))
+        _bp = "/craft/chatcut_registry_baked.json"
+        _rp = _bp if os.path.exists(_bp) else "/craft/chatcut_registry.json"
+        _raw = json.load(open(_rp, encoding="utf-8"))
+        _reg = _raw.get("components") or _raw
+        print(f"  REGISTRY SOURCE : {_rp}  ({len(_reg)} components)", flush=True)
     except Exception as e:                                        # noqa: BLE001
         _reg = {}
         print(f"  REGISTRY        : ABSENT ({e}) — the agent will have to "
@@ -839,11 +852,17 @@ def prestage(access_token, title_text, controls=None, source_path=None,
                       {"projectId": pid, "name": _n, "code": _c["code"],
                        "width": w, "height": h, "durationInSeconds": 5,
                        "properties": _c["properties"]}, 100 + _i)
+            _ov = _c.get("overrides") or {}
             _v = _find(_r, "validation") or {}
             if _v.get("errors"):
                 reg_failed[_n] = _v["errors"][:2]
             else:
-                registered[_n] = _find(_r, "assetId")
+                # THE SCALAR HALF TRAVELS WITH THE COMPONENT. Structured
+                # content is already inside the code; the overrides are what
+                # propertyOverrides is for, and carrying them here means the
+                # agent never has to re-derive them from a fixture file.
+                registered[_n] = {"assetId": _find(_r, "assetId"),
+                                  "overrides": _ov} if _ov else _find(_r, "assetId")
         except Exception as e:                                    # noqa: BLE001
             reg_failed[_n] = [f"{type(e).__name__}: {e}"][:1]
     if _reg:
@@ -986,7 +1005,7 @@ def build_system_prompt():
               secrets=[modal.Secret.from_name("chatcut-oauth"),
                        modal.Secret.from_name("anthropic-api-key")])
 def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
-         run_id: str = "latest", use_hands: bool = True, plan: str = "",
+         run_id: str = "latest", use_hands: bool = False, plan: str = "",
          think_tokens: int = 0, prestage_title: str = "",
          prestage_controls: str = "", prestage_titles: str = ""):
     t0 = time.time()
@@ -1198,9 +1217,13 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                     "declared. If the plan calls for one, place it by assetId — "
                     "you never author component code:\n  %s\n"
                     % (_libn, ", ".join(
-                        "%s=%s" % (k, (v or "?")[:8])
+                        "%s=%s%s" % (
+                            k,
+                            ((v.get("assetId") if isinstance(v, dict) else v)
+                             or "?")[:8],
+                            ("(+overrides)" if isinstance(v, dict) else ""))
                         for k, v in sorted(
-                            (_stage.get("components") or {}).items())[:40])))
+                            (_stage.get("components") or {}).items())[:60])))
                    if _libn else "")
                 + "\n") if _stage else "")
             + f"===== THE PLAN =====\n{plan}\n===== END OF PLAN =====\n")
@@ -1406,10 +1429,20 @@ def component_render_check(sample_props_json: str = ""):
     """
     import urllib.request
     tok = _access_token()
-    reg = json.load(open("/craft/chatcut_registry.json", encoding="utf-8"))
+    _baked = "/craft/chatcut_registry_baked.json"
+    _path = _baked if os.path.exists(_baked) else "/craft/chatcut_registry.json"
+    reg = json.load(open(_path, encoding="utf-8"))
+    print("  REGISTRY        : %s" % _path, flush=True)
     comps = reg.get("components") or reg
     refused = reg.get("refused") or {}
     samples = json.loads(sample_props_json) if sample_props_json else {}
+    # THE BAKED REGISTRY CARRIES ITS OWN OVERRIDES — the scalar half of the
+    # split. Structured content is already inside the code; what is left is
+    # exactly what propertyOverrides is for, so it travels with the component
+    # rather than being supplied again from a fixture file that could drift.
+    for _n, _sp in comps.items():
+        if _sp.get("overrides"):
+            samples.setdefault(_n, {}).update(_sp["overrides"])
     STAGE = ('const Component = ({ item }) => {\n'
              '  const props = (item && item.props) || {};\n'
              '  const rootStyle = { position: "absolute", inset: 0,\n'
@@ -1520,10 +1553,27 @@ def component_render_check(sample_props_json: str = ""):
             call("edit_item", {"projectId": pid, "adds": [add]}, 15 + i * 9)
             shot_png, uri = shot(16 + i * 9)
             frac, box = (None, None) if shot_png is None else px(base, shot_png)
+            # A COHERENT REGION IS A RENDER, WHATEVER ITS AREA. A flat
+            # 0.2%-of-frame floor called three correct components ABSENT:
+            # TikTokComment at 0.188% (a complete comment row — avatar "KE",
+            # "kellan", "wait how", heart, 98 likes, READ FROM THE FRAME),
+            # RecordingFrame at 0.134% (its screen-chrome border, bbox 88% of
+            # the picture), and caption:Prime at 0.170% (one caption word, the
+            # same shape as eight sibling styles that passed at 0.29-1.17%).
+            # A threshold tight enough to reject a correct implementation is
+            # not a check — third time this lane has paid for that, and the
+            # first two were someone else's code.
+            #
+            # Noise has no bbox worth the name; a render does. So either the
+            # area is unambiguous, or the changed pixels form a region.
+            _px = None if frac is None else frac * 1080 * 1920
+            _bba = 0 if not box else (box[2] - box[0]) * (box[3] - box[1])
+            _drew = frac is not None and (
+                frac > 0.002 or (_px >= 1200 and _bba >= 4000))
             rows[n] = {
                 "content_unavailable": spec.get("content_unavailable") or [],
                 "state": ("FAILED" if frac is None
-                          else "MEASURED" if frac > 0.002 else "ABSENT"),
+                          else "MEASURED" if _drew else "ABSENT"),
                 "how": "own project, own empty frame, pixels diffed",
                 "detail": (f"{frac*100:.3f}% px @f{at}, bbox {box}"
                            if frac is not None else "no frame"),
@@ -1565,6 +1615,134 @@ def component_render_check(sample_props_json: str = ""):
            "attempted": len(comps)}
     RESULTS["render-check"] = out
     return out
+
+
+@app.function(image=IMG, timeout=1800,
+              secrets=[modal.Secret.from_name("chatcut-oauth"),
+                       modal.Secret.from_name("anthropic-api-key")])
+def bake_probe(payload_json: str):
+    """Register ONE component whose ARRAY CONTENT IS BAKED INTO THE CODE, place
+    it over a stage, and diff the pixels against that project's own empty frame.
+
+    THE IDEA BEING TESTED. ChatCut has no array property type, so eight
+    components were registered with their content typed `text` and defaulting
+    to "" — they rendered blank and passed every validator. But the CODE is
+    registered per asset, and the plan knows the items at registration time. So
+    the array does not have to be a property at all: bake it in as a literal
+    and the component gets its content.
+
+    Both halves move together: the read `items: props.items` becomes a literal
+    AND the `items` declaration is dropped, because ChatCut refuses a declared
+    property the code does not read just as firmly as the reverse.
+    """
+    import urllib.request
+    tok = _access_token()
+    spec = json.loads(payload_json)
+    name = spec.get("name") or "baked"
+
+    def call(fn, args, mid):
+        r = mcp_rpc(tok, "tools/call", {"name": fn, "arguments": args}, mid)
+        if r.get("error"):
+            raise RuntimeError(f"{fn}: {r['error']}")
+        out = r.get("result") or {}
+        txt = "".join(c.get("text") or "" for c in (out.get("content") or []))
+        if txt.strip().startswith("{"):
+            try:
+                return json.loads(txt)
+            except Exception:                                  # noqa: BLE001
+                pass
+        return out
+
+    def find(o, k):
+        if isinstance(o, dict):
+            if o.get(k):
+                return o[k]
+            for v in o.values():
+                g = find(v, k)
+                if g:
+                    return g
+        elif isinstance(o, list):
+            for v in o:
+                g = find(v, k)
+                if g:
+                    return g
+        return None
+
+    STAGE = ('const Component = ({ item }) => {\n'
+             '  const props = (item && item.props) || {};\n'
+             '  const rootStyle = { position: "absolute", inset: 0,\n'
+             '    backgroundColor: "#202024" };\n'
+             '  return <div style={rootStyle} />;\n'
+             '};\n')
+    pr = call("create_project", {"name": f"bake {name}",
+                                 "compositionWidth": 1080,
+                                 "compositionHeight": 1920, "fps": 30}, 1)
+    pid = find(pr, "projectId") or re.search(
+        r"/editor/([0-9a-f-]{36})", find(pr, "editorUrl") or "").group(1)
+    st = call("create_motion_graphic_from_code",
+              {"projectId": pid, "name": "stage", "code": STAGE,
+               "width": 1080, "height": 1920, "durationInSeconds": 20,
+               "properties": []}, 2)
+    call("edit_item", {"projectId": pid, "adds": [
+        {"type": "motion-graphic", "assetId": st.get("assetId"),
+         "from": 0, "durationInFrames": 300}]}, 3)
+
+    def shot(at, mid):
+        r = call("preview_timeline", {"projectId": pid, "views": ["viewer"],
+                                      "viewerFrames": [at]}, mid)
+        u = find(r, "uri")
+        return (urllib.request.urlopen(u, timeout=120).read() if u else None)
+
+    eff = {p["key"]: p["defaultValue"] for p in spec["properties"]}
+    eff.update(spec.get("overrides") or {})
+    at = max(1, min(int(eff.get("enterFrames") or 12) + 8,
+                    round((eff.get("durationMs") or 4000) / 1000.0 * 30)
+                    - int(eff.get("exitFrames") or 8) - 4))
+    base = shot(at, 4)
+    a = call("create_motion_graphic_from_code",
+             {"projectId": pid, "name": name, "code": spec["code"],
+              "width": 1080, "height": 1920, "durationInSeconds": 8,
+              "properties": spec["properties"]}, 5)
+    v = find(a, "validation") or {}
+    if v.get("errors") or not a.get("assetId"):
+        return {"name": name, "state": "REFUSED",
+                "detail": str(v.get("errors") or a)[:600]}
+    add = {"type": "motion-graphic", "assetId": a["assetId"],
+           "from": 0, "durationInFrames": 150}
+    if spec.get("overrides"):
+        add["propertyOverrides"] = spec["overrides"]
+    call("edit_item", {"projectId": pid, "adds": [add]}, 6)
+    png = shot(at, 7)
+
+    from PIL import Image, ImageChops
+    import io, base64
+    ia = Image.open(io.BytesIO(base)).convert("RGB")
+    ib = Image.open(io.BytesIO(png)).convert("RGB")
+    d = ImageChops.difference(ia, ib).convert("L").point(
+        lambda q: 255 if q > 12 else 0)
+    frac = sum(d.histogram()[255:]) / float(ia.size[0] * ia.size[1])
+    return {"name": name, "state": "MEASURED" if frac > 0.002 else "ABSENT",
+            "frac_pct": round(frac * 100, 3), "bbox": d.getbbox(),
+            "frame": at, "project": pid,
+            "jpg_b64": base64.b64encode(png).decode()}
+
+
+@app.local_entrypoint()
+def bake(payload_file: str):
+    """Register one baked component and report whether it draws."""
+    from require_detach import require_detach
+    require_detach(why_not="one component, one render — ~90s")
+    import base64
+    r = bake_probe.remote(open(payload_file, encoding="utf-8").read())
+    print("  %-18s %-9s %s%%  bbox %s  @f%s"
+          % (r["name"], r["state"], r.get("frac_pct"), r.get("bbox"),
+             r.get("frame")))
+    if r.get("detail"):
+        print("  detail: %s" % r["detail"])
+    if r.get("jpg_b64"):
+        out = "/tmp/bs/bake_%s.jpg" % r["name"]
+        open(out, "wb").write(base64.b64decode(r["jpg_b64"]))
+        print("  frame -> %s" % out)
 
 
 @app.function(image=IMG, timeout=900,
@@ -1657,7 +1835,7 @@ def sweep(props_file: str = ""):
 @app.local_entrypoint()
 def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
          run_id: str = "", wait: bool = False,
-         model: str = "claude-sonnet-5", use_hands: bool = True,
+         model: str = "claude-sonnet-5", use_hands: bool = False,
          plan_file: str = "", think_tokens: int = 0,
          prestage_title: str = "", prestage_controls: str = "",
          prestage_titles: str = ""):

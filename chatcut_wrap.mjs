@@ -63,7 +63,22 @@ export function destructuredProps(code, name) {
     .filter((s) => /^[A-Za-z_$][\w$]*$/.test(s));
 }
 
+// THE COMPONENT'S NAME IS IN THE CODE, NOT IN THE FILENAME. Gadzhi.tsx
+// exports `GadzhiStyle`, so wrapping by basename emitted `<Gadzhi {...} />`
+// against a declaration that did not exist — an undefined identifier the
+// local scan caught only because it had been taught to ask. Resolve the name
+// from the source, preferring an exact match and falling back to the last
+// declaration that starts with it.
+export function resolveName(code, base) {
+  if (new RegExp("\\bvar " + base + " = \\(").test(code)) return base;
+  const m = [...code.matchAll(
+    new RegExp("^var (" + base + "\\w*) = \\(", "gm"))];
+  if (m.length) return m[m.length - 1][1];
+  return base;
+}
+
 export function wrap(code, name) {
+  name = resolveName(code, name);
   const violations = [];
   // STRIP THE PREVIOUS ADAPTER. port_mg.mjs already appends a
   // `const Component = ({ item })` wrapper; wrapping again would produce
@@ -99,9 +114,61 @@ export function wrap(code, name) {
   //     0.62`, the latin advance from mgTextMetrics), reached when the context
   //     is null. So force that branch instead of rewriting the measurement:
   //     the estimate is the one this codebase already trusts.
+  // THE WHOLE MEASUREMENT, not just the line that names the blocked global.
+  // Replacing only `document.createElement("canvas")` with a throw left the
+  // NEXT line — `_ctx = canvas.getContext("2d")` — still referring to a
+  // binding that no longer existed, and ChatCut refused StickyNotes for an
+  // undefined `canvas`. Setting the context to null forces the em-estimate
+  // branch the corpus already trusts, and the local disappears with it.
+  out = out.replace(
+    /const canvas = document\.createElement\("canvas"\);\s*\n\s*_ctx = canvas\.getContext\("2d"\);/g,
+    '_ctx = null; // no canvas in ChatCut — the em estimate is the fallback');
   out = out.replace(
     /const canvas = document\.createElement\("canvas"\);/g,
-    'throw new Error("no canvas in ChatCut; use the em estimate");');
+    '_ctx = null; // no canvas in ChatCut');
+
+  // 9. SafeImg PROBES AN IMAGE AND CHATCUT HAS NOTHING TO PROBE WITH. It calls
+  //    `new Image()` behind a `setTimeout`, holding the frame open with
+  //    delayRender and bailing out through cancelRender. Measured against the
+  //    validator: setTimeout, requestAnimationFrame and fetch are BLOCKED
+  //    globals; clearTimeout, Image, cancelRender and URL do not exist at all.
+  //    Five components (TweetBubble, ChatThread, EndCard, InstagramComment,
+  //    TikTokComment) were refused for exactly that block.
+  //
+  //    ChatCut's own <Img> does the loading, and the contract asks only that a
+  //    media source be GUARDED. So the probe is replaced by the thing it was
+  //    protecting: render the image when there is one, fall back when there is
+  //    not. Same signature, same job, none of the machinery.
+  {
+    const at = out.indexOf("var SafeImg = (");
+    if (at >= 0) {
+      let i = out.indexOf("{", out.indexOf("=>", at));
+      let depth = 0, end = -1;
+      for (let j = i; j < out.length; j++) {
+        if (out[j] === "{") depth++;
+        else if (out[j] === "}") { depth--; if (depth === 0) { end = j; break; } }
+      }
+      if (end > 0) {
+        const tail = out.indexOf(";", end);
+        out = out.slice(0, at)
+          + "var SafeImg = ({ src, role, fallback = null, label, "
+          + "onUnavailable, ...rest }) => (src ? <Img src={src} {...rest} /> "
+          + ": fallback);"
+          + out.slice(tail + 1);
+      }
+    }
+  }
+
+  // 7c. `globalThis` IS A BLOCKED NAME TOO, and it appears in exactly one
+  //     place across the corpus: a strict-mode feature flag read that is FALSE
+  //     everywhere except a Remotion test harness
+  //     (`typeof globalThis !== "undefined" && globalThis.REMOTION_FIT_STRICT`).
+  //     The read is collapsed to its value here rather than renamed, because
+  //     the flag has no meaning in ChatCut and a renamed `__globalThis` would
+  //     be an undefined identifier one rule later.
+  out = out.replace(
+    /typeof globalThis !== "undefined" && globalThis\.\w+/g, "false");
+  out = out.replace(/\bglobalThis\b/g, "__globalThis");
 
   // 6. loadFont is refused BY NAME even when it is already a local shim.
   out = out.replace(/\bloadFont(\d*)\b/g, "__font$1");
@@ -116,6 +183,36 @@ export function wrap(code, name) {
 
   const props = destructuredProps(out, name);
   if (!props) violations.push(`could not read ${name}'s parameter list`);
+
+  // 10. AN INNER COMPONENT WHOSE PARAMETER IS LITERALLY `props` COLLIDES WITH
+  //     THE CONTRACT. ChatCut matches `props.X` STATICALLY by name, so it
+  //     cannot tell the wrapper's item props from a helper's own parameter.
+  //     ProgressBar takes `(props)` directly and reads `props.width`,
+  //     `props.accentColor`, `props.formatValue` in its body; every one was
+  //     reported as an undeclared item prop, and baking them out of __mapped
+  //     removed the declaration while leaving the read. Rename the inner
+  //     parameter — the collision is the whole problem, and the outer `props`
+  //     identifier the contract demands is untouched.
+  {
+    const re2 = new RegExp("(var " + name + " = \\()props(\\)\\s*=>)");
+    if (re2.test(out)) {
+      const at = out.search(re2);
+      let i = out.indexOf("{", out.indexOf("=>", at));
+      let depth = 0, end = -1;
+      for (let j = i; j < out.length; j++) {
+        if (out[j] === "{") depth++;
+        else if (out[j] === "}") { depth--; if (depth === 0) { end = j; break; } }
+      }
+      if (end > 0) {
+        const body = out.slice(at, end + 1)
+          .replace(re2, "$1__own$2")
+          .replace(/\bprops\??\./g, "__own.")
+          .replace(/=\s*props\b/g, "= __own");
+        out = out.slice(0, at) + body + out.slice(end + 1);
+      }
+    }
+  }
+
 
   const mapped = (props || [])
     .map((p) => `    ${p}: props.${p},`)

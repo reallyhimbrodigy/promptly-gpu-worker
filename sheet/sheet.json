@@ -1,5 +1,81 @@
 {
+ "header": "These are the components that RENDER. Each picture is a real ChatCut frame of that component, not a mock. Pick by what the moment needs. THEY ARE NOT RANKED and the order carries no meaning. USING ONE TWICE IS FINE when two moments do the same job. A component that is not on this sheet is not available.",
  "entries": [
+  {
+   "name": "AnnotationArrow",
+   "frame": "AnnotationArrow.jpg",
+   "when": "WHEN A REGION OF THE FRAME NEEDS POINTING AT",
+   "size": "SMALL",
+   "claim": "Look at THIS thing on screen.",
+   "what": "hand-drawn marker arrow (chevron head, jitter, default #C8551F) drawing on like a live pen, retracting on exit",
+   "props": [
+    [
+     "",
+     "{ \"start\": {\"x\": 0.0-1.0, \"y\": 0.0-1.0}, \"end\": {\"x\": 0.0-1.0, \"y\": 0.0-1.0}, \"pathType\"?: \"straight\" | \"curved-arc\" | \"j-shape\" | \"custom\", \"customPath\"?: \"M ...\", \"color\"?: \"#hex\", \"strokeWidth\"?: number }"
+    ]
+   ],
+   "evidence": "0.500% px @f30, bbox (213, 544, 639, 976)"
+  },
+  {
+   "name": "BarRace",
+   "frame": "BarRace.jpg",
+   "when": "WHEN A NUMBER LANDS",
+   "size": "MEDIUM",
+   "claim": "Watch these values race \u2014 the biggest wins.",
+   "what": "a centered stack of 2\u20134 horizontal bars growing to lengths proportional to their values; each has a caps label and a value counting up at the bar's tip, and the highest flips to gold with a crown as it pulls ahead",
+   "props": [
+    [
+     "",
+     "{ \"bars\": [{\"label\":\"Our team\",\"value\":40},{\"label\":\"Competitor\",\"value\":28}], \"mode\"?: \"compare\"|\"race\", \"valueSuffix\"?: \"K\"|\"%\"|\"+\", \"accentColor\"?: \"#FFB23E\", \"anchor\"?: \"upper_third_safe\"|\"center\"|\"lower_third_safe\" }"
+    ]
+   ],
+   "evidence": "2.973% px @f30, bbox (160, 521, 590, 894)"
+  },
+  {
+   "name": "ChatThread",
+   "frame": "ChatThread.jpg",
+   "when": "WHEN SOCIAL PROOF OR A MESSAGE IS QUOTED",
+   "size": "LARGE",
+   "claim": "This is the literal exchange \u2014 both sides.",
+   "what": "full iMessage screen: header, stacked bubbles (outgoing #0A84FF right, incoming #26252A left), typing indicators resolving into messages, home indicator. ~820\u00d71320px",
+   "props": [
+    [
+     "",
+     "{ \"messages\": [{\"sender\": \"me\" | \"them\", \"text\": \"...\", \"typingMs\"?: int, \"holdMs\"?: int}, ...], \"header\"?: {\"name\": \"Sarah\", \"subtitle\"?: \"Active 2m ago\"}, \"incomingColor\"?: \"#hex\", \"outgoingColor\"?: \"#hex\" }"
+    ]
+   ],
+   "evidence": "40.647% px @f22, bbox (160, 220, 721, 1236)"
+  },
+  {
+   "name": "DropBanner",
+   "frame": "DropBanner.jpg",
+   "when": "WHEN STEPS OR ITEMS ARE ENUMERATED",
+   "size": "TOP-PINNED",
+   "claim": "Here's the framework, one point at a time.",
+   "what": "a full-width banner that drops from the top with a bounce, opens on a numbered-circle intro (connected 1-2-3 rings), then scrolls through one captioned point per beat, each point's words lighting grey\u2192black as if spoken",
+   "props": [
+    [
+     "",
+     "{ \"title\": \"The 3-Part Hook\", \"subtitle\"?: \"Why people keep watching\", \"count\"?: 3, \"points\"?: [{\"title\": \"1. The Missing Piece\", \"caption\": \"Tell them what they don't know yet.\"}], \"accentColor\"?: \"#F5A11E\" }"
+    ]
+   ],
+   "evidence": "47.030% px @f32, bbox (0, 0, 882, 742)"
+  },
+  {
+   "name": "DropCard",
+   "frame": "DropCard.jpg",
+   "when": "WHEN STEPS OR ITEMS ARE ENUMERATED",
+   "size": "TOP-PINNED",
+   "claim": "Here's the framework, on a clean card.",
+   "what": "the floating-card sibling of DropBanner: a rounded card inset from the edges drops in near the top with a numbered dashed stepper (a short label under each circle), then scrolls one captioned point per beat with words lighting grey\u2192black",
+   "props": [
+    [
+     "",
+     "{ \"title\": \"Hook Framework\", \"titleLead\"?: \"3\", \"steps\"?: [{\"label\": \"Hook\"}, {\"label\": \"Tension\"}, {\"label\": \"Payoff\"}], \"points\"?: [{\"title\": \"1. The Missing Piece\", \"caption\": \"Tell them what they don't know yet.\"}], \"accentColor\"?: \"#F5A11E\" }"
+    ]
+   ],
+   "evidence": "39.704% px @f32, bbox (41, 73, 839, 768)"
+  },
   {
    "name": "EditorialQuote",
    "frame": "EditorialQuote.jpg",
@@ -31,6 +107,21 @@
    "evidence": "0.330% px @f20, bbox (187, 696, 500, 750)"
   },
   {
+   "name": "InstagramComment",
+   "frame": "InstagramComment.jpg",
+   "when": "WHEN SOCIAL PROOF OR A MESSAGE IS QUOTED",
+   "size": "MEDIUM",
+   "claim": "This IG comment exists \u2014 receipts.",
+   "what": "IG comment row: avatar, bold username, single-line comment, timestamp, heart + like count",
+   "props": [
+    [
+     "",
+     "{ \"username\": \"sarahleeofficial\", \"comment\": \"obsessed with this \ud83d\udd25\", \"timestamp\"?: \"2h\", \"likes\"?: int }"
+    ]
+   ],
+   "evidence": "1.922% px @f20, bbox (188, 684, 693, 762)"
+  },
+  {
    "name": "MouseDrag",
    "frame": "MouseDrag.jpg",
    "when": "WHEN THE SCREEN OR APP IS THE SUBJECT",
@@ -46,6 +137,70 @@
    "evidence": "1.585% px @f38, bbox (584, 814, 882, 915)"
   },
   {
+   "name": "Notification",
+   "frame": "Notification.jpg",
+   "when": "WHEN SOCIAL PROOF OR A MESSAGE IS QUOTED",
+   "size": "TOP-PINNED",
+   "claim": "This phone event actually happened \u2014 here's the banner.",
+   "what": "platform banner drops from the top with spring bounce; up to 3 stack, staggered ~400ms",
+   "props": [
+    [
+     "",
+     "{ \"notifications\": [{\"app\": \"apple-pay\" | \"venmo\" | \"stripe\" | \"imessage\" | \"instagram\" | \"email\" | \"bank\", \"appName\": \"Venmo\", \"title\": \"Sarah Lee paid you\", \"body\": \"$200 \u2014 for dinner\", \"timestamp\"?: \"now\"}, ...], \"platform\"?: \"ios\" | \"android\" }"
+    ]
+   ],
+   "evidence": "0.840% px @f22, bbox (20, 20, 699, 148)"
+  },
+  {
+   "name": "PillCluster",
+   "frame": "PillCluster.jpg",
+   "when": "WHEN STEPS OR ITEMS ARE ENUMERATED",
+   "size": "SMALL",
+   "claim": "Here are the tags for this idea.",
+   "what": "a tidy cluster of rounded keyword pills that spring-pop in together as a staggered cascade, with every few pills accent-filled for rhythm",
+   "props": [
+    [
+     "",
+     "{ \"tags\": [\"mindset\",\"focus\",\"discipline\"], \"accentColor\"?: \"#4F9DF7\", \"accentEvery\"?: 3, \"glass\"?: true, \"anchor\"?: \"upper_third_safe\"|\"center\"|\"lower_third_safe\" }"
+    ]
+   ],
+   "evidence": "2.482% px @f32, bbox (66, 675, 879, 775)"
+  },
+  {
+   "name": "PillMarquee",
+   "frame": "PillMarquee.jpg",
+   "when": "WHEN STEPS OR ITEMS ARE ENUMERATED",
+   "size": "FULL-WIDTH",
+   "claim": "A living stream of tags for this topic.",
+   "what": "rows of rounded keyword pills scrolling horizontally across a soft band, alternating direction per row with edge fades, optionally each a different palette hue",
+   "props": [
+    [
+     "",
+     "{ \"pills\": [\"mindset\",\"focus\",\"discipline\",\"habits\",\"growth\"], \"rows\"?: 3, \"hashtag\"?: true, \"colorMode\"?: \"single\"|\"varied\", \"accentColor\"?: \"#FF6A3D\", \"offsetY\"?: 0 }"
+    ]
+   ],
+   "evidence": "8.184% px @f26, bbox (8, 656, 873, 912)"
+  },
+  {
+   "name": "ProgressBar",
+   "frame": "ProgressBar.jpg",
+   "when": "WHEN A NUMBER LANDS",
+   "size": "SMALL",
+   "claim": "Here is the quantitative ARC \u2014 watch it advance.",
+   "what": "horizontal bar, gray track, white fill, optional gold eyebrow label (#D4A12A); fill expands 0 \u2192 target with the number counting up; milestone ticks light as crossed",
+   "props": [
+    [
+     "value mode",
+     "{ \"value\": 47000, \"total\": 100000, \"label\"?: \"FUNDRAISING GOAL\", \"fillColor\"?: \"#hex\", \"accentColor\"?: \"#hex\" }"
+    ],
+    [
+     "percentage mode",
+     "{ \"percentage\": 73, \"label\"?: \"COMPLETE\", \"fillColor\"?: \"#hex\", \"accentColor\"?: \"#hex\" }"
+    ]
+   ],
+   "evidence": "2.978% px @f48, bbox (160, 624, 719, 828)"
+  },
+  {
    "name": "PullQuote",
    "frame": "PullQuote.jpg",
    "when": "WHEN SOMETHING IS NAMED OR REVEALED",
@@ -58,7 +213,37 @@
      "{ \"text\": \"Most people quit right before the breakthrough\", \"keywords\"?: [\"quit\",\"breakthrough\"], \"highlightStyle\"?: \"color\"|\"bar\"|\"scale\", \"keywordColor\"?: \"#FFD60A\", \"fontKey\"?: \"anton\", \"anchor\"?: \"upper_third_safe\"|\"center\"|\"lower_third_safe\" }"
     ]
    ],
-   "evidence": "2.340% px @f48, bbox (176, 672, 705, 776)"
+   "evidence": "2.914% px @f48, bbox (176, 664, 707, 781)"
+  },
+  {
+   "name": "RankedList",
+   "frame": "RankedList.jpg",
+   "when": "WHEN STEPS OR ITEMS ARE ENUMERATED",
+   "size": "MEDIUM",
+   "claim": "The ranked list, in order.",
+   "what": "a clean ordered Top-N: numbered badges + labels reveal top\u2192bottom, each badge popping a beat before its label wipes in, a hairline rule under each row, #1 subtly highlighted",
+   "props": [
+    [
+     "",
+     "{ \"items\": [{\"label\": \"Hook them fast\", \"value\"?: \"98%\", \"rank\"?: \"1\"}], \"order\"?: \"topDown\"|\"bottomUp\", \"highlightTop\"?: true, \"accentColor\"?: \"#FFC53D\", \"anchor\"?: \"upper_third_safe\"|\"center\"|\"lower_third_safe\" }"
+    ]
+   ],
+   "evidence": "2.550% px @f28, bbox (24, 435, 863, 776)"
+  },
+  {
+   "name": "RecordingFrame",
+   "frame": "RecordingFrame.jpg",
+   "when": "WHEN THE SCREEN OR APP IS THE SUBJECT",
+   "size": "LARGE",
+   "claim": "This is RAW \u2014 caught, unfiltered.",
+   "what": "thin red inset border (~6-8px, default #C5432E), optional live corner annotations (timestamp, word count, WPM), optional slow scan-line",
+   "props": [
+    [
+     "",
+     "{ \"accentColor\"?: \"#hex\", \"showScanLine\"?: bool, \"scanLineColor\"?: \"#hex\", \"annotations\"?: [{\"label\": \"REC\", \"value\": \"timestamp\", \"corner\": \"top-left\"}, {\"label\": \"WPM\", \"value\": \"wpm\", \"corner\": \"bottom-right\"}] }"
+    ]
+   ],
+   "evidence": "0.134% px @f16, bbox (32, 33, 848, 1536)"
   },
   {
    "name": "Reticle",
@@ -134,9 +319,175 @@
     ]
    ],
    "evidence": "3.467% px @f56, bbox (225, 582, 656, 850)"
+  },
+  {
+   "name": "StickyNotes",
+   "frame": "StickyNotes.jpg",
+   "when": "WHEN STEPS OR ITEMS ARE ENUMERATED",
+   "size": "TOP-PINNED",
+   "claim": "Three parallel items worth pinning.",
+   "what": "same component as the sticky_note text overlay: three notes slamming into the upper third",
+   "props": [
+    [
+     "",
+     "{ \"notes\": [{\"text\": \"MOVE FAST\", \"color\": \"#FFE066\", \"rotation\": -3}, {\"text\": \"BREAK STUFF\", \"color\": \"#FFB3C1\", \"rotation\": 1}, {\"text\": \"FIX LATER\", \"color\": \"#A8E6CF\", \"rotation\": 4}] }"
+    ]
+   ],
+   "evidence": "46.750% px @f8, bbox (0, 0, 882, 740)"
+  },
+  {
+   "name": "TikTokComment",
+   "frame": "TikTokComment.jpg",
+   "when": "WHEN SOCIAL PROOF OR A MESSAGE IS QUOTED",
+   "size": "MEDIUM",
+   "claim": "This TikTok comment exists.",
+   "what": "TikTok comment row in TikTok's specific UI",
+   "props": [
+    [
+     "",
+     "{ \"username\": \"@username\", \"comment\": \"this is so real omg\", \"likes\"?: int }"
+    ]
+   ],
+   "evidence": "0.188% px @f20, bbox (188, 696, 696, 744)"
+  },
+  {
+   "name": "Timeline",
+   "frame": "Timeline.jpg",
+   "when": "WHEN TIME OR SEQUENCE IS THE STORY",
+   "size": "MEDIUM",
+   "claim": "Here's the PROCESS, step by step.",
+   "what": "a vertical rail of numbered station-nodes with a label card beside each; an accent fill travels node\u2192node and a comet head rides it, each station popping active as the fill docks",
+   "props": [
+    [
+     "",
+     "{ \"steps\": [{\"label\": \"Research\", \"description\"?: \"Find the real problem\"}], \"accentColor\"?: \"#hex\", \"anchor\"?: \"upper_third_safe\"|\"center\"|\"lower_third_safe\" }"
+    ]
+   ],
+   "evidence": "12.836% px @f26, bbox (137, 466, 731, 934)"
+  },
+  {
+   "name": "TimelineRoadmap",
+   "frame": "TimelineRoadmap.jpg",
+   "when": "WHEN TIME OR SEQUENCE IS THE STORY",
+   "size": "MEDIUM",
+   "claim": "Here's the journey, stage by stage.",
+   "what": "a winding S-curve \"road\" of numbered stations with a comet that travels the path, each station popping active with its label + time sublabel as the comet docks (the scenic-route variant of Timeline)",
+   "props": [
+    [
+     "",
+     "{ \"steps\": [{\"label\": \"Discovery\", \"sublabel\"?: \"Week 1\"}, {\"label\": \"Launch\", \"sublabel\"?: \"Week 6\"}], \"accentColor\"?: \"#hex\", \"anchor\"?: \"upper_third_safe\"|\"center\"|\"lower_third_safe\" }"
+    ]
+   ],
+   "evidence": "2.728% px @f26, bbox (167, 262, 655, 1092)"
+  },
+  {
+   "name": "TweetBubble",
+   "frame": "TweetBubble.jpg",
+   "when": "WHEN SOCIAL PROOF OR A MESSAGE IS QUOTED",
+   "size": "MEDIUM",
+   "claim": "This specific tweet exists.",
+   "what": "Twitter/X post card: avatar, name + handle, optional verified check, body, engagement stats ticking up on entrance",
+   "props": [
+    [
+     "",
+     "{ \"name\": \"Elon Musk\", \"handle\": \"@elonmusk\", \"text\": \"Tweet body content here.\", \"verified\"?: bool, \"stats\"?: {\"replies\": int, \"reposts\": int, \"likes\": int, \"views\": int}, \"darkMode\"?: bool }"
+    ]
+   ],
+   "evidence": "5.683% px @f20, bbox (185, 641, 696, 801)"
+  },
+  {
+   "name": "caption:CleanCut",
+   "frame": "caption:CleanCut.jpg",
+   "when": "WHEN THE VIDEO IS CAPTIONED",
+   "size": "FULL-WIDTH",
+   "claim": "",
+   "what": "one of the nine caption styles \u2014 the typography, its animation and its keyword treatment. One per video.",
+   "props": [],
+   "evidence": "0.586% px @f8, bbox (337, 745, 544, 835)"
+  },
+  {
+   "name": "caption:Cove",
+   "frame": "caption:Cove.jpg",
+   "when": "WHEN THE VIDEO IS CAPTIONED",
+   "size": "FULL-WIDTH",
+   "claim": "",
+   "what": "one of the nine caption styles \u2014 the typography, its animation and its keyword treatment. One per video.",
+   "props": [],
+   "evidence": "0.286% px @f8, bbox (201, 1168, 376, 1232)"
+  },
+  {
+   "name": "caption:Gadzhi",
+   "frame": "caption:Gadzhi.jpg",
+   "when": "WHEN THE VIDEO IS CAPTIONED",
+   "size": "FULL-WIDTH",
+   "claim": "",
+   "what": "one of the nine caption styles \u2014 the typography, its animation and its keyword treatment. One per video.",
+   "props": [],
+   "evidence": "0.557% px @f8, bbox (70, 1176, 312, 1235)"
+  },
+  {
+   "name": "caption:Lumen",
+   "frame": "caption:Lumen.jpg",
+   "when": "WHEN THE VIDEO IS CAPTIONED",
+   "size": "FULL-WIDTH",
+   "claim": "",
+   "what": "one of the nine caption styles \u2014 the typography, its animation and its keyword treatment. One per video.",
+   "props": [],
+   "evidence": "0.367% px @f8, bbox (215, 1168, 384, 1232)"
+  },
+  {
+   "name": "caption:Prime",
+   "frame": "caption:Prime.jpg",
+   "when": "WHEN THE VIDEO IS CAPTIONED",
+   "size": "FULL-WIDTH",
+   "claim": "",
+   "what": "one of the nine caption styles \u2014 the typography, its animation and its keyword treatment. One per video.",
+   "props": [],
+   "evidence": "0.170% px @f8, bbox (280, 1184, 392, 1232)"
+  },
+  {
+   "name": "caption:Pulse",
+   "frame": "caption:Pulse.jpg",
+   "when": "WHEN THE VIDEO IS CAPTIONED",
+   "size": "FULL-WIDTH",
+   "claim": "",
+   "what": "one of the nine caption styles \u2014 the typography, its animation and its keyword treatment. One per video.",
+   "props": [],
+   "evidence": "1.169% px @f8, bbox (217, 1160, 671, 1240)"
+  },
+  {
+   "name": "caption:Quintessence",
+   "frame": "caption:Quintessence.jpg",
+   "when": "WHEN THE VIDEO IS CAPTIONED",
+   "size": "FULL-WIDTH",
+   "claim": "",
+   "what": "one of the nine caption styles \u2014 the typography, its animation and its keyword treatment. One per video.",
+   "props": [],
+   "evidence": "2.000% px @f8, bbox (297, 1053, 604, 1278)"
+  },
+  {
+   "name": "caption:TwoTone",
+   "frame": "caption:TwoTone.jpg",
+   "when": "WHEN THE VIDEO IS CAPTIONED",
+   "size": "FULL-WIDTH",
+   "claim": "",
+   "what": "one of the nine caption styles \u2014 the typography, its animation and its keyword treatment. One per video.",
+   "props": [],
+   "evidence": "1.021% px @f8, bbox (262, 704, 544, 787)"
+  },
+  {
+   "name": "caption:TypewriterReveal",
+   "frame": "caption:TypewriterReveal.jpg",
+   "when": "WHEN THE VIDEO IS CAPTIONED",
+   "size": "FULL-WIDTH",
+   "claim": "",
+   "what": "one of the nine caption styles \u2014 the typography, its animation and its keyword treatment. One per video.",
+   "props": [],
+   "evidence": "0.351% px @f8, bbox (239, 1168, 384, 1231)"
   }
  ],
  "rendered_but_unconditioned": [
+  "EndCard",
   "NamePlate"
  ]
 }

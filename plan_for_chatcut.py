@@ -215,7 +215,16 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
     # do the thing the pipeline had ruled, and the export came back without
     # them. Not an omission in the wiring: an instruction to skip.
     _spec_fams = {str(f).lower() for f in ((led.get("spec") or {}).get("families") or [])}
-    _wants_captions = "caption" in _spec_fams
+    # AND `families` IS NULL ON A full_edit. Keying only off the spec's family
+    # list answered "caption" correctly for a targeted_change and WRONGLY for
+    # every full edit — where families is None by construction and captions are
+    # ruled by the brief, not by a scope list. Caught before spending a run:
+    # the plan would have said NO CAPTIONS on a ledger showing
+    # caption_composited=true, 29 pages, 85 words, style TwoTone. The second
+    # signal is the pipeline's OWN RENDER: if its edit burned captions, the
+    # ChatCut edit of the same ruling carries them too.
+    _wants_captions = ("caption" in _spec_fams
+                       or bool(led.get("caption_composited")))
     # DROPPED IS NOT OMITTED. Refusing outright is right when an unmapped family
     # would reach the agent as prose to reconcile. But a ruling this pipeline
     # made and this surface cannot execute is a FACT about the run, and burying
@@ -341,12 +350,39 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
           f"  footage and is dropped because an edit ENDS ON THE LAST THING "
           f"WORTH SEEING.", ""]
 
+    # EVERY RULING IS ACCOUNTED FOR OR THE PLAN REFUSES TO EXIST.
+    #
+    # The loop below used to emit ONE GRAPHIC PER TREATED BEAT whatever the
+    # beat was ruled, so a beat ruled `text+card+sfx` produced a title and the
+    # card and the sfx simply disappeared. Measured on the blue-shirt edit:
+    # the pipeline ruled 14 placements — text 7, cutaway 3, sfx 2, zoom 1,
+    # card 1 — and the plan carried 7. Three cutaways were NAMED as dropped
+    # because cutaway is unverified; the other four vanished in silence,
+    # including a StatCard whose hero was the video's own closing line.
+    #
+    # And the PLACEMENTS gate could not see it: it compares the plan's own
+    # `planned_adds` against what the agent built, so it confirmed 8 of 8 while
+    # the plan had already lost half the rulings. The check sat downstream of
+    # the loss — the same shape as the caption contradiction.
+    #
+    # So the accounting is kept here and reconciled at the end. A ruling that
+    # does not reach the plan RAISES, exactly like the two clock refusals: a
+    # placement with nowhere to land is not a smaller edit, it is an edit
+    # nobody ruled.
+    _ruled, _emitted = {}, {}
+    for p in rows:
+        for t in (p.get("treatment") or []):
+            if t != "none":
+                _ruled[t] = _ruled.get(t, 0) + 1
+
     L += ["## 2. THE GRAPHICS — motion graphics on V2", ""]
     n = 0
     for p in rows:
         tr = [t for t in (p.get("treatment") or []) if t != "none"]
         if not tr:
             continue
+        if "text" not in tr and "card" not in tr:
+            continue          # zoom/sfx-only beats are emitted in their own pass
         n += 1
         _tl0 = _to_timeline(p["src_t0"])
         _tl1 = _to_timeline(max(p["src_t0"], p["src_t1"] - 1.0 / fps))
@@ -400,6 +436,81 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
               f"    hold          : {p.get('hold_s')}",
               f"    why           : {p.get('why')}",
               ""]
+        for _t in ("text", "card"):
+            if _t in tr:
+                _emitted[_t] = _emitted.get(_t, 0) + 1
+        if "card" in tr:
+            L += [f"    THIS BEAT IS ALSO RULED `card`: {p.get('card_condition')!r}",
+                  f"      hero        : {p.get('card_hero')!r}",
+                  f"      label       : {p.get('card_label')!r}",
+                  f"    The card and the title are ONE placement here — the "
+                  f"component carries both.", ""]
+    # ── ZOOM AND SFX ARE NOT GRAPHICS, AND WERE NEVER EMITTED AT ALL ──────
+    # FAMILY_MAP carries a VERIFIED primitive for each: zoom is an effect ON a
+    # clip (`builtin:zoom`, targetItemId), sfx is an audio item whose assetId
+    # is `library:sound:<id>`. Both were observed live. The graphics loop above
+    # could not express either, so both fell out of every plan in silence while
+    # the map said they were ready.
+    _zoom_rows = [q for q in rows if "zoom" in (q.get("treatment") or [])]
+    if _zoom_rows:
+        L += ["## 2b. THE ZOOMS — an effect ON the video item, not an item", ""]
+        for q in _zoom_rows:
+            _t0 = _to_timeline(q["src_t0"])
+            if _t0 is None:
+                raise Incomplete(
+                    "a zoom is ruled at source %.2fs, which the cut REMOVED."
+                    % q["src_t0"])
+            _gi = _idx[0]
+            _idx[0] += 1
+            L += ["  edit_item adds[%d]:" % _gi,
+                  "    type                   : effect",
+                  "    assetId                : builtin:zoom",
+                  "    targetItemId           : the id of the VIDEO item "
+                  "covering timeline frame %d — read it back from the adds you "
+                  "just made" % int(round(_t0 * fps)),
+                  '    propertyOverrides      : {"magnification": 1.12, '
+                  '"shape": "%s"}' % (q.get("zoom_arc") or "payoff"),
+                  "    why                    : %s" % q.get("why"), ""]
+            _emitted["zoom"] = _emitted.get("zoom", 0) + 1
+
+    _sfx_rows = [q for q in rows if "sfx" in (q.get("treatment") or [])]
+    if _sfx_rows:
+        L += ["## 2c. THE SOUND EFFECTS — audio items on their own track", ""]
+        for q in _sfx_rows:
+            _t0 = _to_timeline(q["src_t0"])
+            if _t0 is None:
+                raise Incomplete(
+                    "a sound effect is ruled at source %.2fs, which the cut "
+                    "REMOVED." % q["src_t0"])
+            _gi = _idx[0]
+            _idx[0] += 1
+            L += ["  edit_item adds[%d]:" % _gi,
+                  "    type                   : audio",
+                  '    assetId                : library:sound:<id> — resolve '
+                  'the id ONCE with browse_library category="sound-effects" '
+                  'searching %r' % (q.get("sfx_name") or "the beat"),
+                  "    from                   : %d" % int(round(_t0 * fps)),
+                  "    NOTE: library sounds REFUSE validateOnly by design — "
+                  "commit them, do not dry-run them.",
+                  "    why                    : %s" % q.get("why"), ""]
+            _emitted["sfx"] = _emitted.get("sfx", 0) + 1
+
+    # ── THE RECONCILIATION. Loud, by name, or the plan does not exist. ──────
+    _lost = {f: _ruled[f] - _emitted.get(f, 0) for f in _ruled
+             if f not in dropped and _ruled[f] - _emitted.get(f, 0) > 0}
+    if _lost:
+        raise Incomplete(
+            "THESE RULINGS DO NOT REACH THE PLAN: %s.\n"
+            "  Ruled %s, emitted %s, dropped-and-named %s.\n"
+            "  A placement that vanishes here is not a smaller edit — it is an "
+            "edit nobody ruled, delivered as its own weaker half with every "
+            "downstream gate green. The PLACEMENTS gate cannot catch it: it "
+            "counts the PLAN's own adds, so it confirms 8 of 8 while the plan "
+            "has already lost half the rulings."
+            % (", ".join("%s x%d" % (f, k) for f, k in sorted(_lost.items())),
+               dict(sorted(_ruled.items())), dict(sorted(_emitted.items())),
+               sorted(dropped)))
+
     if dropped:
         # DROPPED IS NOT OMITTED. The pipeline ruled these and this surface has
         # no verified primitive, so they are removed from the instructions AND
@@ -423,49 +534,51 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
            "already done." if staged else ""),
           "  No movement, no sound, no b-roll, no stock media."]
     if _wants_captions:
+        _cstyle = ((led.get("caption_render") or {}).get("style")
+                   or "CleanCut")
+        _cpages = (led.get("caption_render") or {}).get("pages")
+        _cframes = int(round(_timeline_end * fps))
+        _gi = _idx[0]
+        _idx[0] += 1
         L += ["  (Captions ARE in this edit — see the section below.)",
-              "", "## 4. THE CAPTIONS", "",
-              "  The brief asked for captions and the pipeline ruled them. They "
-              "are NOT items,",
-              "  so they are not in the adds above and they do not count toward "
-              "the placement",
-              "  total. They are their own surface, and it OWNS THE TEXT: "
-              "ChatCut transcribes",
-              "  the timeline itself and returns Cards keyed in TIMELINE FRAMES. "
-              "You do not",
-              "  supply words or times.",
+              "", "## 4. THE CAPTIONS — a COMPONENT, not ChatCut's preset", "",
+              "  The pipeline ruled captions and chose the style %r." % _cstyle,
               "",
-              "    edit_captions action:\"enable\"",
-              "        -> transcribes every audible source and builds the Cards",
-              "    read_captions",
-              "        -> the Cards and the `revision` the next call needs",
-              "    edit_captions action:\"set_max_characters\"",
-              "        json:{\"scope\":\"all\",\"value\":<chars>,\"revision\":\"<from "
-              "read_captions>\"}",
+              "  ChatCut's own caption surface has 26 presets of its own and "
+              "none of them is",
+              "  this one. Our nine styles are Remotion components with "
+              "word-level motion — the",
+              "  typography, the per-word timing, the keyword treatment — and "
+              "mapping them onto",
+              "  someone else's presets throws away exactly the part that "
+              "makes them ours. So a",
+              "  caption style is REGISTERED AS A COMPONENT like every other, "
+              "with its pages",
+              "  baked into the code at registration, and PLACED AS ONE ITEM "
+              "over the whole",
+              "  timeline. Verified live 2026-09-14: TwoTone rendered "
+              "\"BEING A\" white over",
+              "  \"CONTENT\" in its gold accent, its own drop shadow intact.",
               "",
-              "  VERIFIED LIVE 2026-09-14: enable produced 42 Cards on a "
-              "2148-frame timeline,",
-              "  then max characters 14 and a preset, composed and read back off "
-              "the rendered frame.",
+              "  edit_item adds[%d]:" % _gi,
+              "    type                   : motion-graphic",
+              "    assetId                : the `caption:%s` assetId listed in "
+              "your instructions" % _cstyle,
+              "    from                   : 0",
+              "    durationInFrames       : %d   (the whole timeline — one "
+              "item, %s pages inside it)" % (_cframes, _cpages or "all"),
+              "    (omit trackId — captions sit ABOVE the graphics)",
               "",
-              "  DO NOT PICK A STYLE PRESET. Our nine caption styles (CleanCut, "
-              "Gadzhi, Prime,",
-              "  Cove, Lumen, Pulse, Quintessence, TwoTone, TypewriterReveal) "
-              "are Remotion",
-              "  components with their own word-level motion and they do not "
-              "transfer. ChatCut",
-              "  has 26 presets of its own and the mapping between the two "
-              "catalogues is a TASTE",
-              "  CALL NOBODY HAS MADE. Leave the default (plain: Inter, white) — "
-              "the brief asked",
-              "  for READABLE, and plain is readable. Choosing one here would be "
-              "inventing a",
-              "  ruling the pipeline did not make."]
+              "  DO NOT call edit_captions. That surface would transcribe the "
+              "audio again and",
+              "  render ChatCut's typography over the top of ours.",
+              ""]
+        _emitted["caption"] = _emitted.get("caption", 0) + 1
     else:
-        L += ["  NO CAPTIONS. The spec did not rule them. Captions are not items "
-              "in ChatCut —",
-              "  they are their own surface — so do not go looking for a caption "
-              "track either."]
+        L += ["  NO CAPTIONS. The spec did not rule them. Captions are not "
+              "items in ChatCut —",
+              "  they are their own surface — so do not go looking for a "
+              "caption track either."]
     L += [""]
     return "\n".join(L)
 

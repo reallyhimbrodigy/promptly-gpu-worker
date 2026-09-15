@@ -68,6 +68,21 @@ def build(out_dir):
         if not os.path.exists(path):
             print("  %-18s MEASURED BUT NO FRAME ON DISK — not offered" % n)
             continue
+        # A CAPTION STYLE IS A COMPONENT ON THIS SHEET TOO. Zac's nine are
+        # registered by the same route as the rest — pages baked, scalars as
+        # properties — so they appear beside them with their own condition
+        # rather than in a parallel list. Their WHEN is not in the motion-
+        # graphics knowledge file, so it is stated here: a caption style is
+        # chosen per video, one of nine, and the choice is a voice decision.
+        if n.startswith("caption:"):
+            sheet.append({"name": n, "frame": os.path.basename(path),
+                          "when": "WHEN THE VIDEO IS CAPTIONED",
+                          "size": "FULL-WIDTH", "claim": "",
+                          "what": "one of the nine caption styles — the "
+                                  "typography, its animation and its keyword "
+                                  "treatment. One per video.",
+                          "props": [], "evidence": rows[n]["detail"]})
+            continue
         if rows[n].get("content_unavailable"):
             print("  %-18s DRAWS, BUT ITS CONTENT CANNOT BE CARRIED (%s) "
                   "— not offered" % (n, ", ".join(rows[n]["content_unavailable"])))
@@ -81,8 +96,15 @@ def build(out_dir):
                       "claim": c["claim"], "what": c["what"],
                       "props": c.get("props", []),
                       "evidence": rows[n]["detail"]})
+    # NO RANKING, AND REPEAT USE IS FINE — said here rather than assumed,
+    # because a sheet that implies an order is a sheet that teaches one.
+    header = ("These are the components that RENDER. Each picture is a real "
+              "ChatCut frame of that component, not a mock. Pick by what the "
+              "moment needs. THEY ARE NOT RANKED and the order carries no "
+              "meaning. USING ONE TWICE IS FINE when two moments do the same "
+              "job. A component that is not on this sheet is not available.")
     manifest = os.path.join(out_dir, "sheet.json")
-    json.dump({"entries": sheet,
+    json.dump({"header": header, "entries": sheet,
                "rendered_but_unconditioned": missing_condition},
               open(manifest, "w", encoding="utf-8"), indent=1)
     print("  sheet: %d components with a frame and a condition" % len(sheet))

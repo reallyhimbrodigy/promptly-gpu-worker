@@ -95,7 +95,7 @@ def leg_agreement(reg):
     import re
     bad = []
     for n, spec in sorted(reg["components"].items()):
-        read = set(re.findall(r"\bprops\.([A-Za-z_$][\w$]*)", spec["code"]))
+        read = set(re.findall(r"\bprops\??\.([A-Za-z_$][\w$]*)", spec["code"]))
         dec = set(p["key"] for p in spec["properties"])
         for k in sorted(dec - read):
             bad.append((n, k, "declared but the code never reads it"))

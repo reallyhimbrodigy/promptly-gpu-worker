@@ -58,19 +58,38 @@ def legs():
 
     with_caps = copy.deepcopy(BASE)
     with_caps["ledger"]["spec"]["families"] = ["caption", "cut"]
+    with_caps["ledger"]["caption_render"] = {"style": "TwoTone", "pages": 29}
     t = emit(with_caps)
     if "NO CAPTIONS" in t:
         bad.append("spec ruled caption and the plan still says NO CAPTIONS")
     if "THE CAPTIONS" not in t:
         bad.append("spec ruled caption and the plan carries no caption section")
-    for call in ('edit_captions action:"enable"', "read_captions",
-                 "set_max_characters"):
-        if call not in t:
-            bad.append("caption section omits the verified call `%s`" % call)
-    if "DO NOT PICK A STYLE PRESET" not in t:
-        bad.append("caption section does not say the style mapping is unmade")
+    # THE ROUTE CHANGED, AND SO DOES WHAT THIS ASSERTS. Captions were going
+    # to ChatCut's own surface, which meant picking one of its 26 presets and
+    # discarding the word-level motion that makes our nine ours. They are now
+    # registered as COMPONENTS with their pages baked, like every other
+    # component, and placed as ONE item over the whole timeline.
+    for want in ("a COMPONENT, not ChatCut's preset", "type                   "
+                 ": motion-graphic", "DO NOT call edit_captions"):
+        if want not in t:
+            bad.append("caption section omits %r" % want[:40])
+    if "caption:" not in t:
+        bad.append("caption section does not name the caption:<style> assetId")
+
+    # A full_edit has families=None BY CONSTRUCTION. Keying only off the
+    # family list said NO CAPTIONS on every full edit, including one whose own
+    # render burned them.
+    full = copy.deepcopy(BASE)
+    full["ledger"]["spec"] = {"mode": "full_edit", "families": None}
+    full["ledger"]["caption_composited"] = True
+    full["ledger"]["caption_render"] = {"style": "TwoTone", "pages": 29}
+    t3 = emit(full)
+    if "NO CAPTIONS" in t3 or "THE CAPTIONS" not in t3:
+        bad.append("full_edit whose own render burned captions was told "
+                   "NO CAPTIONS (families is null on a full edit)")
 
     without = copy.deepcopy(BASE)
+    without["ledger"]["caption_composited"] = False
     t2 = emit(without)
     if "THE CAPTIONS" in t2:
         bad.append("spec did NOT rule caption and a caption section appeared")

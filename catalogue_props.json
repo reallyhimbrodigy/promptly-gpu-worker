@@ -83,7 +83,21 @@
    "choose a vibe",
    "render"
   ],
-  "accentColor": "#C8551F"
+  "accentColor": "#C8551F",
+  "points": [
+   {
+    "title": "1. The Missing Piece",
+    "caption": "Tell them what they don't know yet."
+   },
+   {
+    "title": "2. The Tension",
+    "caption": "Make the gap uncomfortable."
+   },
+   {
+    "title": "3. The Payoff",
+    "caption": "Close it in one line."
+   }
+  ]
  },
  "EditorialQuote": {
   "startMs": 0,
@@ -181,7 +195,12 @@
    "AUTO CAPTIONS",
    "B-ROLL"
   ],
-  "accentColor": "#C8551F"
+  "accentColor": "#C8551F",
+  "palette": [
+   "#C8551F",
+   "#4F9DF7",
+   "#36E27A"
+  ]
  },
  "ProgressBar": {
   "startMs": 0,
@@ -229,7 +248,24 @@
   "durationMs": 3000,
   "label": "REC",
   "value": "00:14",
-  "corner": "top-left"
+  "corner": "top-left",
+  "annotations": [
+   {
+    "label": "ELAPSED",
+    "value": "timestamp",
+    "corner": "top-left"
+   },
+   {
+    "label": "WORDS",
+    "value": "wordcount",
+    "corner": "top-right"
+   },
+   {
+    "label": "RATE",
+    "value": "wpm",
+    "corner": "bottom-left"
+   }
+  ]
  },
  "Reticle": {
   "startMs": 0,
@@ -329,6 +365,23 @@
     "label": "2024",
     "value": "SHIP"
    }
+  ],
+  "steps": [
+   {
+    "index": "01",
+    "label": "Shoot it raw",
+    "description": "One take, no setup."
+   },
+   {
+    "index": "02",
+    "label": "Drop it in",
+    "description": "The app reads the whole thing."
+   },
+   {
+    "index": "03",
+    "label": "Post it",
+    "description": "Five minutes, start to finish."
+   }
   ]
  },
  "TimelineRoadmap": {
@@ -346,6 +399,28 @@
    {
     "label": "Q3",
     "value": "API"
+   }
+  ],
+  "steps": [
+   {
+    "index": "01",
+    "label": "Record",
+    "sublabel": "one take"
+   },
+   {
+    "index": "02",
+    "label": "Upload",
+    "sublabel": "any length"
+   },
+   {
+    "index": "03",
+    "label": "Edit",
+    "sublabel": "automatic"
+   },
+   {
+    "index": "04",
+    "label": "Publish",
+    "sublabel": "five minutes"
    }
   ]
  },
