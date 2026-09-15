@@ -18,6 +18,7 @@ agent edit like the references instead of generically, and a harness that
 re-encodes them as rules loses exactly the thing that took the week.
 """
 import json
+import math
 import os
 import re
 import subprocess
@@ -535,6 +536,12 @@ LOADBEARING = ["00_job_and_arc.md", "02_intent_standard.md", "01_cut_pass.md",
 # already know is needed: ChatCut exposes 60 tools so Claude Code defers their
 # schemas. There is no eager-load flag, so the next best thing is to tell the
 # agent exactly which ones to fetch, in ONE call instead of nine.
+# ChatCut's export delays the audio by this much, measured on a NO-EDIT round
+# trip (upload a file, export it untouched) across four exports. Set to 0 to
+# ship uncompensated — hop 7 then reports the raw offset instead of ~0.
+CHATCUT_AUDIO_LEAD_MS = 42
+
+
 NEEDED_TOOLS = [
     # SIX, NOT TWENTY-FIVE. The plan now carries the project, the assets, the
     # sound ids, the item references and the review frames, so the agent
@@ -805,6 +812,44 @@ def prestage(access_token, title_text, controls=None, source_path=None,
     #
     # THE FIELD NAMES WERE READ OFF A LIVE create_session RESPONSE, not guessed:
     # `token` (cmi_exec_...), `endpoint`, ttlSeconds 1800.
+    # ── PRE-COMPENSATE ChatCut's AUDIO DELAY ────────────────────────────────
+    # MEASURED, NOT INFERRED. A file uploaded and exported with NO EDITS comes
+    # back with its audio +42ms late — identical to a fully-edited run, so the
+    # offset lives entirely in their import/export and nothing we do to a plan
+    # can touch it. The edit lists name the mechanism: every file in the chain
+    # declares an AAC priming skip except theirs.
+    #     source            video 0                  audio 2112 @44.1k = 47.9ms
+    #     what we upload    video 1024 @15360 = 66.7 audio 1024 @44.1k = 23.2ms
+    #     their export      video 1024 @15360 = 66.7 audio 0  — none declared
+    # Our own transcode measures 0ms against the source, so this is not ours to
+    # fix; it is ours to CORRECT FOR, because the user gets the delivered file
+    # either way and a correct one is the requirement.
+    #
+    # THE COMPENSATION IS MEASURED ON EVERY RUN (hop 7) rather than trusted. A
+    # hard-coded shift with nothing watching it is precisely what breaks in
+    # silence the day ChatCut fixes their end — at which point the check fails
+    # LOUDLY on the over-correction and names this constant.
+    if source_path and os.path.exists(source_path) and CHATCUT_AUDIO_LEAD_MS:
+        _comp = "/work/source_compensated.mp4"
+        _r = subprocess.run(
+            ["ffmpeg", "-v", "error", "-y", "-i", source_path,
+             "-itsoffset", "-%.3f" % (CHATCUT_AUDIO_LEAD_MS / 1000.0),
+             "-i", source_path, "-map", "0:v:0", "-map", "1:a:0",
+             "-c:v", "copy", "-c:a", "aac", "-b:a", "320k",
+             "-movflags", "+faststart", _comp],
+            capture_output=True, text=True, timeout=900)
+        if _r.returncode == 0 and os.path.getsize(_comp) > 10000:
+            print("  AUDIO LEAD      : MEASURED  shifted %dms earlier before "
+                  "upload to cancel ChatCut's export delay"
+                  % CHATCUT_AUDIO_LEAD_MS, flush=True)
+            source_path = _comp
+        else:
+            # NAMED, NOT SILENT. An uncompensated upload is a deliverable with
+            # 42ms of lip-sync error; saying so beats shipping it quietly.
+            print("  AUDIO LEAD      : FAILED  could not pre-compensate (%s) — "
+                  "the delivered audio will be ~%dms late"
+                  % ((_r.stderr or "")[-120:], CHATCUT_AUDIO_LEAD_MS), flush=True)
+
     src_asset = None
     if source_path and os.path.exists(source_path):
         sess = call("import_media",
@@ -1656,6 +1701,99 @@ def verify_hop6_clear(plan, source="/work/source.mp4"):
     return out
 
 
+def _audio_lag_ms(a_path, b_path, at=11.0, dur=3.0):
+    """How late a_path's audio is against b_path's, in ms. None if unmeasurable.
+
+    Envelope cross-correlation at 2ms resolution. A source-against-itself
+    control reads exactly 0 at r=1.000, so the instrument has no bias of its
+    own — which is the only reason a 42ms reading can be believed.
+    """
+    def env(f):
+        p = subprocess.run(
+            ["ffmpeg", "-v", "error", "-ss", "%.3f" % at, "-t", "%.3f" % dur,
+             "-i", f, "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le", "-"],
+            capture_output=True, timeout=300)
+        if p.returncode != 0 or not p.stdout:
+            return None
+        import struct as _st
+        n = len(p.stdout) // 2
+        v = _st.unpack("<%dh" % n, p.stdout[:n * 2])
+        w = 32                                   # 2ms at 16kHz
+        return [math.sqrt(sum(x * x for x in v[i:i + w]) / w)
+                for i in range(0, n - w, w)]
+    A, B = env(a_path), env(b_path)
+    if not A or not B:
+        return None
+    n, best = min(len(A), len(B)), (-2.0, 0)
+    for L in range(-60, 61):
+        xs = [(A[i], B[i - L]) for i in range(max(0, L), min(n, n + L))]
+        if len(xs) < 60:
+            continue
+        ma = sum(x for x, _ in xs) / len(xs)
+        mb = sum(y for _, y in xs) / len(xs)
+        num = sum((x - ma) * (y - mb) for x, y in xs)
+        den = math.sqrt(sum((x - ma) ** 2 for x, _ in xs)
+                        * sum((y - mb) ** 2 for _, y in xs))
+        if den and num / den > best[0]:
+            best = (num / den, L)
+    return best[1] * 2
+
+
+def verify_hop7_sync(tok, stage, shape):
+    """HOP 7 — the DELIVERED audio lines up with the source it came from.
+
+    THE COMPENSATION IS MEASURED, NOT TRUSTED. CHATCUT_AUDIO_LEAD_MS shifts our
+    audio 42ms earlier before upload because their export delays it by exactly
+    that, measured on a NO-EDIT round trip. A hard-coded shift with nothing
+    watching it is what breaks in silence the day they fix their end — so this
+    reads the delivered file and fails on a residual either way, naming the
+    constant so whoever sees it knows what to change.
+
+    Tolerance is 20ms: half a frame at 30fps, and well inside the threshold at
+    which lip-sync error becomes visible.
+    """
+    out = {"state": "ABSENT", "why": "not attempted", "detail": []}
+    if not (stage and shape):
+        out["why"] = "no prestage or no agent shape"
+        return out
+    if not os.path.exists("/work/source.mp4"):
+        out["why"] = "the original source is gone — nothing to measure against"
+        return out
+    try:
+        ex = _mcp_call(tok, "track_export",
+                       {"projectId": stage["projectId"], "action": "status"})
+        blob = json.dumps(ex) + str(ex.get("_text") or "")
+        url = re.search(r'(https://[^\s"\\]+out\.mp4[^\s"\\]*)', blob)
+        if not url:
+            out["why"] = ("no finished export to measure yet — the render was "
+                          "still going when the chain ran")
+            return out
+        import urllib.request as _u
+        with _u.urlopen(url.group(1), timeout=600) as r, \
+                open("/work/delivered.mp4", "wb") as fh:
+            fh.write(r.read())
+        lag = _audio_lag_ms("/work/delivered.mp4", "/work/source.mp4")
+        if lag is None:
+            out["why"] = "the envelope could not be read from one of the files"
+            return out
+        out["detail"].append(
+            "delivered audio is %+dms against the source; compensation applied "
+            "was %dms" % (lag, CHATCUT_AUDIO_LEAD_MS))
+        out["state"] = "MEASURED" if abs(lag) <= 20 else "FAILED"
+        out["why"] = (
+            "delivered audio is %+dms against the source — within 20ms"
+            % lag if abs(lag) <= 20 else
+            "delivered audio is %+dms against the source. The compensation is "
+            "%dms; if this reads about %+d the export delay is gone and "
+            "CHATCUT_AUDIO_LEAD_MS should go to 0, and if it reads about +42 "
+            "the compensation did not apply."
+            % (lag, CHATCUT_AUDIO_LEAD_MS, -CHATCUT_AUDIO_LEAD_MS))
+    except Exception as e:                                        # noqa: BLE001
+        out["state"] = "FAILED"
+        out["why"] = "%s: %s — the sync is UNCHECKED" % (type(e).__name__, e)
+    return out
+
+
 def build_system_prompt():
     """The craft, in the session's context instead of on its to-do list."""
     parts = [CRAFT_CONTEXT, "\n\n===== THE CRAFT DOCUMENTS =====\n"]
@@ -2228,7 +2366,12 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                                          out["chain"]["hop6"]["why"]), flush=True)
     for _l in out["chain"]["hop6"].get("detail") or []:
         print("      %s" % _l, flush=True)
-    _failed = [h for h in ("hop3", "hop4", "hop5", "hop6")
+    out["chain"]["hop7"] = _hop("hop7", verify_hop7_sync, tok, _stage, shape)
+    print("  HOP7           : %s  %s" % (out["chain"]["hop7"]["state"],
+                                         out["chain"]["hop7"]["why"]), flush=True)
+    for _l in out["chain"]["hop7"].get("detail") or []:
+        print("      %s" % _l, flush=True)
+    _failed = [h for h in ("hop3", "hop4", "hop5", "hop6", "hop7")
                if out["chain"][h]["state"] != "MEASURED"]
     out["chain"]["gate"] = "FAILED" if _failed else "PASSED"
     if _failed:
@@ -2254,6 +2397,103 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
 # NO SECRETS. This fetches a public CDN URL and runs two local models; it
 # touches neither ChatCut nor Anthropic, and a function that asks for
 # credentials it does not use is a function that fails for the wrong reason.
+@app.function(image=IMG, timeout=1800,
+              secrets=[modal.Secret.from_name("chatcut-oauth")])
+def audio_roundtrip(clip_url: str):
+    """THE TWO PROBES THAT SETTLE THE +42ms WITH NO INFERENCE.
+
+    PROBE 1 — upload a file and export it with NO EDITS. If the export comes
+    back +42ms against the file we uploaded, the offset lives in their
+    import/export and nothing we do to a plan can touch it. If it comes back
+    clean, something our EDIT introduces it.
+
+    PROBE 2 — ffprobe THE EXACT BYTES THE HELPER SENDS. Not my reproduction of
+    its command — the file on disk at the moment it uploads. Edit list, priming
+    samples, first timestamp, at that precise hop.
+
+    Everything so far has been elimination: our transcode command measured 0ms
+    and theirs measured +42ms, so it was theirs BY SUBTRACTION. This measures
+    the hop directly instead.
+    """
+    os.makedirs("/work", exist_ok=True)
+    subprocess.run(["curl", "-fsSL", "-o", "/work/source.mp4", clip_url],
+                   check=True, timeout=600)
+    tok = _access_token()
+    out = {"probe1": {"state": "ABSENT"}, "probe2": {"state": "ABSENT"}}
+
+    def probe(path, label):
+        r = subprocess.run(
+            ["ffprobe", "-v", "trace", "-i", path],
+            capture_output=True, text=True, timeout=180)
+        el = re.findall(r"Processing st: (\d+), edit list \d+ - media time: "
+                        r"(-?\d+)", r.stderr or "")
+        j = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries",
+             "stream=index,codec_type,codec_name,sample_rate,start_pts,"
+             "start_time,time_base,initial_padding", "-of", "json", path],
+            capture_output=True, text=True, timeout=180)
+        try:
+            streams = json.loads(j.stdout or "{}").get("streams") or []
+        except Exception:                                         # noqa: BLE001
+            streams = []
+        return {"label": label, "edit_lists": el, "streams": streams,
+                "bytes": os.path.getsize(path)}
+
+    _stage = prestage(tok, "", controls={}, source_path="/work/source.mp4",
+                      titles=[])
+    pid = _stage["projectId"]
+
+    # PROBE 2 — the helper leaves its transcode in the work dir; find it.
+    cands = sorted(
+        [os.path.join("/work", f) for f in os.listdir("/work")
+         if f.startswith("chatcut-") and f.endswith(".mp4")]
+        + [os.path.join("/tmp", f) for f in os.listdir("/tmp")
+           if f.startswith("chatcut-") and f.endswith(".mp4")],
+        key=lambda x: os.path.getmtime(x), reverse=True)
+    out["probe2"] = {
+        "state": "MEASURED" if cands else "ABSENT",
+        "why": ("the helper's transcode at %s" % cands[0]) if cands else
+               "no chatcut-*.mp4 left behind — the helper cleans up, so the "
+               "uploaded bytes could not be probed at that hop",
+        "source": probe("/work/source.mp4", "source (what we fetched)"),
+        "uploaded": probe(cands[0], "uploaded (helper output)") if cands else None,
+    }
+
+    # PROBE 1 — place the whole clip and export with no other edit.
+    _mcp_call(tok, "edit_item", {
+        "projectId": pid,
+        "adds": [{"type": "video", "assetId": _stage["sourceAssetId"],
+                  "from": 0, "sourceStartFromInSeconds": 0}]})
+    ex = _mcp_call(tok, "submit_export", {
+        "projectId": pid, "format": "video", "codec": "h264",
+        "resolution": "1080p"})
+    rid = re.search(r"renderId[\"':\s]+([0-9a-f-]{8,})", json.dumps(ex) +
+                    str(ex.get("_text") or ""))
+    out["probe1"] = {"state": "SUBMITTED", "projectId": pid,
+                     "renderId": rid.group(1) if rid else None,
+                     "why": "poll track_export for the URL, then measure it "
+                            "against /work/source.mp4"}
+    print("  PROBE2          : %s" % out["probe2"]["why"], flush=True)
+    print("  PROBE1          : project=%s render=%s"
+          % (pid, out["probe1"]["renderId"]), flush=True)
+    return out
+
+
+@app.local_entrypoint()
+def roundtrip(clip_url: str = "", out: str = "/tmp/bs/roundtrip.json"):
+    r = audio_roundtrip.remote(clip_url)
+    with open(out, "w", encoding="utf-8") as fh:
+        json.dump(r, fh, indent=1)
+    print("WROTE %s" % out)
+    print("  probe2:", r["probe2"]["why"])
+    for k in ("source", "uploaded"):
+        v = r["probe2"].get(k)
+        if v:
+            print("    %-28s edit_lists=%s" % (v["label"], v["edit_lists"]))
+    print("  probe1: project=%s render=%s"
+          % (r["probe1"].get("projectId"), r["probe1"].get("renderId")))
+
+
 @app.function(image=IMG, timeout=900)
 def detect_regions(clip_url: str, duration_s: float = 0.0):
     """The face trajectory and the source's own text bands, for PLAN TIME.
