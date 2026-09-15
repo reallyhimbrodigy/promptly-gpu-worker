@@ -1200,7 +1200,17 @@ def verify_hops_3_and_4(tok, stage, plan):
                     return it
         return cands[0] if cands else None
 
-    by_from = {r["from"]: _pick(r) for r in man if _pick(r) is not None}
+    # KEYED BY THE ROW, NOT THE FRAME. Keying by frame collapsed again: the
+    # title, the card AND the sound effect all name frame 526, so the LAST row
+    # written won and hop 4 inspected whichever that was. A frame does not
+    # identify a placement — that was the whole lesson of the previous fix, and
+    # the dict I built to apply it repeated the mistake one line later.
+    by_row = {}
+    for r in man:
+        it = _pick(r)
+        if it is not None:
+            by_row[(r["call"], r["slot"])] = it
+    by_from = by_row
 
     def _find_po(o, item_id):
         """The overrides on THE ITEM, not the first ones in the tree.
@@ -1253,13 +1263,14 @@ def verify_hops_3_and_4(tok, stage, plan):
     # overrides live on the ITEM and the timeline view does not carry them, so
     # the rows that name any are inspected individually. There is normally one.
     for r in man:
-        if not (r.get("overrides") and r["from"] in by_from):
+        _key = (r["call"], r["slot"])
+        if not (r.get("overrides") and _key in by_from):
             continue
         try:
             det = _mcp_call(tok, "inspect_item",
                             {"projectId": pid,
-                             "itemId": by_from[r["from"]]["id"]})
-            _po = _find_po(det, by_from[r["from"]]["id"])
+                             "itemId": by_from[_key]["id"]})
+            _po = _find_po(det, by_from[_key]["id"])
             if not _po:
                 # inspect_item is a TEXT report. Its own line is authoritative:
                 #   propertyOverrides: {"label":"…","value":5,…}
@@ -1305,15 +1316,24 @@ def verify_hops_3_and_4(tok, stage, plan):
                            "return: %r"
                            % (r["from"], str((det or {}).get("_text") or "")[:240])}
                 return res
-            by_from[r["from"]] = dict(by_from[r["from"]],
-                                      propertyOverrides=_po)
+            by_from[_key] = dict(by_from[_key], propertyOverrides=_po)
         except Exception as e:                                    # noqa: BLE001
             res["hop4"] = {"state": "FAILED",
                            "why": "could not inspect the item at frame %s: %s"
                                   % (r["from"], e)}
             return res
 
-    bad4 = vc.hop4_carries(man, by_from)
+    # hop4_carries indexes by frame. Only rows that NAME overrides are checked
+    # for them, and at most one row per frame does, so a frame-keyed map built
+    # from those rows alone is unambiguous — where the general map was not.
+    _for_hop4 = {}
+    for r in man:
+        k = (r["call"], r["slot"])
+        if k in by_row:
+            _for_hop4.setdefault(r["from"], by_row[k])
+        if r.get("overrides") and k in by_row:
+            _for_hop4[r["from"]] = by_row[k]
+    bad4 = vc.hop4_carries(man, _for_hop4)
     res["detail"] = ["%-8s slot%-3s frame %-5s %s"
                      % ("MISSING" if any(b[0] is r for b in bad4) else "ok",
                         r["slot"], r["from"], (r.get("asset") or "")[:44])

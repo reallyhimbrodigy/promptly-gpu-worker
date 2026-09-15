@@ -228,16 +228,35 @@ def hop3_placed(manifest, timeline_entries):
     have = Counter((e.get("timelineRange") or {}).get("fromFrame") for e in got)
     need = Counter(r["from"] for r in want)
     missing = []
+    # AN AUDIO ADD'S ITEM DOES NOT START AT ITS `fromFrame`. That field is an
+    # ANCHOR: edit_item SHIFTS the item so the sound's anchor lands on it, so a
+    # vine-boom anchored at 526 is an item starting at 518. Requiring a start
+    # AT the frame reported two sounds as never placed while both were on the
+    # timeline — the same semantics that made `from` the wrong field name in
+    # the first place, biting a second time in a different reader.
+    claimed = set()
     for r in want:
         f = r["from"]
-        if have[f] > 0:
-            have[f] -= 1
+        if r["type"] == "audio":
+            hit = next((i for i, e in enumerate(got)
+                        if i not in claimed
+                        and e.get("itemType") == "audio"
+                        and (e.get("timelineRange") or {}).get("fromFrame", 0)
+                        <= f <
+                        (e.get("timelineRange") or {}).get("toFrame", 0)), None)
+        else:
+            hit = next((i for i, e in enumerate(got)
+                        if i not in claimed
+                        and (e.get("timelineRange") or {}).get("fromFrame") == f),
+                       None)
+        if hit is not None:
+            claimed.add(hit)
             continue
-        missing.append((r, "no unclaimed item starts at frame %s (%d add(s) "
-                           "there, %d item(s))"
-                           % (f, need[f], sum(1 for e in got
-                                              if (e.get("timelineRange") or {})
-                                              .get("fromFrame") == f))))
+        _n_here = sum(1 for e in got
+                      if (e.get("timelineRange") or {}).get("fromFrame") == f)
+        missing.append((r, "no unclaimed %s item for frame %s (%d add(s) there, "
+                           "%d item(s) starting there)"
+                           % (r["type"], f, need[f], _n_here)))
     return missing
 
 
