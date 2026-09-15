@@ -1001,7 +1001,17 @@ def _mcp_call(tok, name, args, expect=None):
         raise RuntimeError("%s failed: %s" % (name, r["error"]))
     out = r.get("result") or {}
     parsed = None
-    for c in (out.get("content") or []):
+    # `structuredContent` FIRST. MCP returns the payload three ways and this
+    # reader only knew one: the last run came back with keys
+    # ['_meta', 'content', 'structuredContent'] and no parseable text block, so
+    # hop 3 could not read a timeline that held sixteen entries. The previous
+    # version of this bug reported "12 adds never became an item"; this one
+    # said "returned nothing this reader could use (no 'timeline'). Keys seen:
+    # [...]" — which is the whole reason the message carries what it got.
+    if isinstance(out.get("structuredContent"), dict):
+        sc = out["structuredContent"]
+        parsed = sc.get("result") if isinstance(sc.get("result"), dict) else sc
+    for c in ([] if parsed is not None else (out.get("content") or [])):
         t = c.get("text")
         if not t and isinstance(c.get("resource"), dict):
             t = c["resource"].get("text")
