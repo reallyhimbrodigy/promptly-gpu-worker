@@ -13,900 +13,958 @@
  },
  "shipped": [
   {
-   "t_settled_s": 1.5,
+   "t_settled_s": 1.2,
+   "kind": "placement",
    "purpose": "hook",
    "families": [
     "text",
-    "card",
     "sfx"
    ],
    "where": "center",
-   "on_screen": "$2,000,000 in large 3D text over a pixelated face.",
-   "heard": "\"$2,000,000 a month.\"",
-   "cut_does": "Graphic animates in to establish the core claim.",
-   "why_lands": "The huge number is the hook. Pixelation adds mystery and makes the viewer lean in.",
+   "on_screen": "\"$2,000,000\" in large, 3D gold text.",
+   "heard": "\"...makes two million dollars...\" and a cash register sound.",
+   "cut_does": "Text animates in, number by number, landing on the word.",
+   "why_lands": "The huge, specific number is the most compelling part of the hook, made substantial by 3D.",
+   "instead_of": "Just showing the number as plain text. The 3D and sound make it feel real.",
    "video": "1e5eb227a1814bc0999fd1e62ebef34e.mp4",
    "whole": {
-    "what_it_is_doing": "A young entrepreneur made millions from two apps, and the video promises to reveal his secrets for creating successful apps with no coding experience.",
+    "what_it_is_doing": "A young entrepreneur made $20 million from apps before graduating, and this video holds the secret to how anyone can replicate his success with no coding experience.",
     "the_turn_s": 21.0
    },
    "n": 1,
    "src_n": 1,
    "gate": "yes",
-   "frame_says": "A pixelated face with text overlay reading \"this kid makes $2,000,000 a month\"."
+   "frame_says": "Large 3D gold text reading \"$2,000,000\" over a blurred image of a person."
   },
   {
-   "t_settled_s": 12.8,
+   "t_settled_s": 19.6,
+   "kind": "placement",
    "purpose": "payoff",
    "families": [
-    "text",
-    "sfx"
+    "text"
    ],
    "where": "center",
-   "on_screen": "$100K in large white text over the speaker.",
-   "heard": "\"$100K\" and a cash register sound.",
-   "cut_does": "Graphic lands on the number, punctuated by sound.",
-   "why_lands": "The number is the payoff for the first story beat, reinforced with a classic sfx.",
+   "on_screen": "\"$20,000,000\" in large white text over the narrator.",
+   "heard": "\"...twenty million dollars...\"",
+   "cut_does": "The number is placed directly over the speaker, dominating the frame.",
+   "why_lands": "This is the story's climax. The number is the hero, so it gets the hero treatment.",
+   "instead_of": "A smaller text card. Making it huge and central emphasizes its importance.",
    "video": "1e5eb227a1814bc0999fd1e62ebef34e.mp4",
    "whole": {
-    "what_it_is_doing": "A young entrepreneur made millions from two apps, and the video promises to reveal his secrets for creating successful apps with no coding experience.",
+    "what_it_is_doing": "A young entrepreneur made $20 million from apps before graduating, and this video holds the secret to how anyone can replicate his success with no coding experience.",
     "the_turn_s": 21.0
    },
    "n": 2,
    "src_n": 2,
    "gate": "yes",
-   "frame_says": "A young man speaking with \"$100K\" in large white text over his chest."
-  },
-  {
-   "t_settled_s": 9.2,
-   "purpose": "evidence",
-   "families": [
-    "cutaway",
-    "sfx",
-    "text",
-    "transition"
-   ],
-   "where": "center",
-   "on_screen": "3D animated padlock being unlocked. Text \"bypass school restrictions\".",
-   "heard": "\"bypass school restrictions\" and an unlock sound.",
-   "cut_does": "Cutaway to a 3D animation visualizing the app's function.",
-   "why_lands": "A simple, clear visual metaphor makes a technical concept instantly understandable and slightly illicit.",
-   "video": "1e5eb227a1814bc0999fd1e62ebef34e.mp4",
-   "whole": {
-    "what_it_is_doing": "A young entrepreneur made millions from two apps, and the video promises to reveal his secrets for creating successful apps with no coding experience.",
-    "the_turn_s": 21.0
-   },
-   "n": 3,
-   "src_n": 3,
-   "gate": "yes",
-   "frame_says": "A 3D graphic of a padlock with the text \"bypass school restrictions\"."
-  },
-  {
-   "t_settled_s": 32.0,
-   "purpose": "payoff",
-   "families": [
-    "cutaway",
-    "card",
-    "text",
-    "sfx"
-   ],
-   "where": "full",
-   "on_screen": "App icons with question marks and multi-million dollar values.",
-   "heard": "\"multi-million dollar app ideas...\" and whoosh sounds.",
-   "cut_does": "Cutaway to a graphic teasing the value being offered.",
-   "why_lands": "This visualizes the \"secret\" information, making the abstract promise of \"ideas\" seem concrete and valuable.",
-   "video": "1e5eb227a1814bc0999fd1e62ebef34e.mp4",
-   "whole": {
-    "what_it_is_doing": "A young entrepreneur made millions from two apps, and the video promises to reveal his secrets for creating successful apps with no coding experience.",
-    "the_turn_s": 21.0
-   },
-   "n": 4,
-   "src_n": 4,
-   "gate": "yes",
-   "frame_says": "A graphic with large question marks and multi-million dollar values next to them."
+   "frame_says": "A young man speaking, with large white text \"$20,000,000\" overlaid."
   },
   {
    "t_settled_s": 1.6,
+   "kind": "placement",
    "purpose": "hook",
    "families": [
     "text",
-    "sfx"
+    "transition"
    ],
-   "where": "upper",
-   "on_screen": "The speaker's name, \"Jaden Kohan,\" in large white text.",
-   "heard": "\"I'm Jaden Kohan...\" and a whoosh sound.",
-   "cut_does": "Animated text overlay introduces the speaker by name.",
-   "why_lands": "Immediately establishes the speaker's identity, making the message feel personal and direct from the start.",
+   "where": "center",
+   "on_screen": "Large white text: 'Jaden Kohan' over the speaker.",
+   "heard": "\"I'm Jaden Kohan...\"",
+   "cut_does": "Text animates in, letter by letter, to introduce the speaker by name.",
+   "why_lands": "The introduction is immediate and personal. The large, central text makes his name the most important thing on screen.",
+   "instead_of": "a standard lower-third name card, which would be less bold and commanding for an opening.",
    "video": "56ba63210cfe4c4da625e0b457cc6703.mp4",
    "whole": {
-    "what_it_is_doing": "A manager from Legal Soft introduces their virtual staffing service for law firms, arguing it helps them grow, optimize operations, and increase profits by providing seamless talent solutions.",
-    "the_turn_s": 28.0
+    "what_it_is_doing": "A manager from Legal Soft explains how their virtual staffing service helps law firms grow and operate efficiently by providing seamless talent transitions and outstanding talent.",
+    "the_turn_s": 12.0
    },
-   "n": 5,
+   "n": 3,
    "src_n": 5,
    "gate": "yes",
-   "frame_says": "A man in a suit with the name \"Jaden Kohan\" in large white text above him."
+   "frame_says": "A man in a suit sits at a desk with large white text \"Jaden Kohan\"."
   },
   {
-   "t_settled_s": 28.4,
+   "t_settled_s": 20.4,
+   "kind": "placement",
    "purpose": "turn",
    "families": [
-    "text",
-    "sfx",
-    "transition"
+    "text"
    ],
    "where": "center",
-   "on_screen": "The words \"We make that seamless.\" with \"seamless\" animating in.",
-   "heard": "\"...make that seamless\" and a gentle whoosh.",
-   "cut_does": "A clean, simple text reveal on a light background transitions to the solution.",
-   "why_lands": "After showing the complexity of staffing, this simple, confident statement acts as the core promise and solution.",
+   "on_screen": "The word 'changes' appears in bright orange, emphasizing the key problem.",
+   "heard": "\"...whenever staffing changes.\"",
+   "cut_does": "Highlights a single keyword in the sentence with color and a subtle animation.",
+   "why_lands": "It isolates the core problem ('changes') that the service solves, making the subsequent solution more impactful.",
+   "instead_of": "keeping all the text a uniform color, which would fail to draw attention to the pivotal word.",
    "video": "56ba63210cfe4c4da625e0b457cc6703.mp4",
    "whole": {
-    "what_it_is_doing": "A manager from Legal Soft introduces their virtual staffing service for law firms, arguing it helps them grow, optimize operations, and increase profits by providing seamless talent solutions.",
-    "the_turn_s": 28.0
+    "what_it_is_doing": "A manager from Legal Soft explains how their virtual staffing service helps law firms grow and operate efficiently by providing seamless talent transitions and outstanding talent.",
+    "the_turn_s": 12.0
    },
-   "n": 6,
+   "n": 4,
    "src_n": 6,
    "gate": "yes",
-   "frame_says": "The text \"We make that seamless.\" on a light blue and white gradient background."
+   "frame_says": "A man looks at his phone, with a graphic reading \"whenever staffing changes.\""
   },
   {
-   "t_settled_s": 39.2,
-   "purpose": "evidence",
-   "families": [
-    "cutaway",
-    "cut"
-   ],
-   "where": "none",
-   "on_screen": "A man at a trade show booth points to a brochure while talking.",
-   "heard": "\"Our goal here at Legal Soft...\" and ambient crowd noise.",
-   "cut_does": "Hard cut to B-roll footage from a real-world event.",
-   "why_lands": "Shifts from the controlled office environment to the real world, providing social proof and showing industry engagement.",
-   "video": "56ba63210cfe4c4da625e0b457cc6703.mp4",
-   "whole": {
-    "what_it_is_doing": "A manager from Legal Soft introduces their virtual staffing service for law firms, arguing it helps them grow, optimize operations, and increase profits by providing seamless talent solutions.",
-    "the_turn_s": 28.0
-   },
-   "n": 7,
-   "src_n": 7,
-   "gate": "yes",
-   "frame_says": "A close-up of a man's hands holding and pointing at a document."
-  },
-  {
-   "t_settled_s": 31.6,
+   "t_settled_s": 4.6,
+   "kind": "placement",
    "purpose": "claim",
    "families": [
     "text",
-    "cut"
+    "cutaway"
    ],
-   "where": "center",
-   "on_screen": "Text \"that your staff is a critical part\" animates over a handshake.",
-   "heard": "\"...your staff is a critical part...\"",
-   "cut_does": "Text overlay on a shot that visually represents partnership (a handshake).",
-   "why_lands": "Aligns the company with the client's perspective, showing they understand what's important to the client's business.",
+   "where": "full",
+   "on_screen": "Huge orange text '2 yrs.' over a shot of the speaker typing.",
+   "heard": "\"Over the last two years...\"",
+   "cut_does": "Cuts to a new angle and overlays a large, stylized number to quantify experience.",
+   "why_lands": "It visualizes a specific metric, making the claim of experience feel more concrete and memorable than just hearing it.",
+   "instead_of": "staying on his face as he speaks, which would make the number feel less significant.",
    "video": "56ba63210cfe4c4da625e0b457cc6703.mp4",
    "whole": {
-    "what_it_is_doing": "A manager from Legal Soft introduces their virtual staffing service for law firms, arguing it helps them grow, optimize operations, and increase profits by providing seamless talent solutions.",
-    "the_turn_s": 28.0
+    "what_it_is_doing": "A manager from Legal Soft explains how their virtual staffing service helps law firms grow and operate efficiently by providing seamless talent transitions and outstanding talent.",
+    "the_turn_s": 12.0
    },
-   "n": 8,
+   "n": 5,
    "src_n": 8,
    "gate": "yes",
-   "frame_says": "Two men shaking hands in an office, with the text \"that your staff is a\"."
-  },
-  {
-   "t_settled_s": 1.8,
-   "purpose": "hook",
-   "families": [
-    "text",
-    "card",
-    "sfx"
-   ],
-   "where": "center",
-   "on_screen": "Text: \"100 TIKTOKS PER HOUR\" and an AI icon over a blurred speaker.",
-   "heard": "\"per hour using AI.\"",
-   "cut_does": "Text and icons animate in with sound, making the claim the focus.",
-   "why_lands": "The huge, specific number in the hook makes the value proposition immediately clear and compelling.",
-   "video": "v09044g40000cm9oa7nog65s2crhkf00.mp4",
-   "whole": {
-    "what_it_is_doing": "A tutorial demonstrating how the AI tool Submagic can automate video editing, creating social media clips with captions, b-roll, and effects, saving significant time.",
-    "the_turn_s": 3.2
-   },
-   "n": 9,
-   "src_n": 9,
-   "gate": "yes",
-   "frame_says": "A man in a plaid shirt with text \"100 TIKTOKS PER HOUR\" overlaid."
-  },
-  {
-   "t_settled_s": 3.9,
-   "purpose": "turn",
-   "families": [
-    "text",
-    "sfx"
-   ],
-   "where": "center",
-   "on_screen": "A search bar graphic with \"submagic.co\" typed into it.",
-   "heard": "\"submagic.co\" with keyboard typing sounds.",
-   "cut_does": "A graphic overlay visualizes the first step of the solution.",
-   "why_lands": "Showing the URL in a search bar is a direct, actionable instruction for the viewer.",
-   "video": "v09044g40000cm9oa7nog65s2crhkf00.mp4",
-   "whole": {
-    "what_it_is_doing": "A tutorial demonstrating how the AI tool Submagic can automate video editing, creating social media clips with captions, b-roll, and effects, saving significant time.",
-    "the_turn_s": 3.2
-   },
-   "n": 10,
-   "src_n": 10,
-   "gate": "yes",
-   "frame_says": "A man with a search bar graphic overlaid, containing the text \"submagic.co\"."
-  },
-  {
-   "t_settled_s": 13.2,
-   "purpose": "evidence",
-   "families": [
-    "card",
-    "sfx"
-   ],
-   "where": "lower",
-   "on_screen": "Four icons: zoom, transition, sound effects, and b-roll clips.",
-   "heard": "\"and b-roll clips to your video.\"",
-   "cut_does": "Icons for each feature are added sequentially with distinct sound effects.",
-   "why_lands": "Breaking down a complex process into a list of simple, icon-represented features makes it feel easy.",
-   "video": "v09044g40000cm9oa7nog65s2crhkf00.mp4",
-   "whole": {
-    "what_it_is_doing": "A tutorial demonstrating how the AI tool Submagic can automate video editing, creating social media clips with captions, b-roll, and effects, saving significant time.",
-    "the_turn_s": 3.2
-   },
-   "n": 11,
-   "src_n": 11,
-   "gate": "yes",
-   "frame_says": "A graphic with the text \"B-ROLL CLIPS\" and icons for zoom, sound, and video."
-  },
-  {
-   "t_settled_s": 4.8,
-   "purpose": "evidence",
-   "families": [
-    "cutaway"
-   ],
-   "where": "center",
-   "on_screen": "A screen recording of the Submagic \"Upload your videos\" interface.",
-   "heard": "\"and upload your video.\"",
-   "cut_does": "Cutaway to the actual product UI to provide proof and context.",
-   "why_lands": "Showing the real tool in action builds credibility and walks the user through the process.",
-   "video": "v09044g40000cm9oa7nog65s2crhkf00.mp4",
-   "whole": {
-    "what_it_is_doing": "A tutorial demonstrating how the AI tool Submagic can automate video editing, creating social media clips with captions, b-roll, and effects, saving significant time.",
-    "the_turn_s": 3.2
-   },
-   "n": 12,
-   "src_n": 12,
-   "gate": "yes",
-   "frame_says": "A website interface for uploading videos, with a speaker in a circle saying \"AND UPLOAD\"."
-  },
-  {
-   "t_settled_s": 3.4,
-   "purpose": "hook",
-   "families": [
-    "text",
-    "sfx"
-   ],
-   "where": "center",
-   "on_screen": "The word \"TRASH\" in large red letters over the speaker.",
-   "heard": "\"...looks like trash.\"",
-   "cut_does": "Large, bold text appears, timed with the spoken word.",
-   "why_lands": "Exaggerates the user's pain point with a single, impactful word, making the problem feel urgent.",
-   "video": "v12044gd0000d855u57og65j1avugm80.mp4",
-   "whole": {
-    "what_it_is_doing": "A videographer shares his specific Premiere Pro export settings to achieve the highest quality video on Instagram and TikTok, bypassing their native compression.",
-    "the_turn_s": 14.0
-   },
-   "n": 13,
-   "src_n": 13,
-   "gate": "yes",
-   "frame_says": "A man speaking with the word \"TRASH\" in large, stylized red letters."
-  },
-  {
-   "t_settled_s": 5.5,
-   "purpose": "turn",
-   "families": [
-    "text",
-    "sfx"
-   ],
-   "where": "center",
-   "on_screen": "\"THIS IS DAY 17\" in large text over the speaker.",
-   "heard": "\"This is day 17...\" with a whoosh sound.",
-   "cut_does": "Text overlay establishes the video is part of a series.",
-   "why_lands": "Builds authority and signals commitment, encouraging a follow for the rest of the series.",
-   "video": "v12044gd0000d855u57og65j1avugm80.mp4",
-   "whole": {
-    "what_it_is_doing": "A videographer shares his specific Premiere Pro export settings to achieve the highest quality video on Instagram and TikTok, bypassing their native compression.",
-    "the_turn_s": 14.0
-   },
-   "n": 14,
-   "src_n": 14,
-   "gate": "yes",
-   "frame_says": "A man speaking with the text \"THIS IS DAY 17\" in large, stylized letters."
-  },
-  {
-   "t_settled_s": 32.2,
-   "purpose": "breath",
-   "families": [
-    "text",
-    "hold"
-   ],
-   "where": "center",
-   "on_screen": "Speaker points at the camera with text \"THE SAUCE\".",
-   "heard": "\"And this is the sauce.\"",
-   "cut_does": "Holds on the speaker's face to build anticipation for the key tip.",
-   "why_lands": "Creates a brief pause and uses slang to signal that the most important information is coming next.",
-   "video": "v12044gd0000d855u57og65j1avugm80.mp4",
-   "whole": {
-    "what_it_is_doing": "A videographer shares his specific Premiere Pro export settings to achieve the highest quality video on Instagram and TikTok, bypassing their native compression.",
-    "the_turn_s": 14.0
-   },
-   "n": 15,
-   "src_n": 15,
-   "gate": "yes",
-   "frame_says": "A man gesturing with his hands, with the text \"THE SAUCE\" overlaid."
-  },
-  {
-   "t_settled_s": 13.3,
-   "purpose": "claim",
-   "families": [
-    "text",
-    "sfx"
-   ],
-   "where": "center",
-   "on_screen": "The word \"VIDEOGRAPHY\" in large red letters over the speaker.",
-   "heard": "\"...career in videography.\"",
-   "cut_does": "Text overlay reinforces the speaker's niche and expertise.",
-   "why_lands": "Clearly defines the video's topic and target audience, qualifying the viewer.",
-   "video": "v12044gd0000d855u57og65j1avugm80.mp4",
-   "whole": {
-    "what_it_is_doing": "A videographer shares his specific Premiere Pro export settings to achieve the highest quality video on Instagram and TikTok, bypassing their native compression.",
-    "the_turn_s": 14.0
-   },
-   "n": 16,
-   "src_n": 16,
-   "gate": "yes",
-   "frame_says": "A man speaking with the word \"VIDEOGRAPHY\" in large, stylized red letters."
-  },
-  {
-   "t_settled_s": 4.8,
-   "purpose": "turn",
-   "families": [
-    "cut",
-    "transition",
-    "card",
-    "sfx"
-   ],
-   "where": "center",
-   "on_screen": "B&W frame. Speaker holds a phone showing the video. \"submagic\" card appears above.",
-   "heard": "\"Submagic...\" and a whoosh sound.",
-   "cut_does": "Hard cut to a stylized frame, introducing the solution as a branded object.",
-   "why_lands": "A sharp visual and audio shift signals the pivot from problem to solution, re-engaging attention for the reveal.",
-   "video": "v14044g50000d5la79fog65q5itovh6g.mp4",
-   "whole": {
-    "what_it_is_doing": "The video presents the problem of time-consuming manual captioning and then introduces an AI tool, Submagic, as the simple, four-step solution that feels like cheating.",
-    "the_turn_s": 4.6
-   },
-   "n": 17,
-   "src_n": 18,
-   "gate": "yes",
-   "frame_says": "A man in a black and white shot holds a phone showing a color video of himself."
-  },
-  {
-   "t_settled_s": 10.0,
-   "purpose": "evidence",
-   "families": [
-    "cutaway",
-    "card",
-    "sfx"
-   ],
-   "where": "top",
-   "on_screen": "Screen recording of Submagic UI. A card with \"1\" and the logo appears.",
-   "heard": "\"Step one...\" and a click sound.",
-   "cut_does": "Cutaway to a screen recording, breaking down the process into simple, numbered steps.",
-   "why_lands": "A numbered step makes a new process feel easy and structured, reducing the viewer's perceived complexity.",
-   "video": "v14044g50000d5la79fog65q5itovh6g.mp4",
-   "whole": {
-    "what_it_is_doing": "The video presents the problem of time-consuming manual captioning and then introduces an AI tool, Submagic, as the simple, four-step solution that feels like cheating.",
-    "the_turn_s": 4.6
-   },
-   "n": 18,
-   "src_n": 19,
-   "gate": "yes",
-   "frame_says": "A screen recording of the Submagic website with a \"1 submagic\" card."
-  },
-  {
-   "t_settled_s": 16.1,
-   "purpose": "evidence",
-   "families": [
-    "cutaway",
-    "card",
-    "sfx"
-   ],
-   "where": "top",
-   "on_screen": "Screen recording of AI tools menu. A card with \"3\" and the logo appears.",
-   "heard": "\"one click...\" and a click sound.",
-   "cut_does": "Highlights a specific, powerful feature (one-click B-roll) within the tutorial sequence.",
-   "why_lands": "Focusing on a single, high-impact feature proves the tool's value more effectively than listing many minor ones.",
-   "video": "v14044g50000d5la79fog65q5itovh6g.mp4",
-   "whole": {
-    "what_it_is_doing": "The video presents the problem of time-consuming manual captioning and then introduces an AI tool, Submagic, as the simple, four-step solution that feels like cheating.",
-    "the_turn_s": 4.6
-   },
-   "n": 19,
-   "src_n": 20,
-   "gate": "yes",
-   "frame_says": "A screen recording of the Submagic UI with a \"3 submagic\" card."
-  },
-  {
-   "t_settled_s": 0.6,
-   "purpose": "hook",
-   "families": [
-    "text"
-   ],
-   "where": "upper",
-   "on_screen": "Text: \"captions are stealing your editing time\" over the speaker.",
-   "heard": "\"If you edit client videos...\"",
-   "cut_does": "Text animates in, word by word, over the main shot.",
-   "why_lands": "It states the audience's specific pain point immediately, making the video instantly relevant to them.",
-   "video": "v14044g50000d9kvim7og65hg0im5sng.mp4",
-   "whole": {
-    "what_it_is_doing": "Manual video captioning is slow and costly. This AI tool, Submagic, automates captions, B-roll, and more, saving you time to earn more money.",
-    "the_turn_s": 8.2
-   },
-   "n": 20,
-   "src_n": 21,
-   "gate": "yes",
-   "frame_says": "A man in a red hoodie with text \"captions are stealing your editing time\"."
-  },
-  {
-   "t_settled_s": 19.2,
-   "purpose": "evidence",
-   "families": [
-    "cutaway",
-    "zoom",
-    "sfx"
-   ],
-   "where": "center",
-   "on_screen": "Screen recording of a color picker being used on caption text.",
-   "heard": "\"...the font, colors...\" with mouse clicks.",
-   "cut_does": "A digital zoom highlights the specific UI element being discussed.",
-   "why_lands": "It addresses a key user need (brand consistency) by showing the customization options in detail.",
-   "video": "v14044g50000d9kvim7og65hg0im5sng.mp4",
-   "whole": {
-    "what_it_is_doing": "Manual video captioning is slow and costly. This AI tool, Submagic, automates captions, B-roll, and more, saving you time to earn more money.",
-    "the_turn_s": 8.2
-   },
-   "n": 21,
-   "src_n": 23,
-   "gate": "yes",
-   "frame_says": "A screen recording of a video editing UI showing a color picker."
-  },
-  {
-   "t_settled_s": 3.4,
-   "purpose": "claim",
-   "families": [
-    "cutaway",
-    "text"
-   ],
-   "where": "center",
-   "on_screen": "Man in a different outfit, rubbing his tired eyes. Text: \"entire day\".",
-   "heard": "\"...that eats your entire day.\"",
-   "cut_does": "Cutaway to a different angle/outfit, showing the effect of the problem.",
-   "why_lands": "It visualizes the emotional cost of the problem (fatigue, frustration), making the pain more relatable.",
-   "video": "v14044g50000d9kvim7og65hg0im5sng.mp4",
-   "whole": {
-    "what_it_is_doing": "Manual video captioning is slow and costly. This AI tool, Submagic, automates captions, B-roll, and more, saving you time to earn more money.",
-    "the_turn_s": 8.2
-   },
-   "n": 22,
-   "src_n": 24,
-   "gate": "yes",
-   "frame_says": "A tired-looking man with text \"that eats your entire day\" on screen."
-  },
-  {
-   "t_settled_s": 1.2,
-   "purpose": "hook",
-   "families": [
-    "text",
-    "sfx"
-   ],
-   "where": "center",
-   "on_screen": "Large yellow text \"VIDEOS\" appears over the speaker.",
-   "heard": "\"videos\" and a whoosh sound.",
-   "cut_does": "Text animates in, timed to the speech, to emphasize the core subject.",
-   "why_lands": "Large, bold text immediately establishes the video's topic and grabs attention, making the hook visual and auditory.",
-   "video": "v15044gf0000d7akrh7og65p1f3s1ua0.mp4",
-   "whole": {
-    "what_it_is_doing": "This video argues that not knowing how to edit is no longer an excuse for not creating videos, thanks to the AI-powered 'Captions' app.",
-    "the_turn_s": 6.0
-   },
-   "n": 23,
-   "src_n": 25,
-   "gate": "yes",
-   "frame_says": "A man with large yellow text \"IF YOU'RE NOT MAKING VIDEOS\" on screen."
-  },
-  {
-   "t_settled_s": 6.4,
-   "purpose": "turn",
-   "families": [
-    "card",
-    "sfx",
-    "transition"
-   ],
-   "where": "top",
-   "on_screen": "The \"Captions\" app logo and wordmark appear above the speaker's head.",
-   "heard": "\"the Captions App.\" and a whoosh sound.",
-   "cut_does": "A logo graphic is revealed with a sound effect, timed to the speaker's gesture.",
-   "why_lands": "The solution is introduced with a clear visual and auditory cue, making the brand name memorable.",
-   "video": "v15044gf0000d7akrh7og65p1f3s1ua0.mp4",
-   "whole": {
-    "what_it_is_doing": "This video argues that not knowing how to edit is no longer an excuse for not creating videos, thanks to the AI-powered 'Captions' app.",
-    "the_turn_s": 6.0
-   },
-   "n": 24,
-   "src_n": 26,
-   "gate": "yes",
-   "frame_says": "A man pointing up at the \"Captions\" app logo and wordmark."
-  },
-  {
-   "t_settled_s": 28.6,
-   "purpose": "payoff",
-   "families": [
-    "cut",
-    "text"
-   ],
-   "where": "lower",
-   "on_screen": "Speaker presents two framed videos side-by-side, labeled \"raw clip\" and \"final version.\"",
-   "heard": "\"compared to the final version.\"",
-   "cut_does": "A cut reveals a physical representation of the before-and-after result.",
-   "why_lands": "Physically framing the comparison makes the transformation tangible and visually satisfying, providing a strong payoff.",
-   "video": "v15044gf0000d7akrh7og65p1f3s1ua0.mp4",
-   "whole": {
-    "what_it_is_doing": "This video argues that not knowing how to edit is no longer an excuse for not creating videos, thanks to the AI-powered 'Captions' app.",
-    "the_turn_s": 6.0
-   },
-   "n": 25,
-   "src_n": 27,
-   "gate": "yes",
-   "frame_says": "A man holding two framed pictures, seemingly a before and after comparison."
-  },
-  {
-   "t_settled_s": 3.6,
-   "purpose": "hook",
-   "families": [
-    "text"
-   ],
-   "where": "top",
-   "on_screen": "Text: \"EXCUSE = NO GOOD\". \"NO GOOD\" is red.",
-   "heard": "\"That's not a good excuse.\"",
-   "cut_does": "A graphic lands to reframe the viewer's problem as a weak excuse.",
-   "why_lands": "This challenges the viewer's mindset, creating an opening for the solution by invalidating their reason for inaction.",
-   "video": "v15044gf0000d7akrh7og65p1f3s1ua0.mp4",
-   "whole": {
-    "what_it_is_doing": "This video argues that not knowing how to edit is no longer an excuse for not creating videos, thanks to the AI-powered 'Captions' app.",
-    "the_turn_s": 6.0
-   },
-   "n": 26,
-   "src_n": 28,
-   "gate": "yes",
-   "frame_says": "A man looking up at the text \"EXCUSE = NO GOOD\"."
-  },
-  {
-   "t_settled_s": 0.8,
-   "purpose": "hook",
-   "families": [
-    "text",
-    "sfx"
-   ],
-   "where": "center",
-   "on_screen": "The word \"EDITS\" in a white circle around the speaker.",
-   "heard": "\"today I'm going\" and a whoosh SFX.",
-   "cut_does": "Animated text appears and tracks the speaker's movement.",
-   "why_lands": "The effect demonstrates the \"clean edits\" he's about to discuss, making the hook self-referential.",
-   "video": "v15044gf0000d8slpi7og65utp063oi0.mp4",
-   "whole": {
-    "what_it_is_doing": "The video argues that manual editing is slow, and presents the 'Captions' app as an AI-powered solution for creating polished, engaging videos quickly and easily.",
-    "the_turn_s": 15.2
-   },
-   "n": 27,
-   "src_n": 29,
-   "gate": "yes",
-   "frame_says": "A man in a room with the word \"EDITS\" circled around him."
-  },
-  {
-   "t_settled_s": 15.4,
-   "purpose": "turn",
-   "families": [
-    "card",
-    "transition",
-    "music"
-   ],
-   "where": "full",
-   "on_screen": "The \"captions\" logo on a pastel gradient background.",
-   "heard": "\"So I dropped...\" and new, upbeat music begins.",
-   "cut_does": "A full-screen brand card acts as a chapter break.",
-   "why_lands": "The full-screen brand moment resets the scene and introduces the solution with fresh energy and new music.",
-   "video": "v15044gf0000d8slpi7og65utp063oi0.mp4",
-   "whole": {
-    "what_it_is_doing": "The video argues that manual editing is slow, and presents the 'Captions' app as an AI-powered solution for creating polished, engaging videos quickly and easily.",
-    "the_turn_s": 15.2
-   },
-   "n": 28,
-   "src_n": 30,
-   "gate": "yes",
-   "frame_says": "The word \"captions\" and \"So I dropped\" on a pastel gradient background."
-  },
-  {
-   "t_settled_s": 7.5,
-   "purpose": "evidence",
-   "families": [
-    "cut",
-    "hold"
-   ],
-   "where": "none",
-   "on_screen": "Speaker in a chair, holding up a phone showing a raw video.",
-   "heard": "\"This is a completely raw...\"",
-   "cut_does": "Hard cut to a new location and angle.",
-   "why_lands": "The change in location signals a shift from the intro to the demonstration's 'before' state.",
-   "video": "v15044gf0000d8slpi7og65utp063oi0.mp4",
-   "whole": {
-    "what_it_is_doing": "The video argues that manual editing is slow, and presents the 'Captions' app as an AI-powered solution for creating polished, engaging videos quickly and easily.",
-    "the_turn_s": 15.2
-   },
-   "n": 29,
-   "src_n": 31,
-   "gate": "yes",
-   "frame_says": "A man in a chair holding a phone, with text \"completely raw\"."
-  },
-  {
-   "t_settled_s": 20.5,
-   "purpose": "evidence",
-   "families": [
-    "cutaway",
-    "transition"
-   ],
-   "where": "full",
-   "on_screen": "A 3D scrolling view of various video editing templates in the app.",
-   "heard": "\"...generic template, Captions actually...\"",
-   "cut_does": "An animated cutaway shows a gallery of options, adding visual interest.",
-   "why_lands": "The dynamic 3D scroll is more engaging than a static list, showcasing the app's modern feel.",
-   "video": "v15044gf0000d8slpi7og65utp063oi0.mp4",
-   "whole": {
-    "what_it_is_doing": "The video argues that manual editing is slow, and presents the 'Captions' app as an AI-powered solution for creating polished, engaging videos quickly and easily.",
-    "the_turn_s": 15.2
-   },
-   "n": 30,
-   "src_n": 32,
-   "gate": "yes",
-   "frame_says": "A screen recording of an app's 3D carousel of video editing templates."
-  },
-  {
-   "t_settled_s": 0.4,
-   "purpose": "hook",
-   "families": [
-    "text"
-   ],
-   "where": "center",
-   "on_screen": "Large white text \"the CAPTIONS\" over the speaker.",
-   "heard": "\"The captions...\"",
-   "cut_does": "Graphic arrives on the first key noun.",
-   "why_lands": "Immediately demonstrates the product's value (engaging captions) while talking about it, creating a meta-hook.",
-   "video": "v1c044g50000d879a6nog65km3geglb0.mp4",
-   "whole": {
-    "what_it_is_doing": "This video argues that generic auto-caption tools are boring and ineffective, then presents Submagic as a superior, time-saving solution that offers full brand customization.",
-    "the_turn_s": 9.0
-   },
-   "n": 31,
-   "src_n": 33,
-   "gate": "yes",
-   "frame_says": "A man in a red hoodie with the text \"the CAPTIONS\" on screen."
-  },
-  {
-   "t_settled_s": 9.9,
-   "purpose": "turn",
-   "families": [
-    "text",
-    "cut"
-   ],
-   "where": "center",
-   "on_screen": "Wide shot of the man at his desk. Text \"I use SUBMAGIC\".",
-   "heard": "\"That's why I use Submagic.\"",
-   "cut_does": "Hard cut to a wide shot, revealing the product name.",
-   "why_lands": "A sharp cut and change of angle marks the pivot from problem to solution, introducing the hero product.",
-   "video": "v1c044g50000d879a6nog65km3geglb0.mp4",
-   "whole": {
-    "what_it_is_doing": "This video argues that generic auto-caption tools are boring and ineffective, then presents Submagic as a superior, time-saving solution that offers full brand customization.",
-    "the_turn_s": 9.0
-   },
-   "n": 32,
-   "src_n": 34,
-   "gate": "yes",
-   "frame_says": "A man at a desk with the text \"I use SUBMAGIC\" on screen."
-  },
-  {
-   "t_settled_s": 7.7,
-   "purpose": "claim",
-   "families": [
-    "text",
-    "hold"
-   ],
-   "where": "lower",
-   "on_screen": "Man leans back in his chair, bored. Text \"as everyone else\".",
-   "heard": "\"...as everyone else...\"",
-   "cut_does": "Holds on a visual metaphor for boredom and conformity.",
-   "why_lands": "The physical acting of boredom matches the text, solidifying the negative outcome of using other tools.",
-   "video": "v1c044g50000d879a6nog65km3geglb0.mp4",
-   "whole": {
-    "what_it_is_doing": "This video argues that generic auto-caption tools are boring and ineffective, then presents Submagic as a superior, time-saving solution that offers full brand customization.",
-    "the_turn_s": 9.0
-   },
-   "n": 33,
-   "src_n": 35,
-   "gate": "yes",
-   "frame_says": "A man leaning back in his chair with the text \"as everyone else\"."
-  },
-  {
-   "t_settled_s": 4.7,
-   "purpose": "claim",
-   "families": [
-    "text",
-    "cutaway"
-   ],
-   "where": "center",
-   "on_screen": "Text \"ZERO CONTROL\" over a man looking at his phone.",
-   "heard": "\"...gives you zero control.\"",
-   "cut_does": "Cutaway to a new scene; text emphasizes the core problem.",
-   "why_lands": "Names the user's primary frustration, making the problem feel understood and specific.",
-   "video": "v1c044g50000d879a6nog65km3geglb0.mp4",
-   "whole": {
-    "what_it_is_doing": "This video argues that generic auto-caption tools are boring and ineffective, then presents Submagic as a superior, time-saving solution that offers full brand customization.",
-    "the_turn_s": 9.0
-   },
-   "n": 34,
-   "src_n": 36,
-   "gate": "yes",
-   "frame_says": "A man looking at his phone with the text \"ZERO CONTROL\" on screen."
+   "frame_says": "Large orange text \"2 yrs.\" is overlaid on a shot of the speaker typing."
   },
   {
    "t_settled_s": 1.0,
+   "kind": "placement",
    "purpose": "hook",
    "families": [
-    "text",
-    "transition"
+    "card",
+    "text"
    ],
-   "where": "center",
-   "on_screen": "Text: \"ADD CAPTIONS\"",
-   "heard": "\"add captions\"",
-   "cut_does": "Text appears word-by-word, synchronized with the speaker's words.",
-   "why_lands": "Visually stating the video's topic immediately clarifies the value proposition for the viewer.",
-   "video": "v24044gl0000d2rj4k7og65tcgn43lr0.mp4",
+   "where": "upper",
+   "on_screen": "A large number \"100\" and a TikTok logo in a black rounded rectangle.",
+   "heard": "\"...edit 100...\"",
+   "cut_does": "A large, bold number card appears to emphasize the scale of the claim.",
+   "why_lands": "The number is the core of the hook. Making it the biggest thing on screen anchors the viewer's attention and quantifies the promise.",
+   "instead_of": "Just showing the number as a text caption. The card format makes it feel more official and substantial.",
+   "video": "v09044g40000cm9oa7nog65s2crhkf00.mp4",
    "whole": {
-    "what_it_is_doing": "A tutorial demonstrating how CapCut's AI tools can automate video captioning and editing, saving creators time and effort for more creative work.",
-    "the_turn_s": 10.8
+    "what_it_is_doing": "This video demonstrates how an AI tool, Submagic, can rapidly edit short-form videos with captions, B-roll, and effects, saving creators time and money.",
+    "the_turn_s": 3.0
    },
-   "n": 35,
-   "src_n": 37,
+   "n": 6,
+   "src_n": 9,
    "gate": "yes",
-   "frame_says": "A man is speaking with the yellow text \"ADD CAPTIONS\" overlaid."
+   "frame_says": "A speaker with a graphic above him showing the TikTok logo and \"100\"."
   },
   {
-   "t_settled_s": 11.2,
-   "purpose": "turn",
-   "families": [
-    "cutaway",
-    "sfx",
-    "transition"
-   ],
-   "where": "center",
-   "on_screen": "Screen recording of the CapCut app's home screen.",
-   "heard": "\"...and upload our footage.\" Whoosh SFX.",
-   "cut_does": "Cutaway to a screen recording, beginning the tutorial section of the video.",
-   "why_lands": "The transition to the app screen signals the start of the practical demonstration, fulfilling the video's promise.",
-   "video": "v24044gl0000d2rj4k7og65tcgn43lr0.mp4",
-   "whole": {
-    "what_it_is_doing": "A tutorial demonstrating how CapCut's AI tools can automate video captioning and editing, saving creators time and effort for more creative work.",
-    "the_turn_s": 10.8
-   },
-   "n": 36,
-   "src_n": 38,
-   "gate": "yes",
-   "frame_says": "A screen recording of a video editing app's home screen is shown."
-  },
-  {
-   "t_settled_s": 28.8,
+   "t_settled_s": 13.4,
+   "kind": "placement",
    "purpose": "evidence",
    "families": [
     "cutaway",
-    "sfx"
+    "card",
+    "text"
    ],
    "where": "lower",
-   "on_screen": "Screen recording of CapCut, with the \"Captions\" button circled.",
-   "heard": "\"...we simply click...\" Click SFX.",
-   "cut_does": "Graphic overlay (circle) highlights the next crucial step in the process.",
-   "why_lands": "Visually guiding the user's eye to the correct button makes the instruction clear and actionable.",
-   "video": "v24044gl0000d2rj4k7og65tcgn43lr0.mp4",
+   "on_screen": "A B-roll clip of hands counting money, with icons for features overlaid.",
+   "heard": "\"...B-roll clips to your video.\"",
+   "cut_does": "Cuts away to a relevant B-roll clip while overlaying icons for all the features mentioned.",
+   "why_lands": "This demonstrates the B-roll feature in action while summarizing the previous points with icons, reinforcing the value proposition.",
+   "instead_of": "Just staying on the speaker's face. The cutaway is direct proof of the \"auto B-roll\" claim.",
+   "video": "v09044g40000cm9oa7nog65s2crhkf00.mp4",
    "whole": {
-    "what_it_is_doing": "A tutorial demonstrating how CapCut's AI tools can automate video captioning and editing, saving creators time and effort for more creative work.",
-    "the_turn_s": 10.8
+    "what_it_is_doing": "This video demonstrates how an AI tool, Submagic, can rapidly edit short-form videos with captions, B-roll, and effects, saving creators time and money.",
+    "the_turn_s": 3.0
    },
-   "n": 37,
-   "src_n": 40,
+   "n": 7,
+   "src_n": 12,
    "gate": "yes",
-   "frame_says": "A screen recording of CapCut shows the \"Captions\" button circled in white."
-  }
- ],
- "held": [
+   "frame_says": "Hands counting money with the text \"B-ROLL CLIPS\" and several icons overlaid."
+  },
+  {
+   "t_settled_s": 3.2,
+   "kind": "placement",
+   "purpose": "hook",
+   "families": [
+    "text",
+    "sfx"
+   ],
+   "where": "center",
+   "on_screen": "The word \"TRASH\" in large, red, capital letters over the speaker.",
+   "heard": "\"...looks like trash.\"",
+   "cut_does": "A single, large, red word appears, timed to the speaker's dialogue.",
+   "why_lands": "The aggressive text visually confirms the viewer's frustration, making the problem feel more acute and the need for a solution more urgent.",
+   "instead_of": "Just showing his face. The text amplifies the negative feeling he's describing, creating a stronger hook.",
+   "video": "v12044gd0000d855u57og65j1avugm80.mp4",
+   "whole": {
+    "what_it_is_doing": "A student videographer shares his specific Premiere Pro export settings to get the highest quality video on Instagram and TikTok, bypassing their compression.",
+    "the_turn_s": 4.0
+   },
+   "n": 8,
+   "src_n": 13,
+   "gate": "yes",
+   "frame_says": "A speaker with the word \"TRASH\" in large, red, semi-transparent letters."
+  },
+  {
+   "t_settled_s": 4.6,
+   "kind": "placement",
+   "purpose": "turn",
+   "families": [
+    "text",
+    "transition",
+    "sfx"
+   ],
+   "where": "center",
+   "on_screen": "The words \"FOR YOU\" in large, red, capital letters.",
+   "heard": "\"...solution for you.\"",
+   "cut_does": "Text appears with a bright orange light leak transition and rising whoosh sound.",
+   "why_lands": "The flare and sound effect create a dramatic reveal, making the promised solution feel significant and signaling a clear pivot.",
+   "instead_of": "A simple text card. The transition adds energy and marks a definitive shift from problem to solution.",
+   "video": "v12044gd0000d855u57og65j1avugm80.mp4",
+   "whole": {
+    "what_it_is_doing": "A student videographer shares his specific Premiere Pro export settings to get the highest quality video on Instagram and TikTok, bypassing their compression.",
+    "the_turn_s": 4.0
+   },
+   "n": 9,
+   "src_n": 14,
+   "gate": "yes",
+   "frame_says": "A speaker with the words \"FOR YOU\" in large, red, semi-transparent letters."
+  },
+  {
+   "t_settled_s": 22.8,
+   "kind": "placement",
+   "purpose": "evidence",
+   "families": [
+    "cutaway",
+    "text"
+   ],
+   "where": "center",
+   "on_screen": "Premiere Pro \"Basic Video Settings\" UI on a green grid background.",
+   "heard": "\"...1350 by 1080p at 24 fps...\"",
+   "cut_does": "Hard cut to a screen recording of the software, providing visual proof.",
+   "why_lands": "This is the first piece of concrete evidence. It shows the viewer exactly where to go and what to do, making the advice actionable.",
+   "instead_of": "A simple text card with the numbers. Showing the actual UI is more instructive and credible.",
+   "video": "v12044gd0000d855u57og65j1avugm80.mp4",
+   "whole": {
+    "what_it_is_doing": "A student videographer shares his specific Premiere Pro export settings to get the highest quality video on Instagram and TikTok, bypassing their compression.",
+    "the_turn_s": 4.0
+   },
+   "n": 10,
+   "src_n": 16,
+   "gate": "yes",
+   "frame_says": "A video settings UI on a green grid background, with text overlaid."
+  },
   {
    "t_settled_s": 1.3,
+   "kind": "placement",
    "purpose": "hook",
    "families": [
     "text"
    ],
    "where": "center",
    "on_screen": "Large white text \"YOUR editing CAPTIONS\" over the speaker.",
-   "heard": "\"editing your captions.\"",
-   "cut_does": "Text appears word-by-word, timed to the speaker's words.",
-   "why_lands": "Stating the viewer's specific pain point in large text makes the hook immediate and personal.",
+   "heard": "\"Stop manually editing your captions.\"",
+   "cut_does": "Animated text appears to emphasize the core pain point being addressed.",
+   "why_lands": "The text visually punctuates the spoken words, immediately clarifying the video's topic and grabbing attention.",
+   "instead_of": "Just the speaker talking. The text adds visual impact and makes the hook unmissable.",
    "video": "v14044g50000d5la79fog65q5itovh6g.mp4",
    "whole": {
-    "what_it_is_doing": "The video presents the problem of time-consuming manual captioning and then introduces an AI tool, Submagic, as the simple, four-step solution that feels like cheating.",
+    "what_it_is_doing": "The video presents manual captioning as a time-consuming problem and introduces an AI tool, Submagic, as the simple, four-step solution to automate the entire process.",
     "the_turn_s": 4.6
    },
-   "n": 17,
+   "n": 11,
    "src_n": 17,
-   "gate": "no",
-   "frame_says": "A man speaking with the text \"YOUR editing\" and \"stop manually\" overlaid."
+   "gate": "yes",
+   "frame_says": "A speaker with glasses, with the text \"YOUR editing CAPTIONS\" overlaid."
   },
   {
-   "t_settled_s": 8.2,
+   "t_settled_s": 5.0,
+   "kind": "placement",
+   "purpose": "turn",
+   "families": [
+    "transition",
+    "card",
+    "cutaway"
+   ],
+   "where": "full",
+   "on_screen": "A black-and-white background with a phone screen overlay showing the app.",
+   "heard": "\"Submagic automates...\"",
+   "cut_does": "A stylized transition introduces the solution, separating it from the problem section.",
+   "why_lands": "The dramatic color change and phone overlay clearly signal a pivot from the problem to the solution.",
+   "instead_of": "A simple cut to a screen recording. The stylized transition makes the reveal more impactful.",
+   "video": "v14044g50000d5la79fog65q5itovh6g.mp4",
+   "whole": {
+    "what_it_is_doing": "The video presents manual captioning as a time-consuming problem and introduces an AI tool, Submagic, as the simple, four-step solution to automate the entire process.",
+    "the_turn_s": 4.6
+   },
+   "n": 12,
+   "src_n": 18,
+   "gate": "yes",
+   "frame_says": "A black-and-white shot of a speaker with a color phone screen overlay."
+  },
+  {
+   "t_settled_s": 8.4,
+   "kind": "restraint",
+   "purpose": "breath",
+   "families": [
+    "hold"
+   ],
+   "where": "none",
+   "on_screen": "Speaker pointing and talking directly to camera, with phone camera UI overlay.",
+   "heard": "\"...focus on the content itself.\"",
+   "cut_does": "Holds on the speaker's face without adding a graphic for the word \"content.\"",
+   "why_lands": "After a series of fast edits, this hold creates a moment of direct connection and sincerity.",
+   "instead_of": "A text graphic for \"content.\" This would have cluttered the frame and broken the direct address.",
+   "video": "v14044g50000d5la79fog65q5itovh6g.mp4",
+   "whole": {
+    "what_it_is_doing": "The video presents manual captioning as a time-consuming problem and introduces an AI tool, Submagic, as the simple, four-step solution to automate the entire process.",
+    "the_turn_s": 4.6
+   },
+   "n": 13,
+   "src_n": 19,
+   "gate": "yes",
+   "frame_says": "A man points at the camera, with a phone camera UI overlay on the screen."
+  },
+  {
+   "t_settled_s": 10.1,
+   "kind": "placement",
+   "purpose": "evidence",
+   "families": [
+    "cutaway",
+    "card",
+    "sfx"
+   ],
+   "where": "top",
+   "on_screen": "Screen recording of the Submagic UI, with a \"1\" and \"submagic\" logo card.",
+   "heard": "\"Step one, upload your raw video.\"",
+   "cut_does": "Cuts to a screen recording to provide clear, step-by-step evidence of the process.",
+   "why_lands": "It transitions from telling to showing, building credibility by demonstrating the tool's simplicity.",
+   "instead_of": "The speaker just describing the steps. The screen recording is direct, undeniable proof.",
+   "video": "v14044g50000d5la79fog65q5itovh6g.mp4",
+   "whole": {
+    "what_it_is_doing": "The video presents manual captioning as a time-consuming problem and introduces an AI tool, Submagic, as the simple, four-step solution to automate the entire process.",
+    "the_turn_s": 4.6
+   },
+   "n": 14,
+   "src_n": 20,
+   "gate": "yes",
+   "frame_says": "A screen recording of the Submagic website, showing the logo and UI."
+  },
+  {
+   "t_settled_s": 0.5,
+   "kind": "placement",
+   "purpose": "hook",
+   "families": [
+    "text"
+   ],
+   "where": "top",
+   "on_screen": "Large text: \"captions are stealing your editing time\". Speaker is in the background.",
+   "heard": "\"If you edit client videos...\"",
+   "cut_does": "Large, bold text appears over the speaker to state the video's core problem.",
+   "why_lands": "It immediately frames the problem for the target audience before the speaker even finishes his first sentence.",
+   "instead_of": "Letting the speaker state the problem alone. The text is faster and more visually arresting.",
+   "video": "v14044g50000d9kvim7og65hg0im5sng.mp4",
+   "whole": {
+    "what_it_is_doing": "The video argues that manual captioning wastes editors' time and presents Submagic, an AI tool, as the solution to automate editing and reclaim valuable hours.",
+    "the_turn_s": 8.1
+   },
+   "n": 15,
+   "src_n": 21,
+   "gate": "yes",
+   "frame_says": "Large white text reads \"captions are stealing your editing time\" over a speaker."
+  },
+  {
+   "t_settled_s": 6.5,
+   "kind": "restraint",
+   "purpose": "claim",
+   "families": [
+    "hold"
+   ],
+   "where": "none",
+   "on_screen": "Wide shot of the speaker at his desk, typing on a laptop.",
+   "heard": "\"...you could have used to land another client.\"",
+   "cut_does": "Holds the shot on the speaker working, with no additional graphics.",
+   "why_lands": "The lack of a graphic about money or clients keeps the focus on his personal testimony of lost opportunity.",
+   "instead_of": "A cutaway to a dollar sign or calendar. This would feel clich\u00e9 and break the authentic tone.",
+   "video": "v14044g50000d9kvim7og65hg0im5sng.mp4",
+   "whole": {
+    "what_it_is_doing": "The video argues that manual captioning wastes editors' time and presents Submagic, an AI tool, as the solution to automate editing and reclaim valuable hours.",
+    "the_turn_s": 8.1
+   },
+   "n": 16,
+   "src_n": 23,
+   "gate": "yes",
+   "frame_says": "A man sits at a desk using a laptop, with the running caption \"have used\"."
+  },
+  {
+   "t_settled_s": 18.4,
+   "kind": "restraint",
+   "purpose": "evidence",
+   "families": [
+    "hold",
+    "cutaway"
+   ],
+   "where": "none",
+   "on_screen": "Screen recording of the font customization panel. A cursor moves a slider.",
+   "heard": "\"...just customize the font, colors, size and animation...\"",
+   "cut_does": "Holds on the UI panel without excessive highlighting as the voiceover lists features.",
+   "why_lands": "It trusts the viewer to absorb the interface's options while the voiceover provides context and benefits.",
+   "instead_of": "Rapidly zooming to every single button mentioned. This would be visually overwhelming and confusing.",
+   "video": "v14044g50000d9kvim7og65hg0im5sng.mp4",
+   "whole": {
+    "what_it_is_doing": "The video argues that manual captioning wastes editors' time and presents Submagic, an AI tool, as the solution to automate editing and reclaim valuable hours.",
+    "the_turn_s": 8.1
+   },
+   "n": 17,
+   "src_n": 24,
+   "gate": "yes",
+   "frame_says": "A screen recording of a font customization panel, with a cursor on a slider."
+  },
+  {
+   "t_settled_s": 2.6,
+   "kind": "placement",
+   "purpose": "hook",
+   "families": [
+    "text"
+   ],
+   "where": "center",
+   "on_screen": "Speaker looking up at large yellow text: \"YOU DONT KNOW HOW TO EDIT\".",
+   "heard": "\"...you don't know how to edit.\"",
+   "cut_does": "Large, bold text slams on screen, synchronized with the key phrase.",
+   "why_lands": "It directly states the viewer's pain point in an unmissable way, making the hook impossible to ignore.",
+   "instead_of": "Just using standard captions, which would lack the visual punch and authority of the large text.",
+   "video": "v15044gf0000d7akrh7og65p1f3s1ua0.mp4",
+   "whole": {
+    "what_it_is_doing": "The fear of not knowing how to edit is a poor excuse for not creating videos, because the Captions app uses AI to do the editing for you.",
+    "the_turn_s": 4.4
+   },
+   "n": 18,
+   "src_n": 25,
+   "gate": "yes",
+   "frame_says": "A man looks up at large yellow text reading \"YOU DONT KNOW HOW TO EDIT\"."
+  },
+  {
+   "t_settled_s": 6.4,
+   "kind": "placement",
+   "purpose": "turn",
+   "families": [
+    "card",
+    "sfx"
+   ],
+   "where": "upper",
+   "on_screen": "Speaker points up to the \"captions\" app logo and name.",
+   "heard": "\"...the Captions App.\" (with a subtle whoosh/pop sfx)",
+   "cut_does": "The app's logo and name appear above the speaker's head as he names it.",
+   "why_lands": "This is the direct reveal of the solution. The logo provides a clear visual anchor for the product.",
+   "instead_of": "Just saying the name, which would be less memorable and harder for viewers to find later.",
+   "video": "v15044gf0000d7akrh7og65p1f3s1ua0.mp4",
+   "whole": {
+    "what_it_is_doing": "The fear of not knowing how to edit is a poor excuse for not creating videos, because the Captions app uses AI to do the editing for you.",
+    "the_turn_s": 4.4
+   },
+   "n": 19,
+   "src_n": 26,
+   "gate": "yes",
+   "frame_says": "A man points up to the \"captions\" app logo and name."
+  },
+  {
+   "t_settled_s": 9.2,
+   "kind": "restraint",
+   "purpose": "breath",
+   "families": [
+    "hold"
+   ],
+   "where": "none",
+   "on_screen": "Speaker stands by a window, hands crossed, speaking sincerely to the camera.",
+   "heard": "\"And trust me. I get it.\"",
+   "cut_does": "The shot is held on the speaker's face with no graphics or cuts.",
+   "why_lands": "After the hook and solution reveal, this moment builds trust and empathy by being simple and direct.",
+   "instead_of": "Adding text like \"I get it,\" which would feel less sincere and clutter the intimate moment.",
+   "video": "v15044gf0000d7akrh7og65p1f3s1ua0.mp4",
+   "whole": {
+    "what_it_is_doing": "The fear of not knowing how to edit is a poor excuse for not creating videos, because the Captions app uses AI to do the editing for you.",
+    "the_turn_s": 4.4
+   },
+   "n": 20,
+   "src_n": 27,
+   "gate": "yes",
+   "frame_says": "A man stands by a window with his arms crossed, with the caption \"I get it.\""
+  },
+  {
+   "t_settled_s": 27.8,
+   "kind": "placement",
+   "purpose": "payoff",
+   "families": [
+    "text",
+    "transition"
+   ],
+   "where": "lower",
+   "on_screen": "Speaker behind two framed videos, one labeled \"raw clip,\" the other showing the edited version.",
+   "heard": "\"...raw clip compared to the...\"",
+   "cut_does": "The two frames slide into place, presenting a clear before-and-after comparison.",
+   "why_lands": "This is the ultimate proof. It visually resolves the video's central promise in a single, compelling frame.",
+   "instead_of": "Just showing the final video, which would lack the powerful contrast of the side-by-side comparison.",
+   "video": "v15044gf0000d7akrh7og65p1f3s1ua0.mp4",
+   "whole": {
+    "what_it_is_doing": "The fear of not knowing how to edit is a poor excuse for not creating videos, because the Captions app uses AI to do the editing for you.",
+    "the_turn_s": 4.4
+   },
+   "n": 21,
+   "src_n": 28,
+   "gate": "yes",
+   "frame_says": "A man sits behind two framed images showing a before-and-after video edit."
+  },
+  {
+   "t_settled_s": 0.5,
+   "kind": "placement",
+   "purpose": "hook",
+   "families": [
+    "text",
+    "transition"
+   ],
+   "where": "center",
+   "on_screen": "\"EDITS\" in a circling scribble graphic around the speaker.",
+   "heard": "\"today I'm going to show you\"",
+   "cut_does": "Animated text appears and orbits the speaker, establishing the topic.",
+   "why_lands": "The dynamic text grabs attention and visually establishes the video's topic before he even says it.",
+   "instead_of": "A static title card, which would be less engaging and break the flow.",
+   "video": "v15044gf0000d8slpi7og65utp063oi0.mp4",
+   "whole": {
+    "what_it_is_doing": "Demonstrating how the Captions app's AI can automate complex video editing, saving creators time and effort while producing a polished result.",
+    "the_turn_s": 4.1
+   },
+   "n": 22,
+   "src_n": 29,
+   "gate": "yes",
+   "frame_says": "The word \"EDITS\" is inside a yellow circular scribble graphic around a speaker."
+  },
+  {
+   "t_settled_s": 5.1,
+   "kind": "placement",
+   "purpose": "turn",
+   "families": [
+    "card",
+    "sfx"
+   ],
+   "where": "upper",
+   "on_screen": "The \"Captions\" app logo appears above his head.",
+   "heard": "\"with the captions app.\" + whoosh sfx",
+   "cut_does": "Logo graphic fades in with a sound effect, revealing the solution.",
+   "why_lands": "The logo visually introduces the solution at the exact moment it's named, making it memorable.",
+   "instead_of": "Just saying the name, which would be less impactful and harder to remember.",
+   "video": "v15044gf0000d8slpi7og65utp063oi0.mp4",
+   "whole": {
+    "what_it_is_doing": "Demonstrating how the Captions app's AI can automate complex video editing, saving creators time and effort while producing a polished result.",
+    "the_turn_s": 4.1
+   },
+   "n": 23,
+   "src_n": 30,
+   "gate": "yes",
+   "frame_says": "A man looks up at the \"Captions\" app logo floating above his head."
+  },
+  {
+   "t_settled_s": 10.8,
+   "kind": "restraint",
+   "purpose": "claim",
+   "families": [
+    "hold"
+   ],
+   "where": "none",
+   "on_screen": "Speaker sitting in a chair, talking directly to the camera.",
+   "heard": "\"to manually edit this and add B-roll\"",
+   "cut_does": "Holds on a single medium shot for several seconds.",
+   "why_lands": "By not showing B-roll or a complex timeline, the focus stays on the speaker's pain point.",
+   "instead_of": "Cutting to examples of B-roll, which would distract from the problem he's describing.",
+   "video": "v15044gf0000d8slpi7og65utp063oi0.mp4",
+   "whole": {
+    "what_it_is_doing": "Demonstrating how the Captions app's AI can automate complex video editing, saving creators time and effort while producing a polished result.",
+    "the_turn_s": 4.1
+   },
+   "n": 24,
+   "src_n": 31,
+   "gate": "yes",
+   "frame_says": "A man sits in a gaming chair holding a phone, with the caption \"edit this and\"."
+  },
+  {
+   "t_settled_s": 22.0,
+   "kind": "restraint",
+   "purpose": "evidence",
+   "families": [
+    "hold"
+   ],
+   "where": "full",
+   "on_screen": "Screen recording of app templates.",
+   "heard": "analyzes your footage",
+   "cut_does": "Holds on the template screen while the voiceover explains the AI's function.",
+   "why_lands": "It lets the viewer absorb the variety of options without rushing, reinforcing the app's capability.",
+   "instead_of": "Rapidly cutting through each template, which would be overwhelming and less clear.",
+   "video": "v15044gf0000d8slpi7og65utp063oi0.mp4",
+   "whole": {
+    "what_it_is_doing": "Demonstrating how the Captions app's AI can automate complex video editing, saving creators time and effort while producing a polished result.",
+    "the_turn_s": 4.1
+   },
+   "n": 25,
+   "src_n": 32,
+   "gate": "yes",
+   "frame_says": "A screen recording shows a phone screen with various video style templates."
+  },
+  {
+   "t_settled_s": 0.4,
+   "kind": "placement",
+   "purpose": "hook",
+   "families": [
+    "text"
+   ],
+   "where": "center",
+   "on_screen": "Large white text \"the CAPTIONS\" over a close-up of the speaker.",
+   "heard": "\"The captions...\"",
+   "cut_does": "Large, bold text appears to emphasize the subject of the video.",
+   "why_lands": "It immediately addresses the viewer's current action (reading captions), making the content self-referential and engaging.",
+   "instead_of": "Just showing the speaker talking. The text makes the hook explicit and visual.",
+   "video": "v1c044g50000d879a6nog65km3geglb0.mp4",
+   "whole": {
+    "what_it_is_doing": "Argues that generic auto-caption tools make videos boring, and presents Submagic as a customizable, AI-powered solution for creating on-brand, engaging content.",
+    "the_turn_s": 9.2
+   },
+   "n": 26,
+   "src_n": 33,
+   "gate": "yes",
+   "frame_says": "Large white text \"the CAPTIONS\" is overlaid on a man speaking into a microphone."
+  },
+  {
+   "t_settled_s": 9.8,
+   "kind": "placement",
    "purpose": "turn",
    "families": [
     "text",
-    "sfx",
-    "cut"
+    "card"
    ],
    "where": "center",
-   "on_screen": "Speaker in red hoodie. Text: \"Submagic\".",
-   "heard": "\"So when Submagic...\" with a subtle whoosh.",
-   "cut_does": "Hard cut back to the main A-roll as the solution's name appears.",
-   "why_lands": "The name of the solution is presented as the clear, singular answer to the previously established problem.",
-   "video": "v14044g50000d9kvim7og65hg0im5sng.mp4",
+   "on_screen": "Large white text \"I use SUBMAGIC\" over a shot of the speaker working.",
+   "heard": "\"...I use Submagic.\"",
+   "cut_does": "Reveals the product name in large, branded text, marking the pivot.",
+   "why_lands": "This is the solution reveal. Making the name the biggest thing on screen cements it.",
+   "instead_of": "Just saying the name. The text acts as a title card for the solution.",
+   "video": "v1c044g50000d879a6nog65km3geglb0.mp4",
    "whole": {
-    "what_it_is_doing": "Manual video captioning is slow and costly. This AI tool, Submagic, automates captions, B-roll, and more, saving you time to earn more money.",
-    "the_turn_s": 8.2
+    "what_it_is_doing": "Argues that generic auto-caption tools make videos boring, and presents Submagic as a customizable, AI-powered solution for creating on-brand, engaging content.",
+    "the_turn_s": 9.2
    },
-   "n": 22,
-   "src_n": 22,
-   "gate": "no",
-   "frame_says": "A man at a computer with the text \"so when\" on screen."
+   "n": 27,
+   "src_n": 34,
+   "gate": "yes",
+   "frame_says": "Large white text \"I use SUBMAGIC\" is overlaid on a man working at a desk."
   },
   {
-   "t_settled_s": 14.8,
+   "t_settled_s": 12.4,
+   "kind": "restraint",
+   "purpose": "claim",
+   "families": [
+    "hold"
+   ],
+   "where": "none",
+   "on_screen": "Speaker in a red hoodie, talking directly to the camera.",
+   "heard": "\"...makes them fully on-brand...\"",
+   "cut_does": "Stays on the speaker's face without any illustrative graphics.",
+   "why_lands": "It forces the viewer to focus on the speaker's credibility, making the claim feel more personal and sincere.",
+   "instead_of": "A graphic showing a \"brand kit\". This would distract from the speaker's direct address.",
+   "video": "v1c044g50000d879a6nog65km3geglb0.mp4",
+   "whole": {
+    "what_it_is_doing": "Argues that generic auto-caption tools make videos boring, and presents Submagic as a customizable, AI-powered solution for creating on-brand, engaging content.",
+    "the_turn_s": 9.2
+   },
+   "n": 28,
+   "src_n": 35,
+   "gate": "yes",
+   "frame_says": "A man in a red hoodie speaks, with the running caption \"them fully\"."
+  },
+  {
+   "t_settled_s": 0.4,
+   "kind": "placement",
+   "purpose": "hook",
+   "families": [
+    "text"
+   ],
+   "where": "center",
+   "on_screen": "The word 'THIS' in large yellow font over the speaker.",
+   "heard": "\"This is how...\"",
+   "cut_does": "Large text appears word-by-word, synchronized with speech.",
+   "why_lands": "The large, bold text immediately establishes the video is a direct instruction, creating curiosity and a clear promise.",
+   "instead_of": "Just showing the speaker talking, which would be a slower, less engaging start.",
+   "video": "v24044gl0000d2rj4k7og65tcgn43lr0.mp4",
+   "whole": {
+    "what_it_is_doing": "Demonstrating how CapCut's AI features (auto-transcription, filler word removal, and auto-captioning) can dramatically speed up a creator's video editing workflow.",
+    "the_turn_s": 37.1
+   },
+   "n": 29,
+   "src_n": 37,
+   "gate": "yes",
+   "frame_says": "A man is speaking with the words 'THIS IS' in large yellow font over him."
+  },
+  {
+   "t_settled_s": 39.2,
+   "kind": "restraint",
+   "purpose": "payoff",
+   "families": [
+    "hold"
+   ],
+   "where": "none",
+   "on_screen": "Speaker, seated, explaining the benefit of saving time.",
+   "heard": "\"time I can save,\"",
+   "cut_does": "No cut or graphic, just holds on the speaker making his point.",
+   "why_lands": "The lack of graphics makes the benefit feel personal and authentic, not like a marketing claim. The focus is on his experience.",
+   "instead_of": "Adding a graphic of a clock or a brain, which would be clich\u00e9 and less impactful.",
+   "video": "v24044gl0000d2rj4k7og65tcgn43lr0.mp4",
+   "whole": {
+    "what_it_is_doing": "Demonstrating how CapCut's AI features (auto-transcription, filler word removal, and auto-captioning) can dramatically speed up a creator's video editing workflow.",
+    "the_turn_s": 37.1
+   },
+   "n": 30,
+   "src_n": 38,
+   "gate": "yes",
+   "frame_says": "The speaker is talking, with the caption 'I can save,' on screen."
+  },
+  {
+   "t_settled_s": 22.6,
+   "kind": "restraint",
+   "purpose": "breath",
+   "families": [
+    "hold"
+   ],
+   "where": "none",
+   "on_screen": "Speaker talking directly to camera, explaining the feature.",
+   "heard": "\"...awkward pauses.\"",
+   "cut_does": "Holds on the speaker's face without any graphics.",
+   "why_lands": "After showing the complex UI, returning to the speaker's face provides a moment of clarity and reinforces his authority.",
+   "instead_of": "Keeping the UI on screen, which could be distracting while he's explaining the concept.",
+   "video": "v24044gl0000d2rj4k7og65tcgn43lr0.mp4",
+   "whole": {
+    "what_it_is_doing": "Demonstrating how CapCut's AI features (auto-transcription, filler word removal, and auto-captioning) can dramatically speed up a creator's video editing workflow.",
+    "the_turn_s": 37.1
+   },
+   "n": 31,
+   "src_n": 39,
+   "gate": "yes",
+   "frame_says": "The speaker is talking to the camera, with the caption 'awkward pauses.' on screen."
+  },
+  {
+   "t_settled_s": 28.8,
+   "kind": "placement",
    "purpose": "evidence",
    "families": [
     "cutaway",
     "sfx"
    ],
    "where": "lower",
-   "on_screen": "Screen recording of CapCut, with the \"Transcript\" button circled.",
-   "heard": "\"...and hit transcript.\" Click SFX.",
-   "cut_does": "A graphic overlay (circle) highlights a key UI element in the screen recording.",
-   "why_lands": "Highlighting the specific button to press makes the tutorial easy to follow, removing ambiguity.",
+   "on_screen": "Screen recording with a circle highlighting the 'Captions' button.",
+   "heard": "\"we simply click...\" with a click sound.",
+   "cut_does": "A graphic circle and sound effect draw attention to the key button press.",
+   "why_lands": "The highlight and click sound make the crucial step in the process impossible to miss, guiding the viewer's eye.",
+   "instead_of": "Just letting the cursor move, which might be too subtle for viewers to catch.",
    "video": "v24044gl0000d2rj4k7og65tcgn43lr0.mp4",
    "whole": {
-    "what_it_is_doing": "A tutorial demonstrating how CapCut's AI tools can automate video captioning and editing, saving creators time and effort for more creative work.",
-    "the_turn_s": 10.8
+    "what_it_is_doing": "Demonstrating how CapCut's AI features (auto-transcription, filler word removal, and auto-captioning) can dramatically speed up a creator's video editing workflow.",
+    "the_turn_s": 37.1
    },
-   "n": 39,
-   "src_n": 39,
-   "gate": "no",
-   "frame_says": "A screen recording of CapCut shows a swoosh pointing to the \"Media\" button."
+   "n": 32,
+   "src_n": 40,
+   "gate": "yes",
+   "frame_says": "A screen recording of a mobile app shows the 'Captions' button being circled."
   }
  ],
- "tile_px": 3987120,
- "image_tokens": 5316,
- "text_chars": 15437
+ "held": [
+  {
+   "t_settled_s": 11.6,
+   "kind": "restraint",
+   "purpose": "breath",
+   "families": [
+    "hold"
+   ],
+   "where": "none",
+   "on_screen": "The narrator, speaking directly to camera, gesturing with his hands.",
+   "heard": "\"But after he sold this...\"",
+   "cut_does": "Holds on the speaker's face through a key transitional phrase.",
+   "why_lands": "The pause before the pivot creates anticipation. The lack of graphics focuses attention on his words.",
+   "instead_of": "A fast cut or whoosh transition. The hold gives the story a moment to breathe.",
+   "video": "1e5eb227a1814bc0999fd1e62ebef34e.mp4",
+   "whole": {
+    "what_it_is_doing": "A young entrepreneur made $20 million from apps before graduating, and this video holds the secret to how anyone can replicate his success with no coding experience.",
+    "the_turn_s": 21.0
+   },
+   "n": 3,
+   "src_n": 3,
+   "gate": "no",
+   "frame_says": "The narrator is speaking and gesturing, with the word \"after\" on screen."
+  },
+  {
+   "t_settled_s": 2.6,
+   "kind": "placement",
+   "purpose": "hook",
+   "families": [
+    "card",
+    "transition"
+   ],
+   "where": "center",
+   "on_screen": "A Polaroid-style photo of a smiling young man in a graduation cap.",
+   "heard": "\"...but hasn't even graduated...\"",
+   "cut_does": "A spinning transition reveals the photo and text, contrasting with the previous claim.",
+   "why_lands": "The visual of a young graduate grounds the incredible monetary claim in a relatable reality.",
+   "instead_of": "Just saying he's young. The photo provides concrete, surprising evidence.",
+   "video": "1e5eb227a1814bc0999fd1e62ebef34e.mp4",
+   "whole": {
+    "what_it_is_doing": "A young entrepreneur made $20 million from apps before graduating, and this video holds the secret to how anyone can replicate his success with no coding experience.",
+    "the_turn_s": 21.0
+   },
+   "n": 4,
+   "src_n": 4,
+   "gate": "no",
+   "frame_says": "A Polaroid-style photo of a young man, with the text \"but hasn't even\"."
+  },
+  {
+   "t_settled_s": 17.0,
+   "kind": "restraint",
+   "purpose": "breath",
+   "families": [
+    "hold"
+   ],
+   "where": "none",
+   "on_screen": "Speaker at his desk, looking at his monitor, hands on keyboard.",
+   "heard": "\"my focus is making sure...\"",
+   "cut_does": "Holds on a simple shot of the speaker working, with no added graphics.",
+   "why_lands": "After a rapid sequence of graphics, this quiet moment provides a visual reset and focuses attention on his words.",
+   "instead_of": "adding a text overlay like 'OUR FOCUS', which would be redundant and clutter the screen.",
+   "video": "56ba63210cfe4c4da625e0b457cc6703.mp4",
+   "whole": {
+    "what_it_is_doing": "A manager from Legal Soft explains how their virtual staffing service helps law firms grow and operate efficiently by providing seamless talent transitions and outstanding talent.",
+    "the_turn_s": 12.0
+   },
+   "n": 7,
+   "src_n": 7,
+   "gate": "no",
+   "frame_says": "The speaker is at his desk, with a small graphic reading \"my focus\"."
+  },
+  {
+   "t_settled_s": 9.2,
+   "kind": "restraint",
+   "purpose": "turn",
+   "families": [
+    "hold"
+   ],
+   "where": "none",
+   "on_screen": "Speaker looking directly at the camera, in focus.",
+   "heard": "\"But the best part is...\"",
+   "cut_does": "Holds on the speaker's face with no graphics or cuts.",
+   "why_lands": "This pause creates anticipation for the next feature. It signals a shift in importance and draws the viewer in.",
+   "instead_of": "Immediately cutting to the next feature. The hold builds suspense and makes the reveal more impactful.",
+   "video": "v09044g40000cm9oa7nog65s2crhkf00.mp4",
+   "whole": {
+    "what_it_is_doing": "This video demonstrates how an AI tool, Submagic, can rapidly edit short-form videos with captions, B-roll, and effects, saving creators time and money.",
+    "the_turn_s": 3.0
+   },
+   "n": 10,
+   "src_n": 10,
+   "gate": "no",
+   "frame_says": "The speaker is looking at the camera with the text \"BUT THE\" overlaid."
+  },
+  {
+   "t_settled_s": 14.8,
+   "kind": "restraint",
+   "purpose": "claim",
+   "families": [
+    "hold"
+   ],
+   "where": "none",
+   "on_screen": "Speaker looking at the camera, making a strong claim.",
+   "heard": "\"...works insanely well...\"",
+   "cut_does": "Holds on the speaker's face for the entire claim without any visual aids.",
+   "why_lands": "The direct-to-camera delivery makes the strong claim feel more like a personal endorsement rather than a marketing pitch.",
+   "instead_of": "Adding a \"10/10\" or star rating graphic. The human element adds more credibility to a subjective claim.",
+   "video": "v09044g40000cm9oa7nog65s2crhkf00.mp4",
+   "whole": {
+    "what_it_is_doing": "This video demonstrates how an AI tool, Submagic, can rapidly edit short-form videos with captions, B-roll, and effects, saving creators time and money.",
+    "the_turn_s": 3.0
+   },
+   "n": 11,
+   "src_n": 11,
+   "gate": "no",
+   "frame_says": "The speaker is looking at the camera with the text \"WORKS\" overlaid."
+  },
+  {
+   "t_settled_s": 14.8,
+   "kind": "restraint",
+   "purpose": "claim",
+   "families": [
+    "hold"
+   ],
+   "where": "none",
+   "on_screen": "Speaker looking directly at the camera, speaking confidently.",
+   "heard": "\"After lots and lots of testing...\"",
+   "cut_does": "The shot holds on the speaker's face, with no cutaway or b-roll.",
+   "why_lands": "By staying on his face, the edit builds personal credibility. It's his experience, not a generic process, that led to the solution.",
+   "instead_of": "B-roll of him at a computer. This would have been generic and less personal, weakening his authority.",
+   "video": "v12044gd0000d855u57og65j1avugm80.mp4",
+   "whole": {
+    "what_it_is_doing": "A student videographer shares his specific Premiere Pro export settings to get the highest quality video on Instagram and TikTok, bypassing their compression.",
+    "the_turn_s": 4.0
+   },
+   "n": 15,
+   "src_n": 15,
+   "gate": "no",
+   "frame_says": "The speaker is talking, with the text \"AND LOTS OF TESTING\" overlaid."
+  },
+  {
+   "t_settled_s": 8.2,
+   "kind": "placement",
+   "purpose": "turn",
+   "families": [
+    "text"
+   ],
+   "where": "center",
+   "on_screen": "The word \"Submagic\" appears over the speaker as he introduces the solution.",
+   "heard": "\"So when Submagic showed me...\"",
+   "cut_does": "A simple text card introduces the brand name at the exact moment it's spoken.",
+   "why_lands": "This is the pivot from problem to solution. Branding the moment makes the solution's name memorable.",
+   "instead_of": "Just saying the name. The text ensures the brand name is seen, not just heard.",
+   "video": "v14044g50000d9kvim7og65hg0im5sng.mp4",
+   "whole": {
+    "what_it_is_doing": "The video argues that manual captioning wastes editors' time and presents Submagic, an AI tool, as the solution to automate editing and reclaim valuable hours.",
+    "the_turn_s": 8.1
+   },
+   "n": 22,
+   "src_n": 22,
+   "gate": "no",
+   "frame_says": "A man sits at a desk, with the running caption \"so when\" at the bottom."
+  },
+  {
+   "t_settled_s": 7.6,
+   "kind": "placement",
+   "purpose": "claim",
+   "families": [
+    "hold",
+    "text"
+   ],
+   "where": "lower",
+   "on_screen": "Speaker leans back, bored, with text \"as everyone else\".",
+   "heard": "\"...as everyone else...\"",
+   "cut_does": "Holds the shot on the speaker's bored expression for 2 seconds.",
+   "why_lands": "The extended hold on the physical expression of boredom lets the feeling land, reinforcing the claim.",
+   "instead_of": "A quick cut. A faster pace would have undercut the feeling of tediousness being described.",
+   "video": "v1c044g50000d879a6nog65km3geglb0.mp4",
+   "whole": {
+    "what_it_is_doing": "Argues that generic auto-caption tools make videos boring, and presents Submagic as a customizable, AI-powered solution for creating on-brand, engaging content.",
+    "the_turn_s": 9.2
+   },
+   "n": 36,
+   "src_n": 36,
+   "gate": "no",
+   "frame_says": "A man leans back in his chair, with the running caption \"same boring look\"."
+  }
+ ],
+ "density": {
+  "placement": 23,
+  "restraint": 9,
+  "restraint_share": 28.1,
+  "videos_with_a_restraint_moment": 6
+ },
+ "tile_px": 3879360,
+ "image_tokens": 5172,
+ "text_chars": 18134
 }

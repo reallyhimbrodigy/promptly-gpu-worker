@@ -1018,30 +1018,38 @@ def prestage(access_token, title_text, controls=None, source_path=None,
 # the agent exported without ever seeing a composed frame. ChatCut's own skill
 # says to download each URI and inspect the pixels there — and nothing in this
 # prompt said so, which is the producer half of the same gap.
+# THE FETCH RULE IS NOW A SERVE RULE, and the old text is the reason.
+#
+# It used to say: `preview_timeline` returns signed URLs, so download them all,
+# tile them with ffmpeg, Read the sheet once. Every word of that was correct
+# when written — reading a URL errors, and one Read per frame had cost twelve
+# turns on an earlier run. It was also, measured on run 24, the single most
+# expensive instruction in the prompt:
+#
+#     49,501 chars of tool-call payload typed by the agent
+#       1,380 (2.8%) was the EDIT — two edit_item calls
+#      44,098 (89%) was signed S3 URLs, retyped into curl commands
+#     at 6.23s of generation per 1k chars => ~275s TYPING, ~156s RUNNING
+#
+# The harness now watches for a `preview_timeline` result and fetches what it
+# points at, sending the pixels back. So the instruction inverts: the agent
+# asks to look, and looking is free. It is NOT told to look less — bounding the
+# looking is precisely what Zac reversed.
 FETCH_RULE = (
-    "LOOKING AT A COMPOSED FRAME TAKES TWO STEPS. `preview_timeline` returns "
-    "signed image URLs, and `Read` only opens LOCAL paths — reading a URL "
-    "errors and you will have looked at nothing. Download first, then read.\n\n"
-    # ONE SHEET, NOT ONE READ PER FRAME. Measured on run-1789443426: 13 of 24
-    # tool calls were `Read` of a single frame — twelve turns spent on the same
-    # review an earlier run did in one, because nothing said to tile. A
-    # contact sheet is also the BETTER instrument: the defects this turn is
-    # for — a collision, a band drifting, a title landing on the wrong moment —
-    # are comparisons ACROSS frames, and frames read one at a time are compared
-    # from memory.
-    "DOWNLOAD THEM ALL, TILE THEM INTO ONE SHEET, READ THE SHEET ONCE. Not one "
-    "Read per frame: twelve frames read one at a time is twelve turns spent on "
-    "the review, and a collision or a drifting band is a comparison ACROSS "
-    "frames that a sheet shows you and a sequence of single frames does not.\n"
-    "    mkdir -p /work/frames && cd /work/frames\n"
-    "    curl -fsSL -o f0.jpg \"<uri 1>\"   # one curl per uri, all in ONE Bash\n"
-    "    curl -fsSL -o f1.jpg \"<uri 2>\"\n"
-    "    ffmpeg -v error -i f0.jpg -i f1.jpg ... -filter_complex \\\n"
-    "      \"[0][1]...hstack=inputs=N,scale=1600:-1\" -frames:v 1 sheet.png\n"
-    "    Read /work/frames/sheet.png            # ONE Read\n"
-    "Use -fsSL: without it curl writes a redirect body and exits 0, which is a "
-    "file that is not a frame. If a curl fails, say so — a sheet with a missing "
-    "tile is a frame you did not look at, not a frame that was fine.\n\n")
+    "YOU DO NOT DOWNLOAD FRAMES. When you call `preview_timeline`, the frames "
+    "it names are FETCHED FOR YOU and arrive in your next message as pictures, "
+    "in the order the tool returned them. Look at them there.\n"
+    "  - do NOT curl, wget or otherwise download a frame URL\n"
+    "  - do NOT tile frames with ffmpeg\n"
+    "  - do NOT `Read` a frame: `Read` opens local paths, and you already have "
+    "the pixels in the conversation\n"
+    "None of that is a limit on LOOKING. Ask `preview_timeline` for whatever "
+    "frames you want, as often as you want, at whatever moments you think "
+    "matter — entrances, exits, the frame after a cut, a band you are unsure "
+    "about. Every call is served back to you as pictures. The only thing that "
+    "has been taken away is the typing.\n"
+    "If a frame you asked for does not arrive as a picture, say so in your "
+    "final message — a frame you did not see is not a frame that was fine.\n\n")
 
 TWO_TURN_LOOP = (
     "THE LOOP IS TWO PASSES. A third is a failure state, not a budget.\n\n"
@@ -1950,6 +1958,85 @@ def pass2_message(frames, plan_frames):
     return _message(blocks)
 
 
+# ── THE FRAME SERVER: THE AGENT ASKS TO LOOK, THE HARNESS FETCHES ───────────
+#
+# MEASURED on run 24, and it is the whole execution half:
+#
+#     tool-call payload the agent TYPED        49,501 chars
+#       of which mcp__chatcut__edit_item        1,380   2.8%   <- the EDIT
+#       of which Bash                          47,379  95.7%
+#       of which signed S3 frame URLs          44,098  89.1%
+#     at 6.23 s of tool_use generation per 1k chars
+#       => ~275s TYPING URLS, plus 156s of Bash RUNNING the curls
+#       => ~430 of 908 seconds fetching frames by hand
+#
+# `preview_timeline` returns signed URLs, not pixels. So an agent that scrubs —
+# which is exactly what it is supposed to do — pays for every look by
+# retyping a 300-character signed URL into a curl command, then tiling with
+# ffmpeg, then Read-ing the tile back. Zac's ruling was that the agent scrubs
+# and nobody pre-picks its frames; it was never that looking should cost four
+# minutes of typing.
+#
+# So the harness watches for a `preview_timeline` RESULT and serves what it
+# points at: fetch the URLs here, send the pixels back. The agent keeps asking
+# for whatever frames it wants, and never writes a URL again.
+#
+# BOUNDED, BUT NOT CHEAPENED. The cap is on total frames served in a run, not
+# on how often the agent may look — bounding the looking is the thing that was
+# reversed. `preview_timeline` caps itself at 9 per call.
+_FRAME_URL_RE = re.compile(r'https://[^\s"\\\']+?\.(?:jpg|jpeg|png)(?:\?[^\s"\\\']*)?')
+_SERVE_CAP = 60                      # frames, whole run
+
+
+def _frame_urls(result_text):
+    """Signed frame URLs in a tool result, in order, deduped."""
+    seen, out = set(), []
+    for u in _FRAME_URL_RE.findall(result_text or ""):
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
+
+def _fetch_frames(urls, out_dir, already):
+    """(blocks, state). Fetch signed frame URLs and return them as image blocks.
+
+    A STATE, never a silent empty list: served-nothing and asked-for-nothing
+    are different facts, and only one of them means the agent is about to go
+    and curl them itself.
+    """
+    import urllib.request
+    os.makedirs(out_dir, exist_ok=True)
+    blocks, got, failed = [], [], []
+    for u in urls:
+        if u in already:
+            continue
+        if len(already) + len(got) >= _SERVE_CAP:
+            failed.append("cap %d reached" % _SERVE_CAP)
+            break
+        fp = os.path.join(out_dir, "f%03d.jpg" % (len(already) + len(got)))
+        try:
+            with urllib.request.urlopen(u, timeout=45) as r:
+                b = r.read()
+            if not b:
+                failed.append("empty body")
+                continue
+            with open(fp, "wb") as fh:
+                fh.write(b)
+        except Exception as e:                                    # noqa: BLE001
+            failed.append("%s: %s" % (type(e).__name__, str(e)[:60]))
+            continue
+        already.add(u)
+        got.append(u)
+        blocks.append(_img_block(fp))
+    if not blocks:
+        return [], ("SERVED 0 — %d url(s) seen, %d already served, failures %s"
+                    % (len(urls), len(urls) - len(failed), failed[:3]))
+    return blocks, "SERVED %d of %d url(s)%s" % (
+        len(blocks), len(urls),
+        ("; %d failed: %s" % (len(failed), failed[:2])) if failed else "")
+
+
 def _edit_frames(tok, pid, total_frames, n=EDIT_FRAMES_N, fps=30):
     """Frames of the EDIT for pass 2 — from a real render, not the 9-frame cap.
 
@@ -2589,7 +2676,60 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     _total_frames = max([(r["from"] or 0) + (r["dur"] or 0) for r in _man]
                         or [0])
     _n_calls = len({r["call"] for r in _man}) or 1
-    _state = {"edits": 0, "sent": False, "pass2": ""}
+    _state = {"edits": 0, "sent": False, "pass2": "",
+              # the frame server's own record: which preview_timeline
+              # calls are outstanding, what has been served, and which
+              # URLs are already pixels in the transcript.
+              "pending": set(), "served": [], "served_urls": set(),
+              "render_thread": None}
+
+    def _serve_what_it_asked_to_see(ev, send):
+        """Every `preview_timeline` result becomes PIXELS in the next message.
+
+        The agent asks to look; the harness fetches. It never writes a signed
+        URL, never runs curl, never tiles with ffmpeg, never Reads a file back
+        — 89% of everything it typed on run 24 was S3 URLs.
+
+        This does not bound the looking. It makes looking free, which is the
+        opposite thing and the one Zac's ruling actually wanted.
+        """
+        if ev.get("type") == "assistant":
+            for _b in ((ev.get("message") or {}).get("content") or []):
+                if _b.get("type") == "tool_use" and \
+                        str(_b.get("name") or "").endswith("preview_timeline"):
+                    _state["pending"].add(_b.get("id"))
+            return
+        if ev.get("type") != "user":
+            return
+        _text = []
+        for _b in ((ev.get("message") or {}).get("content") or []):
+            if _b.get("type") != "tool_result":
+                continue
+            if _b.get("tool_use_id") not in _state["pending"]:
+                continue
+            _state["pending"].discard(_b.get("tool_use_id"))
+            _c = _b.get("content")
+            if isinstance(_c, list):
+                _c = " ".join(str(x.get("text") or "") for x in _c
+                              if isinstance(x, dict))
+            _text.append(str(_c or ""))
+        if not _text:
+            return
+        _urls = _frame_urls(" ".join(_text))
+        if not _urls:
+            _state["served"].append("ASKED but the result named no frame URL")
+            return
+        _blocks, _st = _fetch_frames(_urls, "/work/served",
+                                     _state["served_urls"])
+        _state["served"].append(_st)
+        print("  FRAMES SERVED   : %s" % _st, flush=True)
+        if _blocks:
+            send(_message([{"type": "text", "text":
+                            "The frames you just asked for, as pictures — "
+                            "in the order preview_timeline returned them. "
+                            "Do not download them; you are looking at them. "
+                            "Ask for more whenever you want to look again."}]
+                          + _blocks))
 
     def _drive(ev, send, close):
         """PASS 2: the edit is shown to the agent, once its placements land.
@@ -2597,6 +2737,7 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         FIRED ON THE PLAN'S LAST CALL, not on a fixed count — a plan with no
         effect names one call, and waiting for a second would have hung.
         """
+        _serve_what_it_asked_to_see(ev, send)
         if _state["sent"] or ev.get("type") != "assistant":
             return
         for b2 in ((ev.get("message") or {}).get("content") or []):
@@ -2606,30 +2747,65 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         if _state["edits"] < _n_calls or not _stage:
             return
         _state["sent"] = True
-        _got, _want = _edit_frames(tok, _stage["projectId"], _total_frames)
-        # PRINTED IN THE SAME COMMIT THAT NEEDS IT. Run 24 could not be read:
-        # the agent scrubbed 19 frames of its own with 10 Bash calls and 156s,
-        # and NOTHING in the record said whether that was because pass 2 never
-        # arrived or because it arrived and the agent looked further anyway.
-        # Those are opposite diagnoses — a broken harness against an agent
-        # doing exactly what it was told — and they rendered identically.
-        _state["pass2"] = ("SERVED %d frame(s)" % len(_got) if _got
-                           else "NOT SERVED — _edit_frames returned nothing; "
-                                "the agent was told to scrub for itself")
-        print("  PASS 2          : %s" % _state["pass2"], flush=True)
-        if _got:
-            send(pass2_message(_got, _want))
-        else:
-            # NAMED, NOT SILENT. An agent told nothing would export blind.
-            send(_message([{"type": "text", "text":
-                            "The edit could not be rendered for you to look "
-                            "at, so you have NOT seen it. Scrub it yourself "
-                            "with preview_timeline — %s is a reasonable place "
-                            "to start, and look at whatever else you need — "
-                            "then say in your final message that the harness "
-                            "could not show you the edit."
-                            % ", ".join(str(f) for f in _want[:9])}]))
-        close()
+        # OFF THE EVENT LOOP. `_edit_frames` submits a cloud render and polls
+        # it for up to 240s. Run synchronously here it stops this callback
+        # returning, so run_timed stops reading stdout, the pipe fills at 64K
+        # and the AGENT BLOCKS on a write — a hang that looks exactly like a
+        # slow model, inside the harness built to find out why the model is
+        # slow. And while it blocked, the agent had already gone and fetched
+        # the edit by hand.
+        import threading as _th
+
+        def _render_and_send():
+            # try/finally AROUND EVERYTHING, because `close()` lives in here
+            # now. stream-json input ends at EOF; a thread that dies before
+            # closing stdin leaves the agent waiting for a turn that never
+            # arrives, and the run burns to its 1500s timeout looking like a
+            # slow model. The old synchronous version could not fail this way —
+            # moving work onto a thread moved the close with it.
+            try:
+                _render_and_send_inner()
+            except Exception as _e:                               # noqa: BLE001
+                _state["pass2"] = ("FAILED %s: %s"
+                                   % (type(_e).__name__, str(_e)[:160]))
+                print("  PASS 2          : %s" % _state["pass2"], flush=True)
+            finally:
+                close()
+
+        def _render_and_send_inner():
+            _got, _want = _edit_frames(tok, _stage["projectId"], _total_frames)
+            # PRINTED IN THE SAME COMMIT THAT NEEDS IT. Run 24 could not be
+            # read: the agent scrubbed 19 frames of its own with 10 Bash calls
+            # and 156s, and NOTHING in the record said whether that was because
+            # pass 2 never arrived or because it arrived and the agent looked
+            # further anyway. Those are opposite diagnoses — a broken harness
+            # against an agent doing exactly what it was told — and they
+            # rendered identically.
+            _state["pass2"] = ("SERVED %d frame(s)" % len(_got) if _got
+                               else "NOT SERVED — _edit_frames returned "
+                                    "nothing; the agent scrubs for itself, "
+                                    "and the frame server hands it the pixels")
+            print("  PASS 2          : %s" % _state["pass2"], flush=True)
+            if _got:
+                send(pass2_message(_got, _want))
+            else:
+                # NAMED, NOT SILENT. An agent told nothing would export blind.
+                # It is NOT told to curl: whatever it asks preview_timeline for
+                # comes back as pixels from the frame server.
+                send(_message([{"type": "text", "text":
+                                "The harness could not render the edit for "
+                                "you, so you have NOT seen it yet. Ask "
+                                "preview_timeline for the frames you want — "
+                                "%s is a reasonable place to start — and they "
+                                "will be sent to you as pictures. Then say in "
+                                "your final message that the harness could not "
+                                "render the edit."
+                                % ", ".join(str(f) for f in _want[:9])}]))
+            close()
+
+        _state["render_thread"] = _th.Thread(target=_render_and_send,
+                                             daemon=True)
+        _state["render_thread"].start()
 
     _rc, _errtxt, _wall, _killed = turn_clock.run_timed(
         _cmd, "/work", "/work/stream.jsonl", "/work/timing.json", 1500,
@@ -2677,6 +2853,14 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         flush=True)
     out = {"pass2": _state.get("pass2") or "NEVER FIRED — the plan's last "
                                            "edit_item call was not reached",
+           # THE FRAME SERVER'S OWN NUMBER, in the record, because the whole
+           # point of it is that a number moves: 89% of everything the agent
+           # typed on run 24 was signed S3 URLs it was about to curl.
+           "frames_served": {"urls": len(_state.get("served_urls") or ()),
+                             "events": _state.get("served") or [],
+                             "state": ("MEASURED" if _state.get("served")
+                                       else "NONE — the agent never asked "
+                                            "preview_timeline for a frame")},
            "think_tokens": think_tokens,
            "prestaged": bool(_stage),
            "turn_budget": _budget,

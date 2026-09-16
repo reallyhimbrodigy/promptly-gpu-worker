@@ -1,82 +1,133 @@
-WATCH THIS VIDEO AND MARK THE MOMENTS THAT MATTER.
+WATCH THIS VIDEO AND MARK THE MOMENTS THAT MATTER — INCLUDING THE EMPTY ONES.
 
 You can see it and you can hear it. Both are evidence. Watch it once end to
-end, then go back and mark the moments where an EDITORIAL DECISION is visible
-or audible — where a graphic lands, where a cut falls, where a card carries a
-number, where a sound gives something weight, where a hold creates a wait.
+end, then go back and mark the moments where an EDITORIAL DECISION is visible,
+audible, or DELIBERATELY ABSENT.
 
-This is not a summary and not a transcript. It is a list of moments, each one
-pinned to a frame a person could look at and see the decision.
+There are TWO KINDS OF MOMENT and the artefact needs both.
 
-WHAT COUNTS AS A MOMENT
+  PLACEMENT — the editor did something: a graphic arrives, a cut lands, a sound
+              marks a reveal, the frame pushes in.
+
+  RESTRAINT — the editor did NOTHING, and doing nothing was the decision. A
+              claim that goes unillustrated. A number spoken with no card. A
+              pause held with no sound under it. A long take where a cut was
+              available. A moment that is obviously begging for a graphic and
+              gets clean footage instead.
+
+RESTRAINT IS NOT "A BORING BIT". It is a moment where a competent editor would
+have reached for something and this one did not, and the video is better for
+it. If you cannot say what the moment could plausibly have carried, it is not a
+restraint moment — it is just footage, and it does not belong here.
+
+An artefact made only of placements teaches "put something here". That is a
+fact to imitate. What generalises is the DECISION — including the decision to
+leave a moment alone.
+
+WHAT COUNTS AS A PLACEMENT MOMENT
   - a graphic, word, card or number ARRIVES on screen
   - a cut lands somewhere a cut changes the meaning (a new angle on a key word,
     a pivot to a new chapter, a rhythmic run of cuts through a list)
   - a cutaway leaves the speaker to show proof, a tool, or a metaphor
   - a sound marks something (a reveal, a click, a whoosh, a hit, a music drop)
   - a push-in, a scale, a shake or any camera/frame move that adds emphasis
-  - a HOLD: the edit deliberately does nothing while something builds
-  - silence used on purpose
 
-WHAT DOES NOT COUNT
-  - the speaker continuing to talk over an unchanged frame
+WHAT COUNTS AS A RESTRAINT MOMENT
+  - a claim, a statistic or a promise spoken with NOTHING on screen
+  - a shot held long past the point where a cut was available
+  - silence or a pause with no sound effect and no music swell under it
+  - a section where the speaker carries it alone and the edit stays out
+  - a graphic that arrives LATER than the words, so the words land first
+  - somewhere the video could have cut away and stays on the face
+
+WHAT DOES NOT COUNT, EITHER WAY
+  - the speaker continuing to talk over an unchanged frame with nothing at
+    stake — that is neither a placement nor a restraint, it is filler
   - a caption line that is just the words being spoken, with nothing done to it
   - anything you cannot point at a single frame and see
 
 THE FRAME
-For each moment give `t_settled_s`: the time, in seconds, of a frame where the
-thing you are describing is FULLY PRESENT and STILL — after any entrance
-animation has finished, before it leaves. Not the frame it starts moving on.
-If a graphic animates in over 0.4s and holds for 1.5s, pick the middle of the
-hold. A frame grabbed at this time must show what you describe; that is the
-one thing this timestamp is for.
+For each moment give `t_settled_s`: the time, in seconds, of a frame that shows
+the moment. For a PLACEMENT that means a frame where the thing you describe is
+FULLY PRESENT and STILL — after any entrance animation has finished, before it
+leaves. For a RESTRAINT that means a frame in the middle of the empty moment,
+where a viewer can see there is nothing there.
 
-Do not round to whole seconds. Give one decimal.
+Do not round to whole seconds. Give one decimal. A frame grabbed at this time
+must show what you describe; that is the one thing this timestamp is for.
 
-THE FIVE FIELDS, AND THEY ARE SHORT ON PURPOSE
+THE FIELDS, AND THEY ARE SHORT ON PURPOSE
 This artefact is read at a glance by an editor deciding what to do at a moment
 of the same shape. Long prose is not read. Stay inside the word limits; a field
 that needs more words usually means the moment is two moments.
 
+  kind        "placement" or "restraint".
+
   on_screen   <= 14 words. What a viewer SEES in that frame. Name the actual
                 words if there is text ("$2,000,000 in gold 3D type"), the
                 actual subject if there is not ("speaker, tilted low angle,
-                laptop closed").
+                laptop closed"). For a restraint moment this is the plain
+                footage, described plainly — that IS the answer.
   heard       <= 10 words. What a viewer HEARS across that moment: the spoken
                 words in quotes if they matter, and the non-speech sound if
                 there is one ("cha-ching", "bass thump", "music drops out",
-                "clicks under cursor"). If there is nothing but speech, say the
-                words. If there is silence, say silence.
-  cut_does    <= 12 words. What the EDIT does here, mechanically. "hard cut to
-                new location", "holds on face, no cut for 1.4s", "cutaway to
-                screen recording", "text in 3 frames before the word", "push-in
-                on the number", "sfx on the reveal". If the edit does nothing
-                mechanical and the moment is a graphic arriving, say so.
+                "clicks under cursor"). If there is silence, say silence.
+  cut_does    <= 12 words. What the EDIT does here, mechanically. For a
+                placement: "hard cut to new location", "text in 3 frames
+                before the word", "push-in on the number", "sfx on the reveal".
+                FOR A RESTRAINT, say what the edit does NOT do, mechanically:
+                "no cut for 4.2s", "no graphic under a dollar figure",
+                "silence left unscored".
   why_lands   <= 18 words. WHY this works at this moment — the condition that
                 made it the right call. Write it as a reason an editor could
                 apply somewhere else, not as praise. "the number is the claim,
                 so it gets the largest thing on screen" lands; "great editing"
-                does not.
+                does not. For a restraint: why the emptiness is doing work.
+
+  AND THE FIELD THAT MAKES THIS GENERALISE — every moment has one:
+
+  instead_of  <= 16 words. THE OBVIOUS ALTERNATIVE, AND WHY IT LOSES.
+                For a PLACEMENT: the other treatment a competent editor would
+                reach for here, and what it would have cost. Not a list of
+                everything possible — the ONE obvious rival.
+                  "not a cutaway: leaving the face drops the accusation"
+                  "not a card: the number is spoken twice, text would repeat it"
+                  "not a zoom: the frame is already tight, a push would crop him"
+                For a RESTRAINT: what could have been placed here and why it
+                would have hurt.
+                  "a stat card would have arrived before the claim was made"
+                  "a whoosh here would be the third in four seconds"
+                  "cutting away would lose the pause he is holding on purpose"
+                This is the half a reader can act on somewhere else. "A card is
+                here" is a fact to copy; "a card and not a cutaway, because the
+                face carries the accusation" is a decision to apply.
+
   where       one of: top, upper, center, lower, bottom, full, none.
                 Where in the FRAME the graphic or emphasis sits. `full` means
                 it occupies the whole frame. `none` means this moment has no
-                graphic (a cut, a hold, a sound on unchanged footage).
+                graphic — which is EVERY restraint moment, and some placements
+                (a cut, a hold, a sound on unchanged footage).
 
 AND TWO LABELS
   purpose     one of: hook, claim, evidence, turn, payoff, breath, close.
                 What job this moment does in the argument.
   families    a list, from: text, card, sfx, zoom, cutaway, cut, transition,
-                hold, silence, music. Name every one that is actually operating
-                at this moment. Use `text` for words on screen that are doing
-                something beyond transcription; `card` for a framed graphic
-                object carrying a value, stat, name or logo. If something real
-                is happening that none of these names, add it as a plain word —
-                do not force it into a family it is not.
+                hold, silence, music. For a PLACEMENT, name every one actually
+                operating. For a RESTRAINT, this is what the moment IS made of
+                — usually `hold`, `silence`, or nothing at all, so an empty
+                list is a correct answer here and only here. Use `text` for
+                words on screen doing something beyond transcription; `card`
+                for a framed graphic object carrying a value, stat, name or
+                logo. If something real is happening that none of these names,
+                add it as a plain word — do not force it into a family it is
+                not.
 
 HOW MANY
-Between 6 and 14 moments. Cover the whole runtime, not just the opening — the
-turn and the close are where most edits get worse and these videos do not.
-Fewer honest moments beat more padded ones.
+Between 8 and 16 moments, and BOTH KINDS MUST BE PRESENT. Restraint moments are
+harder to see and every one of these videos has several — a video that seems to
+place something at every moment is a video you have not finished watching.
+Cover the whole runtime, not just the opening. Fewer honest moments beat more
+padded ones, and an invented restraint moment is worse than a missing one.
 
 NO RATES. Do not write "about one every three seconds", "roughly 8 per video",
 "high density" or any other count-per-time. This artefact instructs an editor
@@ -92,13 +143,27 @@ RETURN STRICT JSON AND NOTHING ELSE:
   "moments": [
     {
       "t_settled_s": 3.4,
+      "kind": "placement",
       "purpose": "hook",
       "families": ["text", "sfx"],
       "where": "center",
       "on_screen": "...",
       "heard": "...",
       "cut_does": "...",
-      "why_lands": "..."
+      "why_lands": "...",
+      "instead_of": "..."
+    },
+    {
+      "t_settled_s": 11.8,
+      "kind": "restraint",
+      "purpose": "claim",
+      "families": ["hold"],
+      "where": "none",
+      "on_screen": "...",
+      "heard": "...",
+      "cut_does": "...",
+      "why_lands": "...",
+      "instead_of": "..."
     }
   ]
 }

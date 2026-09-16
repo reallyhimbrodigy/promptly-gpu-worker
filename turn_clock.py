@@ -153,17 +153,25 @@ def run_timed(cmd, cwd, stream_path, timing_path, timeout, env=None,
                          text=True, bufsize=1, env=_env)
     killed = False
     _stdin_open = [bool(stdin_first)]
+    _io_lock = threading.Lock()
 
     def _send(msg):
         """Write another user message into the running conversation."""
         if not _stdin_open[0]:
             return False
-        try:
-            p.stdin.write(json.dumps(msg) + "\n")
-            p.stdin.flush()
-            return True
-        except Exception:                                         # noqa: BLE001
-            return False
+        # LOCKED, because `send` is no longer called only from the stdout
+        # loop. The harness renders the edit on a BACKGROUND thread — a render
+        # poll inside the event callback stops this loop reading stdout, the
+        # pipe fills, and the agent blocks on a write with nothing in the log
+        # to say so. Two threads writing interleaved JSON to one stdin would
+        # corrupt both messages and the agent would see neither.
+        with _io_lock:
+            try:
+                p.stdin.write(json.dumps(msg) + "\n")
+                p.stdin.flush()
+                return True
+            except Exception:                                     # noqa: BLE001
+                return False
 
     def _close_stdin():
         """Tell the agent no more input is coming, so it can finish.
@@ -172,12 +180,13 @@ def run_timed(cmd, cwd, stream_path, timing_path, timeout, env=None,
         after the last message is a agent waiting for a turn that never
         arrives, which looks exactly like a slow model.
         """
-        if _stdin_open[0]:
-            _stdin_open[0] = False
-            try:
-                p.stdin.close()
-            except Exception:                                     # noqa: BLE001
-                pass
+        with _io_lock:
+            if _stdin_open[0]:
+                _stdin_open[0] = False
+                try:
+                    p.stdin.close()
+                except Exception:                                 # noqa: BLE001
+                    pass
 
     if stdin_first:
         try:

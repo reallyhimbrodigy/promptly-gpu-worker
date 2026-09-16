@@ -87,8 +87,16 @@ def select(recs, per_video):
                     return m
             return None
 
+        # THE HOOK, THE TURN, AND AT LEAST ONE RESTRAINT MOMENT PER VIDEO.
+        # Restraint is the half the greedy coverage rule would lose: a
+        # restraint moment usually names no family, so it adds no (family,
+        # where) pair and sorts last forever. A sheet made of placements
+        # teaches "put something here", which is the fact an imitator copies;
+        # the decision NOT to place is the half that generalises. So it is
+        # taken by name, not left to arithmetic.
         for pred in (lambda m: m["purpose"] == "hook",
-                     lambda m: m["purpose"] in ("turn", "payoff")):
+                     lambda m: m["purpose"] in ("turn", "payoff"),
+                     lambda m: m.get("kind") == "restraint"):
             m = pop(pred)
             if m:
                 take.append(m)
@@ -150,17 +158,32 @@ def sheet_text(picked, whole):
     # prose form: it reads like a complete thought and is missing its verb.
     for v, w in whole:
         L.append("  %-10s %s" % (v[:10], w.get("what_it_is_doing") or "(none)"))
+    _nr = sum(1 for m in picked if m.get("kind") == "restraint")
     L += ["",
-          "  #   t     purpose   where   families",
-          "        SEEN / HEARD / THE EDIT / WHY IT LANDS", ""]
+          "  Half of this sheet is PLACEMENT — what an editor did at that "
+          "second. The rest is RESTRAINT — a moment where a competent editor "
+          "would have reached for something and this one did not, and the "
+          "video is better for it. %d of %d moments below are restraint. The "
+          "NOT line on every moment is the obvious alternative and why it "
+          "loses; that is the half you can apply somewhere else." % (_nr,
+                                                                     len(picked)),
+          "",
+          "  #   t     kind       purpose   where   families",
+          "        SEEN / HEARD / THE EDIT / WHY IT LANDS / WHAT IT IS NOT", ""]
     for m in picked:
-        L.append("  %-3d %5.1f %-9s %-7s %s"
-                 % (m["n"], m["t_settled_s"], m["purpose"], m["where"],
-                    "+".join(m["families"]) or "-"))
+        L.append("  %-3d %5.1f %-10s %-9s %-7s %s"
+                 % (m["n"], m["t_settled_s"], (m.get("kind") or "placement"),
+                    m["purpose"], m["where"], "+".join(m["families"]) or "-"))
         L.append("        %s" % m["on_screen"])
         L.append("        heard: %s" % m["heard"])
         L.append("        edit:  %s" % m["cut_does"])
         L.append("        why:   %s" % m["why_lands"])
+        # THE LINE THAT GENERALISES. Kept last and kept on the sheet even
+        # though it is the most expensive field: "a card is here" is a fact to
+        # copy, "a card and not a cutaway, because the face carries the
+        # accusation" is a decision to apply somewhere else.
+        if m.get("instead_of"):
+            L.append("        NOT:   %s" % m["instead_of"])
         L.append("")
     return "\n".join(L)
 
@@ -223,15 +246,27 @@ def main():
     except Exception:                                             # noqa: BLE001
         cache = {}
 
+    # THE PROMPT'S HASH IS PART OF THE KEY. Without it, changing the verify
+    # prompt silently reuses the verdicts the OLD prompt gave — which is
+    # exactly what would have happened here: the first restraint build lost 9
+    # of 12 held moments to a verifier that read the video's own burned-in
+    # caption track as contradicting "no graphic here", and the fix is a
+    # prompt change. A cache that survives the fix hands back the bug.
+    import hashlib as _hl
+    _pver = _hl.sha256(
+        open(os.path.join(HERE, "watch_verify_prompt.txt"), "rb").read()
+    ).hexdigest()[:8]
+    print("  verify prompt: %s" % _pver)
+
     def key_of(m, fp):
-        import hashlib
-        h = hashlib.sha256(open(fp, "rb").read()).hexdigest()[:16]
-        return "%s|%s" % (h, m["on_screen"].strip())
+        h = _hl.sha256(open(fp, "rb").read()).hexdigest()[:16]
+        return "%s|%s|%s" % (_pver, h, m["on_screen"].strip())
 
     verdicts = {}
     px_total = 0
     for gi, (ms, fs) in enumerate(groups, 1):
         lines = [{"n": m["n"], "t": m["t_settled_s"], "where": m["where"],
+                  "kind": m.get("kind") or "placement",
                   "on_screen": m["on_screen"]} for m in ms]
         p = os.path.join("/tmp", "sheet_%d.png" % gi)
         W, H = tile(fs, lines, p)
@@ -305,6 +340,7 @@ def main():
     for gi in range(0, len(shipped), per):
         ms = shipped[gi:gi + per]
         lines = [{"n": m["n"], "t": m["t_settled_s"], "where": m["where"],
+                  "kind": m.get("kind") or "placement",
                   "on_screen": m["on_screen"]} for m in ms]
         ms_frames = [os.path.join(work, "m%03d.jpg" % m["src_n"]) for m in ms]
         p = os.path.join(OUT, "tiles", "SHEET_%d.png" % (gi // per + 1))
@@ -317,7 +353,20 @@ def main():
                                 (r.get("record") or {}).get("whole_video") or {})
                                for r in recs])
     open(os.path.join(OUT, "SHEET.md"), "w").write(txt)
+    _dens = {"placement": sum(1 for m in shipped
+                              if (m.get("kind") or "placement") == "placement"),
+             "restraint": sum(1 for m in shipped
+                              if m.get("kind") == "restraint")}
+    _dens["restraint_share"] = (round(100.0 * _dens["restraint"]
+                                      / max(1, len(shipped)), 1))
+    _dens["videos_with_a_restraint_moment"] = len(
+        {m["video"] for m in shipped if m.get("kind") == "restraint"})
+    print("  DENSITY: %d placement, %d restraint (%.1f%%), restraint present "
+          "in %d of %d videos"
+          % (_dens["placement"], _dens["restraint"], _dens["restraint_share"],
+             _dens["videos_with_a_restraint_moment"], len(recs)))
     json.dump({"states": states, "shipped": shipped, "held": held,
+               "density": _dens,
                "tile_px": px_total, "image_tokens": px_total // 750,
                "text_chars": len(txt)},
               open(os.path.join(OUT, "moments.json"), "w"), indent=1)

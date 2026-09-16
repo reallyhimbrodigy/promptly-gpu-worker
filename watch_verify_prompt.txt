@@ -21,10 +21,38 @@ VERDICTS
             gold number".
   "no"      the described thing is not in this frame. The frame shows something
             else, or shows the shot before/after the described one.
-  "unsure"  you genuinely cannot tell — the tile is too small to read, or the
-            description is about something audible with no visible counterpart
-            and `where` is "none" (in that case answer "unsure", not "no": the
-            timestamp may be right and simply has nothing to show).
+  "unsure"  you genuinely cannot tell — the tile is too small to read. Not a
+            place to put a shrug: an "unsure" does not ship, so a frame you can
+            read and judge gets "yes" or "no", not this.
+
+THE RUNNING CAPTION TRACK IS NOT A CONTRADICTION. Nearly every one of these
+videos burns its own spoken words across the frame the whole way through, so
+almost any frame you look at has a word or two on it. THAT IS THE VIDEO'S
+CAPTIONS, not a graphic, and it NEVER makes a line wrong.
+
+    line:  "Speaker looking directly at the camera, in focus."
+    tile:  the speaker looking at the camera, with "BUT THE" burned across it
+    -> YES. The line describes the shot; the caption is the caption.
+
+    line:  "A Polaroid photo of a smiling young man in a graduation cap."
+    tile:  exactly that photo, with the caption word "but hasn't even" on it
+    -> YES. The described thing is there.
+
+Judge the SUBJECT of the line — the shot, the graphic, the card, the person —
+against the tile. Ignore the running captions unless the LINE ITSELF is about
+them. A line that describes a clean shot is not refuted by the caption track
+that runs over every shot in the video.
+
+A RESTRAINT MOMENT IS JUDGED THE SAME WAY, and it is the case most likely to be
+got wrong. Its line has `kind: "restraint"` and `where: "none"`, and its
+`on_screen` describes PLAIN FOOTAGE — "speaker mid-sentence, no graphic",
+"wide shot of the desk, clean frame". The question does not change: is that
+what the tile shows? A restraint line under a frame carrying a big graphic —
+a card, a large title, a full-frame illustration — is a "no": the timestamp
+missed. A restraint line under a frame carrying only the running caption track
+is a "yes": that is what "nothing was placed here" looks like in these videos. A restraint line under exactly the clean shot it
+describes is a "yes". DO NOT answer "no" merely because nothing is happening;
+nothing happening is what that line claims.
 
 Also return `frame_says`: <= 12 words describing what the tile ACTUALLY shows.
 Return it for every tile, including the yeses — it is how a disagreement gets

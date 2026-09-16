@@ -46,9 +46,11 @@ _MODEL = os.environ.get("PROMPTLY_WATCH_MODEL", "gemini-2.5-pro")
 # The word limits the prompt states. Enforced here as a RECORDED STATE, never a
 # silent truncation: a field cut mid-sentence reads as a complete thought that
 # happens to be wrong, which is worse than a long one.
-_LIMITS = {"on_screen": 14, "heard": 10, "cut_does": 12, "why_lands": 18}
+_LIMITS = {"on_screen": 14, "heard": 10, "cut_does": 12, "why_lands": 18,
+           "instead_of": 16}
 _WHERE = {"top", "upper", "center", "lower", "bottom", "full", "none"}
 _PURPOSE = {"hook", "claim", "evidence", "turn", "payoff", "breath", "close"}
+_KIND = {"placement", "restraint"}
 
 
 def _client():
@@ -172,8 +174,27 @@ def watch(video_bytes: bytes, label: str, duration_s: float,
         m["where"] = w if w in _WHERE else "none"
         p = str(m.get("purpose") or "").strip().lower()
         m["purpose"] = p if p in _PURPOSE else "evidence"
+        # KIND IS REQUIRED AND NEVER DEFAULTED. An unlabelled moment folded
+        # into "placement" would make the restraint density a measurement of
+        # the default, which is the whole question this artefact was extended
+        # to answer.
+        _k = str(m.get("kind") or "").strip().lower()
+        if _k not in _KIND:
+            dropped.append({"i": i, "t": t,
+                            "why": "kind is %r, not placement/restraint"
+                                   % m.get("kind")})
+            continue
+        m["kind"] = _k
+        # AN EMPTY FAMILY LIST IS A CORRECT ANSWER FOR A RESTRAINT MOMENT and
+        # a defect for a placement: a placement that names no family has not
+        # said what it placed.
         m["families"] = [str(x).strip().lower()
                          for x in (m.get("families") or []) if str(x).strip()]
+        if _k == "placement" and not m["families"]:
+            dropped.append({"i": i, "t": t,
+                            "why": "a placement naming no family has not said "
+                                   "what was placed"})
+            continue
         for k, lim in _LIMITS.items():
             n = len(str(m[k]).split())
             if n > lim:
@@ -182,6 +203,18 @@ def watch(video_bytes: bytes, label: str, duration_s: float,
     rec["moments"] = sorted(kept, key=lambda x: x["t_settled_s"])
     rec["dropped"] = dropped
     rec["over_word_limit"] = over
+    # THE DENSITY, RECORDED WHERE IT IS READ. A video that returned only
+    # placements read exactly like a video with no restraint in it, and the
+    # prompt asks for both — so the split is a STATE of this record, not
+    # something a later script infers from the rows.
+    rec["kinds"] = {_k: sum(1 for _m in kept if _m["kind"] == _k)
+                    for _k in sorted(_KIND)}
+    if not rec["kinds"].get("restraint"):
+        rec["kinds"]["note"] = ("NO RESTRAINT MOMENT — either this video "
+                                "genuinely places at every marked moment, or "
+                                "the reader did not look for the empty ones. "
+                                "Those are different and this record cannot "
+                                "tell them apart.")
     rec["provenance"] = {"source_file": label, "duration_s": duration_s,
                          "analyzer_model": model, "fps": sample_fps,
                          "heard_audio": True}

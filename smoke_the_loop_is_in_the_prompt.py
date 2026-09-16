@@ -31,9 +31,17 @@ LEGS = [
     # described as PASSES because the agent watches, places, watches, fixes.
     # Same class as every other reader keyed to wording, in the smoke written
     # to protect the loop. They ask for the BEHAVIOUR now.
-    ("pass 1 batches, and forbids placing one at a time",
+    # SEVENTH READER KEYED TO WORDING IN THIS FILE. `r"one at a time"` matched
+    # a sentence in FETCH_RULE — "twelve frames read one at a time is twelve
+    # turns" — which is about READING FRAMES, not about placing items. When
+    # FETCH_RULE was rewritten (the harness serves the frames now, so nothing
+    # is read one at a time any more) this leg went red on a prompt whose
+    # batching rule had not changed at all: the phrase it tested lived in a
+    # different rule the whole time. It now accepts either spelling of the
+    # thing it means.
+    ("pass 1 batches, and forbids placing one item at a time",
      lambda s: (re.search(r"(TURN|PASS) 1", s)
-                and re.search(r"one at a time", s)
+                and re.search(r"one (item )?at a time", s)
                 and re.search(r"BATCHES THE PLAN NAMES|SINGLE edit_item call"
                               r"|ONE BATCH", s))),
     # THIS ASSERTED A GAG THAT WAS DELIBERATELY REMOVED. It required "YOUR
@@ -80,7 +88,8 @@ if __name__ == "__main__":
         # the leg no longer reads — so the RED proof printed 0 red and the
         # batching leg was, for that moment, a check that could not fail.
         ("batching removed",
-         SRC.replace("one at a time", "however you like")),
+         SRC.replace("one item at a time", "however you like")
+            .replace("one at a time", "however you like")),
         # The mutations that matter now are the HEAD START and the SCRUB
         # invitation — the turn-end gag they replaced is gone on purpose.
         ("the head start removed",
