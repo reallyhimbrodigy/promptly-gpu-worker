@@ -639,6 +639,9 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
 
     L += ["## 2. THE GRAPHICS — motion graphics on V2", ""]
     _settle = []
+    # What every placement must be true of, collected here and emitted as one
+    # ACCEPTANCE section beside the review frames — which is where it is read.
+    _accept = []
     n = 0
     for p in rows:
         tr = [t for t in (p.get("treatment") or []) if t != "none"]
@@ -715,7 +718,20 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
               ""]
         # 8 frames past the entrance, or the midpoint on a short graphic —
         # whichever still lands inside the window.
-        _settle.append(min(f0 + 8, max(f0, (f0 + f1) // 2)))
+        _sf = min(f0 + 8, max(f0, (f0 + f1) // 2))
+        _settle.append(_sf)
+        # ── THE ACCEPTANCE RECORD ───────────────────────────────────────
+        # MEASURED 2026-09-15: 102.7 of 112.0 thinking seconds on the
+        # execution half sat on the two turns that follow the review frames
+        # arriving — turns that emit almost no tool payload. The agent is not
+        # re-deriving the plan and it is not working out the tools; it is
+        # deciding, from scratch, what "wrong" would look like. The plan
+        # already knows: the ladder computed this band, the face detector ran
+        # at plan time, and the settled frame is named three lines up. Writing
+        # it down turns an open judgement into a check.
+        _accept.append({"n": n, "kind": "GRAPHIC", "band": _band_name,
+                        "f0": f0, "f1": f1, "settle": _sf,
+                        "ladder": _out, "text": p.get("text_content")})
         for _t in ("text", "card"):
             if _t in tr:
                 _emitted[_t] = _emitted.get(_t, 0) + 1
@@ -776,7 +792,13 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
             # reviewed at its own settled frame — StatCard counts IN over
             # `enterFrames` (32 by default), so 8 frames in shows a half-counted
             # number and reads as a defect.
-            _settle.append(min(f0 + 36, max(f0, (f0 + f1) // 2)))
+            _cs = min(f0 + 36, max(f0, (f0 + f1) // 2))
+            _settle.append(_cs)
+            _accept.append({"n": n, "kind": "CARD", "band": "card",
+                            "f0": f0, "f1": f1, "settle": _cs,
+                            "ladder": "computed offsetY",
+                            "text": p.get("card_hero") or p.get("card_condition"),
+                            "offsetY": _ov.get("offsetY")})
     # ── ZOOM AND SFX ARE NOT GRAPHICS, AND WERE NEVER EMITTED AT ALL ──────
     # FAMILY_MAP carries a VERIFIED primitive for each: zoom is an effect ON a
     # clip (`builtin:zoom`, targetItemId), sfx is an audio item whose assetId
@@ -946,6 +968,114 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
               "  These are a STARTING POINT. Scrub wherever you like with "
               "preview_timeline —",
               "  any moment, as often as you need. Nobody is counting.", ""]
+    # ── WHAT "RIGHT" MEANS, PER PLACEMENT ───────────────────────────────────
+    # The review was an open question and it cost 102.7 of 112.0 thinking
+    # seconds: nothing told the agent what wrong looks like, so it worked it out
+    # from scratch on every graphic. All three criteria were already computed
+    # here — the ladder picked the band, the face detector ran at plan time, and
+    # the settled frame is named above. They were simply never written down.
+    #
+    # THIS IS NOT A NEW CONSTRAINT ON THE AGENT. Every line below is a statement
+    # of what this plan already guarantees; the agent's job is to confirm it
+    # survived contact with the renderer, which is a check, not a judgement.
+    if _accept:
+        try:
+            import face_bands as _fb2
+            _yr = _fb2.MG_FACE_BAND_YRANGES
+        except Exception:                                         # noqa: BLE001
+            _yr = {}
+        _cap_band, _cap_why = None, ""
+        if _wants_captions:
+            try:
+                import verify_chain as _vc3
+                _mb = _vc3.measured_bands()
+                # READ HERE, NOT BORROWED FROM BELOW. `_cstyle` is assigned
+                # in the captions block ~70 lines further down; using it here
+                # is a NameError on every run with captions — the
+                # definition-after-use trap this repo has already paid for
+                # twice (_PLAN_ONLY_NOTE, and a pyflakes catch on a mechanical
+                # rewrite). The value comes from the same ledger key either way.
+                _cs2 = ((led.get("caption_render") or {}).get("style")
+                        or "CleanCut")
+                _cap_band = _mb.get("caption:%s" % _cs2) if _mb else None
+            except Exception as _e3:                              # noqa: BLE001
+                # SPOKEN, NOT OMITTED. `measured_bands()` RAISES when rows.json
+                # is unreadable — which is the in-container case the raise was
+                # added for — and swallowing it here would drop the caption
+                # line from every acceptance block in silence. An acceptance
+                # list that is quietly one criterion short is the failure this
+                # whole section exists to stop, arriving from inside it.
+                _cap_band = None
+                _cap_why = "%s: %s" % (type(_e3).__name__, str(_e3)[:90])
+        L += ["  ACCEPTANCE — what RIGHT means for each placement. These are "
+              "not new rules;",
+              "  they are what this plan already computed. Check them, do not "
+              "re-derive them.", ""]
+        for _a in _accept:
+            _y = _yr.get(_a["band"])
+            _ov2 = [x for x in _accept
+                    if x is not _a and x["f0"] < _a["f1"] and x["f1"] > _a["f0"]]
+            L.append("    %s %d  %r" % (_a["kind"], _a["n"],
+                                        str(_a.get("text") or "")[:48]))
+            L.append("      judged at frame : %d  (%.2fs) — the settled frame, "
+                     "not the entrance" % (_a["settle"], _a["settle"] / fps))
+            if _y:
+                L.append("      stays inside    : the %s band, y %.0f-%.0f of "
+                         "1920. Anything outside it is the defect."
+                         % (_a["band"], _y[0], _y[1]))
+            elif _a.get("offsetY") is not None:
+                L.append("      stays inside    : its measured band at "
+                         "offsetY %s — COMPUTED against the title's band and "
+                         "the caption's, and the nearest position that clears "
+                         "both." % _a["offsetY"])
+            L.append("      clear of a face : %s over frames %d-%d. The "
+                     "detector ran on this source at plan time; a graphic on "
+                     "the speaker's face is the defect this checks for."
+                     % ({"placed": "MEASURED clear",
+                         "repositioned": "MEASURED clear after the end was "
+                                         "contracted to fit",
+                         "computed offsetY": "MEASURED, and the offset was "
+                                             "computed from it"}.get(
+                             _a["ladder"], _a["ladder"]),
+                        _a["f0"], _a["f1"]))
+            _col = ", ".join("%s %d (%s band, frames %d-%d)"
+                             % (x["kind"], x["n"], x["band"], x["f0"], x["f1"])
+                             for x in _ov2) or "nothing"
+            L.append("      must not touch  : %s" % _col)
+            if _cap_band:
+                L.append("                        the caption track, y %.0f-%.0f "
+                         "— MEASURED from the component, not guessed"
+                         % (_cap_band[0] * 1920, _cap_band[1] * 1920))
+            elif _wants_captions:
+                L.append("                        the caption track — ITS BAND "
+                         "COULD NOT BE MEASURED HERE (%s), so judge it by eye "
+                         "at that frame and say so if you cannot"
+                         % (_cap_why or "no measurement available"))
+            L.append("      legible         : readable at that frame without "
+                     "leaning in — right size, not clipped by the frame edge.")
+            L.append("")
+        # ── THE STOP CONDITION ──────────────────────────────────────────────
+        # Nothing told the agent when it was finished, so "have I looked enough"
+        # was part of what it was deciding on every review turn. An edit that
+        # satisfies its acceptance lines IS the finished edit.
+        L += ["  WHEN YOU ARE DONE. Look at the settled frames. For each "
+              "placement, check the",
+              "  four lines above against what you see.",
+              "",
+              "    every line holds        -> THE EDIT IS RIGHT. submit_export "
+              "and stop. There is",
+              "                               nothing further to confirm and no "
+              "second review to do.",
+              "    a line fails            -> name it (which placement, which "
+              "line, which frame),",
+              "                               fix it in ONE edit_item call, "
+              "look at that frame again,",
+              "                               then stop.",
+              "    you cannot tell         -> look at more frames. That is what "
+              "scrubbing is for.",
+              "",
+              "  Looking again at a placement whose lines all hold does not make "
+              "the edit better.", ""]
     L += ["## 3. WHAT IS NOT IN THIS EDIT", "",
           f"  Exactly {n} motion graphic{'' if n == 1 else 's'}. A second one is "
           f"the thing ruled out.",
