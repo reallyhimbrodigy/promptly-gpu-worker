@@ -19479,7 +19479,15 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     try:
         _rp = os.environ.get("PROMPTLY_RESULT_JSON")
         if not _rp:
-            _base = os.path.basename(str(out_key or source)).rsplit(".", 1)[0]
+            # THE SOURCE ACTUALLY USED, not the parameter that defaulted.
+            # MEASURED 2026-09-15: a run driven by `--src-url` wrote
+            # `/tmp/result_625dfdc5-73s.json` — named after the DEFAULT
+            # `source` string, for a run on a completely different clip. The
+            # file is correct and its name is a claim about a clip that was
+            # never opened, which is the stale-identifier class in a filename.
+            _base = os.path.basename(
+                str(src_url or out_key or source).split("?")[0]
+            ).rsplit(".", 1)[0]
             _rp = f"/tmp/result_{_base or 'run'}.json"
         with open(_rp, "w") as _rf:
             json.dump(r, _rf, default=str)
