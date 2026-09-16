@@ -18699,6 +18699,31 @@ def edit(source_key: str, brief: str,
     # already there from last time. That is the paid re-edit no-op scored as a
     # success, and it is the shape `reedit_taxonomy` is about.
     _fid_pl = led.get("placements") or []
+    # A PLAN-ONLY RUN DELIVERS RULINGS, AND FIDELITY WAS GRADING PIXELS.
+    # MEASURED 2026-09-15: a plan_only run ruled text 17, card 2, zoom 3, sfx 4
+    # and the grade printed "full_edit guaranteeing ['card','text'] did not
+    # deliver ['card','text']" — because `placements` is what BUILT, and
+    # plan_only builds nothing by design. The prefix already tells the agent
+    # "your rulings are the deliverable"; the grade has to agree, or it reports
+    # a faithful plan as SHORT on the one path whose entire output is the plan.
+    #
+    # This is the DROPPED-vs-UNBUILDABLE distinction turned on the grader: "not
+    # ruled" and "ruled on a path that renders nothing" are opposite facts and
+    # they rendered identically.
+    if plan_only:
+        _fid_pl = [{"family": _f}
+                   for _v in (led.get("executed_verdicts")
+                              or led.get("beat_verdicts") or [])
+                   for _f in (_v.get("treatment") or [])]
+        led["fidelity_population"] = ("RULINGS (plan_only: nothing is built, "
+                                      "so the rulings ARE the delivery) — "
+                                      "%d family mention(s) over %d ruling(s)"
+                                      % (len(_fid_pl),
+                                         len(led.get("executed_verdicts")
+                                             or led.get("beat_verdicts") or [])))
+    else:
+        led["fidelity_population"] = ("PLACEMENTS (%d built)" % len(_fid_pl))
+    print("  FIDELITY READS  : %s" % led["fidelity_population"], flush=True)
     # CAPTIONS COUNT AS DELIVERED ONLY IF THEY SAY SOMETHING. The flag is
     # presence; `caption_words_n` is the shape. A composite that ran over zero
     # words burns nothing and must not satisfy "just add captions".

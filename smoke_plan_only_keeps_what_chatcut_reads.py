@@ -48,6 +48,38 @@ def legs(src=None, tree=None):
     if "plan_only: bool = False" not in src:
         bad.append(("param", "edit() has no plan_only parameter"))
 
+    # ── FIDELITY GRADES THE RULINGS ON A PLAN-ONLY RUN ─────────────────────
+    # The prefix tells the agent "your rulings are the deliverable"; the grade
+    # has to agree. Graded against `placements` — what BUILT — a plan_only run
+    # that ruled card and text perfectly reads SHORT, because plan_only builds
+    # nothing by design. "Not ruled" and "ruled on a path that renders nothing"
+    # are opposite facts and they rendered identically.
+    #
+    # Checked on the POPULATION SELECTION, not on a spelling: the branch under
+    # `if plan_only:` that assigns `_fid_pl` must read a verdict source.
+    # THE ASSIGNMENT, NOT THE BRANCH. My first version read the whole
+    # `if plan_only:` body and the mutation walked straight past it: the
+    # REPORTING line two statements down also spells `executed_verdicts`, so
+    # swapping the population for `placements` left the leg green. A leg
+    # satisfied by a sentence it did not mean — the same shape as six legs
+    # caught in one stretch on 2026-09-11.
+    _sel = ""
+    for n in ast.walk(tree if tree is not None else TREE):
+        if isinstance(n, ast.If) and isinstance(n.test, ast.Name) \
+                and n.test.id == "plan_only":
+            for _st in n.body:
+                if isinstance(_st, ast.Assign) and any(
+                        isinstance(t2, ast.Name) and t2.id == "_fid_pl"
+                        for t2 in _st.targets):
+                    _sel = ast.unparse(_st.value)
+    if not _sel:
+        bad.append(("fidelity", "nothing under `if plan_only:` rebinds _fid_pl "
+                                "— fidelity still grades what BUILT on a path "
+                                "that builds nothing"))
+    elif not ("executed_verdicts" in _sel or "beat_verdicts" in _sel):
+        bad.append(("fidelity", "the plan_only fidelity population does not "
+                                "read a verdict source: %s" % _sel[:120]))
+
     ep = ""
     for n in ast.walk(tree if tree is not None else TREE):
         if isinstance(n, ast.FunctionDef) and n.name == "execute_plan":
@@ -122,7 +154,17 @@ if __name__ == "__main__":
                                  'True'), "withdrawn"),
             ("the prompt no longer says so",
              lambda s: s.replace("inspect_output` is NOT available",
-                                 "all tools remain"), "told")):
+                                 "all tools remain"), "told"),
+            # AIMED AT THE POPULATION, NOT THE SPELLING. The anchor is the
+            # one line naming the verdict source inside the plan_only branch;
+            # swapping it for `placements` puts the grade back on what BUILT,
+            # which on this path is always empty.
+            ("fidelity grades the BUILD again on plan_only",
+             lambda s: s.replace(
+                 '                   for _v in (led.get("executed_verdicts")\n'
+                 '                              or led.get("beat_verdicts") or [])\n',
+                 '                   for _v in (led.get("placements") or [])\n'),
+             "fidelity")):
         m = mut(SRC)
         try:
             r = legs(m, ast.parse(m))
