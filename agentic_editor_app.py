@@ -9574,11 +9574,51 @@ def prefix_material_enabled(name):
         % (_var, _raw, "/".join(_FLAG_TRUE), "/".join(_FLAG_FALSE)))
 
 
+# THE NAMES ARE DERIVED FROM THE CALLS, NOT LISTED. The hand-written tuple held
+# two names and the watched artefact added two more (`watched_moments`,
+# `watched_frames`) — so an ablation of the newest material would have run with
+# the removal HONOURED in the container and the log reporting on two other
+# things entirely. A removal nobody can see in the log is a round whose prefix
+# nobody can reconstruct, and that is the exact sentence written above
+# `prefix_material_enabled`. A list is how it happens anyway.
+#
+# Derived at import from every literal handed to `prefix_material_enabled`, so
+# a fifth material joins the report in the commit that adds it.
+def _prefix_material_names():
+    import ast as _ast
+    _found = set()
+    try:
+        _tree = _ast.parse(open(__file__, encoding="utf-8").read())
+    except Exception:                                             # noqa: BLE001
+        # A FAILURE, NOT A SHORTER LIST. Reporting on two of four materials
+        # reads exactly like a run with only two.
+        return ()
+    for _n in _ast.walk(_tree):
+        if isinstance(_n, _ast.Call) and isinstance(_n.func, _ast.Name) \
+                and _n.func.id == "prefix_material_enabled":
+            for _a in _n.args:
+                if isinstance(_a, _ast.Constant) and isinstance(_a.value, str):
+                    _found.add(_a.value)
+    return tuple(sorted(_found))
+
+
+_PREFIX_MATERIALS = _prefix_material_names()
+
+
 def prefix_material_state():
     """What is IN this run's prefix, for the log. Never inferred from a flag
-    name — the same predicate the injection uses."""
+    name — the same predicate the injection uses.
+
+    RAISES on an empty name set: zero materials and a failed scan are the same
+    dict, and this is the line an ablation is read from.
+    """
+    if not _PREFIX_MATERIALS:
+        raise AssertionError(
+            "the prefix-material names could not be derived from this file — "
+            "every removal arm would report on nothing while the container "
+            "honoured the flag")
     return {_n: ("ON" if prefix_material_enabled(_n) else "REMOVED")
-            for _n in ("reference_examples", "ruling_time_knowledge")}
+            for _n in _PREFIX_MATERIALS}
 
 
 def cut_intrusion_floor_ms(r_frame_rate, avg_frame_rate):

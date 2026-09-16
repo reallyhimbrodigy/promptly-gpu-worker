@@ -226,21 +226,36 @@ for _fname, _mat in (("_reference_block", "reference_examples"),
            f"switch")
 
 # ── LEG 4: ROUND-TRIP, on the real functions ─────────────────────────────────
-_saved = {k: os.environ.get(k) for k in
-          ("PROMPTLY_DISABLE_REFERENCE_EXAMPLES",
-           "PROMPTLY_DISABLE_RULING_TIME_KNOWLEDGE")}
+# EVERY MATERIAL, AND EACH ONE SEPARABLY. The pair named here went stale the
+# day the watched artefact added `watched_moments` and `watched_frames`: the
+# leg asserted a two-key dict and would have failed on a CORRECT four-material
+# reporter, while nothing checked that the two new arms were separable at all.
+# So the population is derived from the reporter itself, and each material is
+# removed on its own and checked to leave the others alone — the per-contributor
+# rule, because "some material was removed" is exactly the shape that hides
+# which one stopped working.
+_MATS = list(app._PREFIX_MATERIALS)
+ok(bool(_MATS), "prefix_material_state reports on nothing — an ablation arm "
+                "would have no observable at all")
+_saved = {"PROMPTLY_DISABLE_" + m.upper(): os.environ.get(
+    "PROMPTLY_DISABLE_" + m.upper()) for m in _MATS}
 try:
     for k in _saved:
         os.environ.pop(k, None)
-    ok(app.prefix_material_state() == {"reference_examples": "ON",
-                                       "ruling_time_knowledge": "ON"},
-       f"unset does not mean ON: {app.prefix_material_state()}")
-    os.environ["PROMPTLY_DISABLE_REFERENCE_EXAMPLES"] = "1"
-    _st = app.prefix_material_state()
-    ok(_st["reference_examples"] == "REMOVED",
-       f"setting the variable did not remove the material: {_st}")
-    ok(_st["ruling_time_knowledge"] == "ON",
-       f"removing one removed the other too — the arms are not separable: {_st}")
+    ok(app.prefix_material_state() == {m: "ON" for m in _MATS},
+       f"unset does not mean ON for all {len(_MATS)}: "
+       f"{app.prefix_material_state()}")
+    for m in _MATS:
+        _var = "PROMPTLY_DISABLE_" + m.upper()
+        os.environ[_var] = "1"
+        _st = app.prefix_material_state()
+        ok(_st[m] == "REMOVED",
+           f"setting {_var} did not remove {m}: {_st}")
+        _others = {k: v for k, v in _st.items() if k != m}
+        ok(all(v == "ON" for v in _others.values()),
+           f"removing {m} removed something else too — the arms are not "
+           f"separable: {_st}")
+        os.environ.pop(_var, None)
 finally:
     for k, v in _saved.items():
         os.environ.pop(k, None)

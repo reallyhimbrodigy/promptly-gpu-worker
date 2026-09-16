@@ -42,13 +42,19 @@ def check(label, cond, detail=""):
           + (f"\n         {detail}" if not cond and detail else ""))
 
 
-ns = {"os": os}
+# `_PREFIX_MATERIALS` AND ITS DERIVER COME ACROSS TOO. The reported set is no
+# longer a literal in the source — it is derived from every name handed to
+# `prefix_material_enabled` — so an isolated exec of the reporter alone raises
+# NameError, and the check would be reporting a harness failure as a defect.
+ns = {"os": os, "__file__": "agentic_editor_app.py"}
 _want = ("prefix_material_enabled", "prefix_material_state")
 for n in tree.body:
     if isinstance(n, ast.Assign) and any(
-            getattr(t, "id", "").startswith("_FLAG_") for t in n.targets):
+            getattr(t, "id", "").startswith("_FLAG_")
+            or getattr(t, "id", "") == "_PREFIX_MATERIALS" for t in n.targets):
         exec(compile(ast.Module([n], []), "<c>", "exec"), ns)
-    if isinstance(n, ast.FunctionDef) and n.name in _want:
+    if isinstance(n, ast.FunctionDef) and n.name in (
+            _want + ("_prefix_material_names",)):
         exec(compile(ast.Module([n], []), "<c>", "exec"), ns)
 check("both flag functions are module-level and drivable",
       all(k in ns for k in _want), f"found {[k for k in _want if k in ns]}")
@@ -98,8 +104,22 @@ for _j in ("maybe", "2", "ON!", "tru e", "none", "null", "-1"):
 # --------------------------- 4. the state the run REPORTS uses the same reader
 os.environ.pop(VAR, None)
 _st = ns["prefix_material_state"]()
-check("prefix_material_state reports both materials",
-      set(_st) == {"reference_examples", "ruling_time_knowledge"}, f"{_st}")
+# EVERY MATERIAL, NOT TWO NAMED ONES. The literal pair here went stale the day
+# the watched artefact added two more: the reporter would have said ON/REMOVED
+# about `reference_examples` and `ruling_time_knowledge` while an arm removed
+# `watched_frames`, and the log would have looked complete. The property is
+# that the report covers exactly what the injection consults.
+_consults = {c.args[0].value for c in ast.walk(tree)
+             if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+             and c.func.id == "prefix_material_enabled" and c.args
+             and isinstance(c.args[0], ast.Constant)
+             and isinstance(c.args[0].value, str)}
+check("there is material to report on at all", bool(_consults),
+      "zero prefix_material_enabled call sites — an empty report and a "
+      "material-free prefix are the same dict")
+check("prefix_material_state reports EVERY material the prefix consults",
+      set(_st) == _consults,
+      f"reports {sorted(_st)}, consults {sorted(_consults)}")
 os.environ[VAR] = "yes"
 _st2 = ns["prefix_material_state"]()
 check("a removal shows in the reported state, not just in the predicate",
