@@ -56,6 +56,33 @@ where a viewer can see there is nothing there.
 Do not round to whole seconds. Give one decimal. A frame grabbed at this time
 must show what you describe; that is the one thing this timestamp is for.
 
+AND FOR SOME MOMENTS ONE FRAME CANNOT SHOW IT.
+A cut is a CHANGE. A transition is a change over time. A sound effect lands
+BETWEEN two pictures and what matters is which two. A single settled frame of
+any of those shows the aftermath and hides the decision — you can see where it
+ended up and not what it did.
+
+So when the moment is a cut, a transition, or a sound landing, give a SPAN and
+the artefact will carry a strip of frames through it instead of one:
+
+  t_from_s   the last moment of what came BEFORE — for a cut, a frame of the
+             outgoing shot with the cut not yet made; for a transition, before
+             it starts; for a sound, the picture it lands away from.
+  t_to_s     the first settled moment of what comes AFTER — the new shot once
+             it is established, the transition completed, the picture the sound
+             lands on.
+
+Keep the span TIGHT. It should be the change and nothing else — usually 0.3 to
+1.5 seconds. A four-second span is not a cut, it is a scene, and the strip will
+show six frames of someone talking.
+
+Give `t_from_s` and `t_to_s` on every moment whose families include `cut`,
+`transition` or `sfx`, and on any other moment where the thing you are
+describing is a CHANGE rather than a state. Leave them null when one frame
+genuinely shows it — a card sitting on screen, a held shot, a restraint moment.
+`t_settled_s` is still required either way, and for a span it should fall
+INSIDE it: the frame that best shows the moment's point.
+
 THE FIELDS, AND THEY ARE SHORT ON PURPOSE
 This artefact is read at a glance by an editor deciding what to do at a moment
 of the same shape. Long prose is not read. Stay inside the word limits; a field
@@ -68,10 +95,32 @@ that needs more words usually means the moment is two moments.
                 actual subject if there is not ("speaker, tilted low angle,
                 laptop closed"). For a restraint moment this is the plain
                 footage, described plainly — that IS the answer.
-  heard       <= 10 words. What a viewer HEARS across that moment: the spoken
+  heard       <= 12 words. What a viewer HEARS across that moment: the spoken
                 words in quotes if they matter, and the non-speech sound if
                 there is one ("cha-ching", "bass thump", "music drops out",
                 "clicks under cursor"). If there is silence, say silence.
+
+  AND WHEN THERE IS A NON-SPEECH SOUND, THREE MORE FIELDS. A sound effect is
+  not a decoration on a moment; it is an edit in its own right, and "there is a
+  whoosh here" is the same useless fact as "a card is here". What an editor
+  needs is WHEN it lands and WHAT it is marking. Fill these whenever a sound
+  effect, a music hit, a music drop or a deliberate silence is part of the
+  moment; leave them null when the only audio is speech.
+
+  sound_lands_s   the time, one decimal, that the sound HITS — its attack, not
+                  where the file would start. If several land in the moment,
+                  give the one that matters.
+  punctuates      <= 10 words. What the sound is marking. Not what it sounds
+                  like — what it is FOR. "the dollar figure arriving",
+                  "the cut into the solution", "the last word of the promise",
+                  "the logo landing". A sound that punctuates nothing is a
+                  sound that should not be there, and if that is what you see,
+                  say so.
+  sync            one of: before_the_word, on_the_word, after_the_word,
+                  on_the_cut, over_silence, under_speech. Where the hit sits
+                  against what is being said or shown. This is the field an
+                  editor acts on: a sound on the word and a sound a beat after
+                  it are different edits and only one of them lands.
   cut_does    <= 12 words. What the EDIT does here, mechanically. For a
                 placement: "hard cut to new location", "text in 3 frames
                 before the word", "push-in on the number", "sfx on the reveal".
@@ -143,18 +192,28 @@ RETURN STRICT JSON AND NOTHING ELSE:
   "moments": [
     {
       "t_settled_s": 3.4,
+      "t_from_s": 3.1,
+      "t_to_s": 3.9,
       "kind": "placement",
       "purpose": "hook",
       "families": ["text", "sfx"],
       "where": "center",
       "on_screen": "...",
       "heard": "...",
+      "sound_lands_s": 3.4,
+      "punctuates": "...",
+      "sync": "on_the_word",
       "cut_does": "...",
       "why_lands": "...",
       "instead_of": "..."
     },
     {
       "t_settled_s": 11.8,
+      "t_from_s": null,
+      "t_to_s": null,
+      "sound_lands_s": null,
+      "punctuates": null,
+      "sync": null,
       "kind": "restraint",
       "purpose": "claim",
       "families": ["hold"],

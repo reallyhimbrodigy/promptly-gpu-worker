@@ -35,6 +35,18 @@ OUT = os.path.join(HERE, "watched")
 # to be estimated.
 TILE_W, TILE_H, HEAD_H = 240, 427, 22
 COLS, ROWS = 6, 3
+# ── STRIPS ──────────────────────────────────────────────────────────────────
+# A cut is a CHANGE and a single settled frame shows its aftermath: where it
+# ended up, not what it did. A sound lands BETWEEN two pictures and what matters
+# is which two. So a moment carrying a span becomes a ROW of frames through the
+# change, with each frame's time under it, and the row is one entry in the
+# sheet the gate asks about.
+#
+# FIVE FRAMES, evenly across the span. Fewer than four cannot show a middle;
+# more than six at this width is a row of thumbnails nobody can read.
+STRIP_N = 5
+STRIP_W, STRIP_H = 232, 412
+STRIP_ROWS = 3                       # strips per sheet
 BG = (24, 24, 27)
 INK = (240, 240, 245)
 
@@ -49,6 +61,70 @@ def ffmpeg_frame(src, t, dst):
         print("    frame FAILED %s @ %.2f: %s"
               % (os.path.basename(src), t, (r.stderr or "")[:160]))
     return ok
+
+
+def strip_times(m):
+    """The times a strip samples, or None. STATED, not inferred at draw time.
+
+    The settled frame is forced into the set so the strip always contains the
+    frame the line was written about — a strip whose five samples all miss the
+    moment is a picture of the seconds around a decision with the decision
+    missing.
+    """
+    a, b = m.get("t_from_s"), m.get("t_to_s")
+    if a is None or b is None or b <= a:
+        return None
+    ts = [a + (b - a) * i / (STRIP_N - 1.0) for i in range(STRIP_N)]
+    t = m.get("t_settled_s")
+    if t is not None and a <= t <= b:
+        # replace whichever sample is nearest, so the count stays STRIP_N
+        j = min(range(STRIP_N), key=lambda k: abs(ts[k] - t))
+        ts[j] = float(t)
+    return [round(x, 2) for x in sorted(ts)]
+
+
+def tile_strip(rows, path):
+    """One sheet of strips: each row is a moment, frames left to right.
+
+    The row header carries the moment number, the span and — when the moment
+    names one — WHEN THE SOUND LANDS, as a caret under the frame it falls
+    between. An editor reading this needs the hit's position in the sequence,
+    not only its timestamp in a line of text.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+    try:
+        font = ImageFont.truetype("/System/Library/Fonts/Menlo.ttc", 14)
+        small = ImageFont.truetype("/System/Library/Fonts/Menlo.ttc", 12)
+    except Exception:                                             # noqa: BLE001
+        font = small = ImageFont.load_default()
+    W = STRIP_N * STRIP_W
+    RH = STRIP_H + HEAD_H + 16
+    sheet = Image.new("RGB", (W, RH * len(rows)), BG)
+    d = ImageDraw.Draw(sheet)
+    for r, (m, frames, times) in enumerate(rows):
+        y = r * RH
+        _snd = ("   sound lands %.2fs (%s)"
+                % (m["sound_lands_s"], m.get("sync") or "sync not named")
+                if m.get("sound_lands_s") is not None else "")
+        d.text((5, y + 3), "%d  %.2fs -> %.2fs  %s%s"
+               % (m["n"], m["t_from_s"], m["t_to_s"],
+                  "+".join(m["families"]) or "-", _snd), fill=INK, font=font)
+        for i, (fp, t) in enumerate(zip(frames, times)):
+            cx = i * STRIP_W
+            im = Image.open(fp).convert("RGB")
+            im.thumbnail((STRIP_W - 4, STRIP_H - 4))
+            sheet.paste(im, (cx + (STRIP_W - im.width) // 2, y + HEAD_H))
+            _hit = (m.get("sound_lands_s") is not None
+                    and i == min(range(len(times)),
+                                 key=lambda k: abs(times[k]
+                                                   - m["sound_lands_s"])))
+            d.text((cx + 5, y + HEAD_H + STRIP_H + 1),
+                   "%.2fs%s" % (t, "  <-- the hit" if _hit else ""),
+                   fill=(255, 190, 90) if _hit else INK, font=small)
+            d.rectangle([cx, y, cx + STRIP_W - 1, y + RH - 1],
+                        outline=(70, 70, 78))
+    sheet.save(path, "PNG", optimize=True)
+    return sheet.width, sheet.height
 
 
 def load():
@@ -168,14 +244,31 @@ def sheet_text(picked, whole):
           "loses; that is the half you can apply somewhere else." % (_nr,
                                                                      len(picked)),
           "",
+          "  A moment that is a CHANGE — a cut, a transition, a sound "
+          "landing — carries a STRIP: five frames through it, on the strip "
+          "sheet, with the times under them and the sound's hit marked. One "
+          "settled frame of a cut shows where it ended up and hides what it "
+          "did.",
+          "",
           "  #   t     kind       purpose   where   families",
-          "        SEEN / HEARD / THE EDIT / WHY IT LANDS / WHAT IT IS NOT", ""]
+          "        SEEN / HEARD / SOUND / THE EDIT / WHY IT LANDS / NOT", ""]
     for m in picked:
         L.append("  %-3d %5.1f %-10s %-9s %-7s %s"
                  % (m["n"], m["t_settled_s"], (m.get("kind") or "placement"),
                     m["purpose"], m["where"], "+".join(m["families"]) or "-"))
+        if m.get("t_from_s") is not None:
+            L.append("        strip: %.2fs -> %.2fs, five frames through the "
+                     "change (see the STRIP sheet)"
+                     % (m["t_from_s"], m["t_to_s"]))
         L.append("        %s" % m["on_screen"])
         L.append("        heard: %s" % m["heard"])
+        # THE AUDIO, AS AN EDIT. "there is a whoosh here" is the same useless
+        # fact as "a card is here"; when it lands and what it marks is the half
+        # that transfers.
+        if m.get("sound_lands_s") is not None:
+            L.append("        sound: lands %.2fs, %s — punctuates %s"
+                     % (m["sound_lands_s"], m.get("sync") or "sync not named",
+                        m.get("punctuates") or "(not named)"))
         L.append("        edit:  %s" % m["cut_does"])
         L.append("        why:   %s" % m["why_lands"])
         # THE LINE THAT GENERALISES. Kept last and kept on the sheet even
@@ -214,21 +307,45 @@ def main():
 
     work = os.path.join("/tmp", "watched_frames")
     os.makedirs(work, exist_ok=True)
-    frames, kept = [], []
+    frames, kept, strips = [], [], []
     for m in picked:
+        ts = strip_times(m)
+        if ts:
+            # A STRIP MOMENT NEEDS EVERY FRAME. A row with a hole in it is a
+            # sequence missing the part that might be the change, so a single
+            # failed grab drops the whole strip to the single-frame path rather
+            # than drawing four frames and calling it five.
+            fps = []
+            for k, t in enumerate(ts):
+                fp = os.path.join(work, "s%03d_%d.jpg" % (m["n"], k))
+                if not ffmpeg_frame(os.path.join(EX, m["video"]), t, fp):
+                    fps = []
+                    break
+                fps.append(fp)
+            if fps:
+                m["strip_times"] = ts
+                strips.append((m, fps, ts))
+                kept.append(m)
+                continue
+            m["span_state"] = (m.get("span_state") or "") + " (a frame grab "
+            m["t_from_s"] = m["t_to_s"] = None
         fp = os.path.join(work, "m%03d.jpg" % m["n"])
         if ffmpeg_frame(os.path.join(EX, m["video"]), m["t_settled_s"], fp):
             frames.append(fp)
             kept.append(m)
         else:
             m["gate"] = "FRAME FAILED"
+    _singles = [m for m in kept if not m.get("strip_times")]
+    print("  %d strip(s), %d single frame(s)" % (len(strips), len(frames)))
     if len(kept) != len(picked):
         print("  *** %d moments lost their frame" % (len(picked) - len(kept)))
 
     # ── tile, then GATE ─────────────────────────────────────────────────────
     per = COLS * ROWS
-    groups = [(kept[i:i + per], frames[i:i + per])
-              for i in range(0, len(kept), per)]
+    groups = [(_singles[i:i + per], frames[i:i + per])
+              for i in range(0, len(_singles), per)]
+    strip_groups = [strips[i:i + STRIP_ROWS]
+                    for i in range(0, len(strips), STRIP_ROWS)]
     os.makedirs(os.path.join(OUT, "tiles"), exist_ok=True)
     preview = os.path.join("/tmp", "watched_preview")
     os.makedirs(preview, exist_ok=True)
@@ -304,6 +421,44 @@ def main():
                 cache[key_of(m, f)] = verdicts[m["n"]]
         json.dump(cache, open(cache_p, "w"))
 
+    # ── THE STRIPS GO THROUGH THE SAME GATE ─────────────────────────────────
+    for gi, rows in enumerate(strip_groups, 1):
+        lines = [{"n": m["n"], "t": m["t_settled_s"], "where": m["where"],
+                  "kind": m.get("kind") or "placement", "strip": True,
+                  "span": "%.2f->%.2f" % (m["t_from_s"], m["t_to_s"]),
+                  "on_screen": m["on_screen"], "cut_does": m["cut_does"]}
+                 for m, _f, _t in rows]
+        p = os.path.join("/tmp", "strip_%d.png" % gi)
+        W, H = tile_strip(rows, p)
+        px_total += W * H
+        print("  strip sheet %d: %d row(s)  %dx%d px  %d KB  ~%d image tokens"
+              % (gi, len(rows), W, H, os.path.getsize(p) // 1024, W * H // 750))
+        if a.no_gate:
+            continue
+        cached = {m["n"]: cache[key_of(m, f[0])] for m, f, _t in rows
+                  if key_of(m, f[0]) in cache}
+        if len(cached) == len(rows):
+            print("    verify: CACHED (%d/%d strips unchanged)"
+                  % (len(cached), len(rows)))
+            verdicts.update(cached)
+            continue
+        import modal
+        fn = modal.Function.from_name("promptly-watch-moments", "verify")
+        time.sleep(20)
+        r = fn.remote(open(p, "rb").read(), lines)
+        print("    verify: %s  %s" % (r["state"], (r.get("detail") or "")[:90]))
+        if r["state"] != "MEASURED":
+            for m, _f, _t in rows:
+                verdicts[m["n"]] = {"verdict": "unchecked",
+                                    "frame_says": r.get("detail") or ""}
+            continue
+        for v in r["verdicts"]:
+            verdicts[int(v.get("n") or 0)] = v
+        for m, f, _t in rows:
+            if m["n"] in verdicts:
+                cache[key_of(m, f[0])] = verdicts[m["n"]]
+        json.dump(cache, open(cache_p, "w"))
+
     if a.no_gate:
         for gi in range(1, len(groups) + 1):
             os.replace("/tmp/sheet_%d.png" % gi,
@@ -337,12 +492,26 @@ def main():
     for i, m in enumerate(shipped, 1):
         m["n"] = i
     px_total = 0
-    for gi in range(0, len(shipped), per):
-        ms = shipped[gi:gi + per]
+    _ship_strips = [m for m in shipped if m.get("strip_times")]
+    _ship_single = [m for m in shipped if not m.get("strip_times")]
+    for gi in range(0, len(_ship_strips), STRIP_ROWS):
+        ms = _ship_strips[gi:gi + STRIP_ROWS]
+        rows = [(m, [os.path.join(work, "s%03d_%d.jpg" % (m["src_n"], k))
+                     for k in range(len(m["strip_times"]))], m["strip_times"])
+                for m in ms]
+        p = os.path.join(OUT, "tiles", "STRIP_%d.png" % (gi // STRIP_ROWS + 1))
+        W, H = tile_strip(rows, p)
+        px_total += W * H
+        print("  shipped strip sheet %d: %d row(s) %dx%d ~%d tok"
+              % (gi // STRIP_ROWS + 1, len(ms), W, H, W * H // 750))
+    for gi in range(0, len(_ship_single), per):
+        ms = _ship_single[gi:gi + per]
         lines = [{"n": m["n"], "t": m["t_settled_s"], "where": m["where"],
                   "kind": m.get("kind") or "placement",
                   "on_screen": m["on_screen"]} for m in ms]
         ms_frames = [os.path.join(work, "m%03d.jpg" % m["src_n"]) for m in ms]
+        if not ms_frames:
+            continue
         p = os.path.join(OUT, "tiles", "SHEET_%d.png" % (gi // per + 1))
         W, H = tile(ms_frames, lines, p)
         px_total += W * H

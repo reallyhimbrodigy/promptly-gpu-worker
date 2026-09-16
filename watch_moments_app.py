@@ -51,6 +51,16 @@ _LIMITS = {"on_screen": 14, "heard": 10, "cut_does": 12, "why_lands": 18,
 _WHERE = {"top", "upper", "center", "lower", "bottom", "full", "none"}
 _PURPOSE = {"hook", "claim", "evidence", "turn", "payoff", "breath", "close"}
 _KIND = {"placement", "restraint"}
+_SYNC = {"before_the_word", "on_the_word", "after_the_word", "on_the_cut",
+         "over_silence", "under_speech"}
+# A SPAN IS THE CHANGE, NOT THE SCENE. A four-second "cut" produces a strip of
+# six frames of someone talking — a picture of nothing, which is worse than one
+# frame of the aftermath because it looks like evidence. Spans outside this are
+# recorded as OVER-WIDE and fall back to the single settled frame rather than
+# being silently trimmed to fit: trimming would invent a boundary the reader
+# did not give.
+_SPAN_MIN_S, _SPAN_MAX_S = 0.12, 2.5
+_STRIP_FAMILIES = {"cut", "transition", "sfx"}
 
 
 def _client():
@@ -195,6 +205,69 @@ def watch(video_bytes: bytes, label: str, duration_s: float,
                             "why": "a placement naming no family has not said "
                                    "what was placed"})
             continue
+        # ── THE SPAN ────────────────────────────────────────────────────
+        _a, _b = m.get("t_from_s"), m.get("t_to_s")
+        m["span_state"] = "NONE"
+        if _a is not None and _b is not None:
+            try:
+                _a, _b = float(_a), float(_b)
+            except (TypeError, ValueError):
+                m["span_state"] = "BAD (%r, %r are not numbers)" % (_a, _b)
+                _a = _b = None
+            if _a is not None:
+                if not (0.0 <= _a < _b <= duration_s):
+                    m["span_state"] = ("BAD (%.2f..%.2f outside [0, %.2f] or "
+                                       "not ordered)" % (_a, _b, duration_s))
+                elif (_b - _a) > _SPAN_MAX_S:
+                    m["span_state"] = ("OVER-WIDE %.2fs > %.2fs — a span this "
+                                       "long is a scene, not a change; falling "
+                                       "back to the settled frame"
+                                       % (_b - _a, _SPAN_MAX_S))
+                elif (_b - _a) < _SPAN_MIN_S:
+                    m["span_state"] = ("TOO NARROW %.3fs — fewer than two "
+                                       "distinct frames" % (_b - _a))
+                else:
+                    m["t_from_s"], m["t_to_s"] = round(_a, 2), round(_b, 2)
+                    m["span_state"] = "MEASURED %.2fs" % (_b - _a)
+        if not m["span_state"].startswith("MEASURED"):
+            m["t_from_s"] = m["t_to_s"] = None
+        # A CHANGE-FAMILY MOMENT WITH NO SPAN IS RECORDED, NOT REFUSED. The
+        # reader may be right that one frame shows it; what must not happen is
+        # the omission being invisible, because then "no strips in this corpus"
+        # and "the reader was never asked for spans" look identical.
+        if (set(m["families"]) & _STRIP_FAMILIES) and not m["t_from_s"]:
+            m["span_missing"] = ("families %s but no usable span (%s)"
+                                 % (sorted(set(m["families"])
+                                           & _STRIP_FAMILIES), m["span_state"]))
+
+        # ── THE AUDIO ───────────────────────────────────────────────────
+        _sl = m.get("sound_lands_s")
+        if _sl is not None:
+            try:
+                _sl = float(_sl)
+            except (TypeError, ValueError):
+                _sl = None
+            if _sl is None or not (0.0 <= _sl <= duration_s):
+                m["sound_lands_s"] = None
+                m["audio_state"] = ("DROPPED — sound_lands_s %r is not a time "
+                                    "inside this clip" % m.get("sound_lands_s"))
+            else:
+                m["sound_lands_s"] = round(_sl, 2)
+        _sy = str(m.get("sync") or "").strip().lower()
+        m["sync"] = _sy if _sy in _SYNC else None
+        if m.get("sound_lands_s") is not None and not m["sync"]:
+            m["audio_state"] = ("PARTIAL — a sound with no `sync` says WHEN it "
+                                "hits and not where it sits against the word, "
+                                "which is the half an editor acts on")
+        elif m.get("sound_lands_s") is not None:
+            m["audio_state"] = "MEASURED"
+        else:
+            m["audio_state"] = "NO SOUND NAMED"
+        if str(m.get("punctuates") or "").strip():
+            _n = len(str(m["punctuates"]).split())
+            if _n > 10:
+                over.append({"i": i, "field": "punctuates", "words": _n,
+                             "limit": 10})
         for k, lim in _LIMITS.items():
             n = len(str(m[k]).split())
             if n > lim:
@@ -209,6 +282,23 @@ def watch(video_bytes: bytes, label: str, duration_s: float,
     # something a later script infers from the rows.
     rec["kinds"] = {_k: sum(1 for _m in kept if _m["kind"] == _k)
                     for _k in sorted(_KIND)}
+    # THE SEQUENCE AND AUDIO DENSITIES, recorded where they are read. A corpus
+    # with no strips and a reader that was never asked for spans produce the
+    # same empty artefact.
+    rec["spans"] = {
+        "with_span": sum(1 for _m in kept if _m.get("t_from_s") is not None),
+        "change_family_without_span": sum(1 for _m in kept
+                                          if _m.get("span_missing")),
+        "rejected": [_m["span_state"] for _m in kept
+                     if _m["span_state"] not in ("NONE",)
+                     and not _m["span_state"].startswith("MEASURED")][:6]}
+    rec["audio"] = {
+        "with_a_sound": sum(1 for _m in kept
+                            if _m.get("sound_lands_s") is not None),
+        "fully_described": sum(1 for _m in kept
+                               if _m.get("audio_state") == "MEASURED"),
+        "partial": sum(1 for _m in kept
+                       if str(_m.get("audio_state") or "").startswith("PARTIAL"))}
     if not rec["kinds"].get("restraint"):
         rec["kinds"]["note"] = ("NO RESTRAINT MOMENT — either this video "
                                 "genuinely places at every marked moment, or "

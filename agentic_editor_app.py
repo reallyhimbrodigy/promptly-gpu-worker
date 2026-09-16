@@ -9486,11 +9486,20 @@ def watched_frames():
     _d = _watched_path("tiles")
     if not _d:
         return [], "ABSENT: no tiles/ under %s" % " or ".join(_WATCHED_DIRS)
-    _files = sorted(glob.glob(os.path.join(_d, "SHEET_*.png")),
-                    key=lambda p: int("".join(c for c in os.path.basename(p)
-                                              if c.isdigit()) or 0))
+    # BOTH KINDS, AND THE STRIPS FIRST. A SHEET_ is single settled frames; a
+    # STRIP_ is rows of five frames through a change — a cut, a transition, a
+    # sound landing — which one settled frame cannot show. Globbing SHEET_*
+    # alone would have mounted the strips into the image and shown the agent
+    # none of them: a producer with no consumer, in the half of the artefact
+    # that exists because one frame was not enough.
+    _files = sorted(glob.glob(os.path.join(_d, "STRIP_*.png"))) + \
+        sorted(glob.glob(os.path.join(_d, "SHEET_*.png")))
+    _files = sorted(_files, key=lambda p: (os.path.basename(p)[:5],
+                                           int("".join(c for c in
+                                                       os.path.basename(p)
+                                                       if c.isdigit()) or 0)))
     if not _files:
-        return [], "ABSENT: %s holds no SHEET_*.png" % _d
+        return [], "ABSENT: %s holds no SHEET_*.png or STRIP_*.png" % _d
     _blocks = []
     for _f in _files:
         try:
@@ -9502,8 +9511,10 @@ def watched_frames():
         _blocks.append({"type": "image",
                         "source": {"type": "base64", "media_type": "image/png",
                                    "data": base64.b64encode(_b).decode()}})
-    return _blocks, "MEASURED: %d sheet(s), %d KB" % (
-        len(_files), sum(os.path.getsize(f) for f in _files) // 1024)
+    _ns = sum(1 for f in _files if os.path.basename(f).startswith("STRIP_"))
+    return _blocks, "MEASURED: %d sheet(s) (%d strip, %d frame), %d KB" % (
+        len(_files), _ns, len(_files) - _ns,
+        sum(os.path.getsize(f) for f in _files) // 1024)
 
 
 # ── REMOVAL SWITCHES FOR THE PREFIX MATERIAL ────────────────────────────────

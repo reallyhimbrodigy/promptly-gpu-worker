@@ -128,6 +128,18 @@ try:
         blocks, state = A.watched_frames()
         if blocks or "no SHEET_*.png" not in state:
             bad("an empty tiles/ returned %r" % state)
+        # THE STRIPS MUST REACH THE PREFIX TOO. A glob that names only
+        # SHEET_*.png mounts the strips and shows the agent none of them —
+        # a producer with no consumer, in the half of the artefact that exists
+        # because one settled frame could not show a cut.
+        open(os.path.join(d, "w", "tiles", "STRIP_1.png"), "wb").write(
+            __import__("base64").b64decode(
+                b"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4"
+                b"nGP4//8/AAX+Av7czFnnAAAAAElFTkSuQmCC"))
+        blocks, state = A.watched_frames()
+        if len(blocks) != 1 or "1 strip" not in state:
+            bad("a tiles/ holding only a STRIP_ returned %d block(s), %r — "
+                "the strips do not reach the prefix" % (len(blocks), state))
 finally:
     A._WATCHED_DIRS = _save
 

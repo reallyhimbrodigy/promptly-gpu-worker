@@ -354,6 +354,21 @@ def classify_stream(path):
     """
     import collections
     calls, errors, turns = [], 0, 0
+    # THE REASONING, KEPT. Until 2026-09-15 this function counted thinking
+    # deltas and `turn_clock` timed them to the tenth of a second, and NOT ONE
+    # WORD was kept anywhere — 112 measured seconds of deliberation per run,
+    # unreadable, because stream.jsonl dies with the container. Asked what the
+    # agent was thinking about, the only honest answer was "the harness never
+    # looked". That is this repo's own rule — a derived signal that is not
+    # printed cannot be verified — applied to the most expensive block in the
+    # run.
+    #
+    # It is attached to the assistant EVENT, beside the tool call that event
+    # emitted, so "what was it working out before it called this" is a read
+    # rather than a join between two numbering schemes that do not line up
+    # (classify_stream counts assistant events, turn_clock counts
+    # message_start..message_stop; 17 against 8 on the same run).
+    reasoning = []
     last_text = ""
     by_tool = collections.Counter()
     per_turn = collections.Counter()
@@ -370,6 +385,21 @@ def classify_stream(path):
             t = ev.get("type")
             if t == "assistant":
                 turns += 1
+                _think = " ".join(
+                    str(b.get("thinking") or b.get("text") or "")
+                    for b in ((ev.get("message") or {}).get("content") or [])
+                    if b.get("type") == "thinking").strip()
+                if _think:
+                    # TRUNCATED WITH ITS DENOMINATOR, never silently. A thought
+                    # cut at 6000 characters reads as a complete one that
+                    # happens to stop.
+                    reasoning.append({
+                        "turn": turns, "chars": len(_think),
+                        "truncated": len(_think) > 6000,
+                        "text": _think[:6000],
+                        "tools": [b.get("name") for b in
+                                  ((ev.get("message") or {}).get("content") or [])
+                                  if b.get("type") == "tool_use"]})
                 for blk in (ev.get("message") or {}).get("content") or []:
                     if blk.get("type") == "text" and (blk.get("text") or "").strip():
                         last_text = blk["text"]
@@ -445,6 +475,20 @@ def classify_stream(path):
         seen.add(k)
     return {"assistant_turns": turns, "tool_calls": len(calls),
             "tool_errors": errors, "identical_repeats": repeats,
+            # WHAT IT WAS WORKING OUT, per assistant event, beside the call
+            # that event made. A STATE, not a possibly-empty list: a run whose
+            # reasoning was never captured and a run that did not think read
+            # identically once you are only looking at a list length.
+            "reasoning": reasoning,
+            "reasoning_state": ("MEASURED: %d event(s) carried thinking, "
+                                "%d chars" % (len(reasoning),
+                                              sum(r["chars"] for r in reasoning))
+                                if reasoning else
+                                "ABSENT — no thinking block reached the "
+                                "transcript. Either the model emitted none, or "
+                                "this stream has no thinking blocks in it; "
+                                "those are different and this line cannot tell "
+                                "them apart"),
             "buckets": dict(buckets),
             "by_tool": by_tool.most_common(20),
             "turns_with_no_tool": sum(1 for i in range(1, turns + 1)

@@ -54,8 +54,31 @@ is a "yes": that is what "nothing was placed here" looks like in these videos. A
 describes is a "yes". DO NOT answer "no" merely because nothing is happening;
 nothing happening is what that line claims.
 
+SOME ENTRIES ARE STRIPS, NOT SINGLE FRAMES. A strip is one ROW of five frames
+left to right through a change — a cut, a transition, a sound landing — with
+each frame's time underneath it. Its line has `strip: true` and a `span`.
+
+For a strip the question is about the SEQUENCE, not any one frame:
+
+    Does this row show the change the line describes?
+
+  "yes"     the row goes from what the line calls the BEFORE to what it calls
+            the AFTER. A cut appears as one frame that is plainly a different
+            shot from the frame to its left. A transition appears as
+            intermediate frames. Minor wording differences are fine.
+  "no"      all five frames are the same shot and the line claims a cut; or the
+            change is there but it is not the change described; or the row
+            shows a different part of the video entirely.
+  "unsure"  the frames are too small to tell one shot from another.
+
+A row where the change happens in the FIRST or LAST frame is still a "yes" —
+the span was tight, which is correct. A row of five identical frames under a
+line claiming a cut is a "no": the span missed the change, and a strip that
+shows no change is worse than one frame, because it looks like evidence.
+
 Also return `frame_says`: <= 12 words describing what the tile ACTUALLY shows.
-Return it for every tile, including the yeses — it is how a disagreement gets
+For a strip, say what the row does across it ("same shot throughout", "cuts at
+frame 3 to a screen recording"). Return it for every entry, including the yeses — it is how a disagreement gets
 diagnosed instead of argued.
 
 RETURN STRICT JSON AND NOTHING ELSE, one entry per tile, in tile order:
