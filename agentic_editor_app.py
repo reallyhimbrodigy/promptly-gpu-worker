@@ -3406,9 +3406,35 @@ KNOWLEDGE_TOOLS = [{
         "'remove the filler', 'make the text bigger', 'cut it down'.) Every "
         "one it names goes in `families`. These are GUARANTEED — the edit must "
         "deliver them.\n"
-        "  Q2. Does the brief carry VIBE language? ('punchy', 'clean', "
-        "'cinematic', 'professional', 'like a trailer', 'tighter', 'more "
-        "energy'.) A vibe asks for the whole edit.\n\n"
+        "  Q2. Does the brief carry VIBE language? ANSWER THIS BY MATCHING, "
+        "NOT BY INTERPRETING. If any of these appears anywhere in the brief, "
+        "in any form, Q2 IS YES:\n"
+        "        punchy  snappy  tight/tighter  clean  crisp  slick  polished\n"
+        "        cinematic  professional  premium  dynamic  energetic  hype\n"
+        "        engaging  scroll-stopping  viral  like a <something>\n"
+        "        'more energy'  'make it pop'  'make it good'  'make it better'\n"
+        "      The list is not exhaustive and a word not on it can still be a "
+        "vibe — but a word ON it is NEVER not one. Do not reason about whether "
+        "'punchy vertical short' is really asking for a vibe or just "
+        "describing the format. It is on the list. Q2 is yes.\n\n"
+        "  WHY THIS ONE IS A MATCH AND NOT A JUDGEMENT, measured 2026-09-15: "
+        "three of seven runs on the brief 'Cut this into a punchy vertical "
+        "short. Remove silence and filler. Keep the meaning intact. Burn "
+        "readable captions.' answered Q2 NO and wrote, verbatim: 'Names cut "
+        "(remove silence/filler) and caption (burn readable captions); NO VIBE "
+        "LANGUAGE, so scope is limited to those two families only.' Every one "
+        "of those runs then ruled `none` on every beat and delivered an EMPTY "
+        "EDIT — correctly, given that scope. The word 'punchy' was in the "
+        "brief, is listed above as a vibe word, and appears in this rule's own "
+        "worked example. More prose did not fix it; reading it as a lookup "
+        "does.\n\n"
+        "  AND THE TWO MISTAKES DO NOT COST THE SAME. Call Q2 wrongly YES and "
+        "you deliver the named families plus whatever the beats deserved — the "
+        "guarantees still hold and a fidelity note records the extras. Call it "
+        "wrongly NO and you deliver NOTHING: every beat rules `none`, the user "
+        "gets their footage back with captions on it, and every gate passes. "
+        "An under-scoped edit is a total failure wearing a clean report. When "
+        "the reading is genuinely close, it is BOTH.\n\n"
         "Then the mode falls out:\n"
         "  Q1 yes, Q2 no   -> targeted_change, families = what it named, and "
         "quote the brief in `existing_edit_quote`. The named things, nothing "
@@ -3425,7 +3451,11 @@ KNOWLEDGE_TOOLS = [{
         "have. Say which.\n\n"
         "Do not agonise over the boundary. If a word could be either, it is a "
         "vibe AND a named change and the answer is BOTH — that branch exists "
-        "precisely so the tie does not need breaking.\n\n"
+        "precisely so the tie does not need breaking. `targeted_change` is for "
+        "a brief that names changes and carries NO vibe word at all: 'add "
+        "captions', 'remove the filler', 'make the text bigger'. If you are "
+        "about to choose it on a brief with an adjective in it, re-read the "
+        "Q2 list first.\n\n"
         "  full_edit       — the request describes a VIBE ('punchy and direct', "
         "'clean and professional', 'like a movie trailer'). The vibe is the "
         "spec: derive the whole edit from it. DENSITY IS NOT YOUR DECISION — "
@@ -17616,6 +17646,22 @@ def edit(source_key: str, brief: str,
                     led["rubric"] = derive_rubric(_sc.get("targets"), _sc["mode"],
                                                   beat_source=_beat_source)
                     led["spec"] = _sc
+                    # PRINTED WHERE IT IS DECIDED. The mode is the single most
+                    # consequential ruling in the run — it decides whether
+                    # ANYTHING gets placed — and it reached the log only
+                    # sideways, in a FIDELITY line at the very end. When 3 of 7
+                    # runs came back empty, the reason existed, in the agent's
+                    # own words, in a `why` nobody had looked at; and two of
+                    # the three had already been overwritten by the time anyone
+                    # went looking. A derived signal that is not printed cannot
+                    # be verified — on the decision that controls the outcome.
+                    print("  SPEC            : mode=%s families=%s\n"
+                          "     why: %s"
+                          % (_sc.get("mode"),
+                             _sc.get("families") if _sc.get("families")
+                             is not None else "(none — the vibe is the spec)",
+                             str(_sc.get("why") or "(no reason given)")[:300]),
+                          flush=True)
                     out = {"spec_set": True, **_sc}
                 except ValueError as _se:
                     # Handed BACK to the agent, not raised: a vague scope is

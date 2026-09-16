@@ -954,7 +954,16 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
     # mistaken for a defect. This file knows every graphic's window, so it
     # knows those frames.
     if _settle:
-        _fr = sorted(set(_settle))[:9]      # the viewer takes at most 9
+        # 25, NOT 9 — READ FROM tools/list ON 2026-09-16, not remembered.
+        # `preview_timeline` now takes viewerFrames maxItems 25 and
+        # viewerFrameCount max 25. The 9 was true against the surface of the
+        # day it was written and became a 2.8x under-ask the moment ChatCut
+        # raised the cap, silently, with nothing on our side to notice. On a
+        # plan with more than nine placements this was NAMING FEWER REVIEW
+        # FRAMES THAN THERE ARE THINGS TO REVIEW: some placement went
+        # unexamined on every run, and the review still reported clean.
+        # CHATCUT_SURFACE.md records the reading and its date.
+        _fr = sorted(set(_settle))[:25]
         # A STARTING POINT, NOT A RATION. These were "do not pick your own and
         # do not call preview_timeline twice" — bounding how often the agent
         # could LOOK, which was a wall problem being solved by taking away the

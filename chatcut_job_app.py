@@ -1857,10 +1857,13 @@ def verify_hop7_sync(tok, stage, shape):
 # harness chose and compressed; a sequence is the nearest thing to watching
 # that this surface allows.
 SOURCE_FRAMES_N = 14
-# NO LONGER NINE. That was `preview_timeline`'s cap — "up to 9 frames" per
-# call — and pass 2 now samples a real rendered file instead, so the number is
-# chosen for what the agent needs to see rather than for what the tool would
-# give. Half evenly spaced so nothing is unwatched, half on the biggest
+# NO LONGER NINE. That was `preview_timeline`'s cap — and the cap itself is no
+# longer nine either: read from tools/list on 2026-09-16 it is 25, for both
+# viewerFrames and viewerFrameCount. Pass 2 samples a real rendered file
+# instead, so the number is chosen for what the agent needs to see rather than
+# for what the tool would give — but the note is corrected because a stale
+# claim about someone else's limit is the thing that kept the PLAN asking for
+# nine review frames long after twenty-five were available. Half evenly spaced so nothing is unwatched, half on the biggest
 # frame-to-frame changes, which is where entrances, exits and collisions are.
 EDIT_FRAMES_N = 16
 
@@ -2840,7 +2843,8 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                                 "The harness could not render the edit for "
                                 "you, so you have NOT seen it yet. Ask "
                                 "preview_timeline for the frames you want — "
-                                "%s is a reasonable place to start — and they "
+                                "%s is a reasonable place to start (it takes "
+                                "up to 25 at a time) — and they "
                                 "will be sent to you as pictures. Then say in "
                                 "your final message that the harness could not "
                                 "render the edit."
