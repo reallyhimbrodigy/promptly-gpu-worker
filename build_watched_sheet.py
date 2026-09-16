@@ -33,8 +33,20 @@ OUT = os.path.join(HERE, "watched")
 # anything whose long edge exceeds 1568, so a sheet that overshoots pays for
 # pixels it then loses. Both numbers are printed by this script; they are not
 # to be estimated.
-TILE_W, TILE_H, HEAD_H = 240, 427, 22
-COLS, ROWS = 6, 3
+# GEOMETRY IS SET BY THE 1568px CAP, NOT BY TASTE. MEASURED with
+# `count_tokens` rather than the w*h/750 rule, which is an upper bound:
+#
+#   5 frames x232px, 3 rows   1160x1350   rule 2088   MEASURED 1556
+#   4 frames x392px, 2 rows   1568x1468   rule 3069   MEASURED 1560
+#   3 frames x522px, 1 row    1566x 966   rule 2017   MEASURED 1552
+#
+# Anthropic rescales anything past 1568 on its long edge, so a sheet that
+# reaches the cap costs ~1,550 tokens WHATEVER IS IN IT. The old geometry paid
+# that for frames 232px wide; the new one pays the same for frames 392px wide —
+# 69% more linear resolution, 2.9x the pixels per frame, for nothing. A taller
+# sheet is strictly worse: it is scaled back down and shows less for the money.
+TILE_W, TILE_H, HEAD_H = 392, 697, 26
+COLS, ROWS = 4, 2
 # ── STRIPS ──────────────────────────────────────────────────────────────────
 # A cut is a CHANGE and a single settled frame shows its aftermath: where it
 # ended up, not what it did. A sound lands BETWEEN two pictures and what matters
@@ -44,9 +56,14 @@ COLS, ROWS = 6, 3
 #
 # FIVE FRAMES, evenly across the span. Fewer than four cannot show a middle;
 # more than six at this width is a row of thumbnails nobody can read.
-STRIP_N = 5
-STRIP_W, STRIP_H = 232, 412
-STRIP_ROWS = 3                       # strips per sheet
+# FOUR FRAMES, NOT FIVE, AND EACH 69% WIDER. A cut needs before / last-before /
+# first-after / settled; the fifth frame bought a sample nobody reads and cost
+# every other frame 20% of its width. At the cap, four at 392px and five at
+# 313px cost the same sheet — so the question is only which shows the change,
+# and a wider frame does.
+STRIP_N = 4
+STRIP_W, STRIP_H = 392, 697
+STRIP_ROWS = 2                       # 2 x (697+42) = 1478, inside the cap
 BG = (24, 24, 27)
 INK = (240, 240, 245)
 
@@ -163,16 +180,25 @@ def select(recs, per_video):
                     return m
             return None
 
-        # THE HOOK, THE TURN, AND AT LEAST ONE RESTRAINT MOMENT PER VIDEO.
-        # Restraint is the half the greedy coverage rule would lose: a
-        # restraint moment usually names no family, so it adds no (family,
-        # where) pair and sorts last forever. A sheet made of placements
-        # teaches "put something here", which is the fact an imitator copies;
-        # the decision NOT to place is the half that generalises. So it is
-        # taken by name, not left to arithmetic.
-        for pred in (lambda m: m["purpose"] == "hook",
-                     lambda m: m["purpose"] in ("turn", "payoff"),
-                     lambda m: m.get("kind") == "restraint"):
+        # THE MOMENTS THAT TEACH, TAKEN BY NAME. Three things are picked
+        # deliberately because the greedy coverage rule below would lose all
+        # three, and each is lost for its own reason:
+        #
+        #   a STRIP through a change — a cut, a transition, a sound landing.
+        #     One settled frame of a cut shows where it ended up and hides what
+        #     it did, so the strips are the half that teaches an EDIT rather
+        #     than an outcome. They are taken FIRST.
+        #   a RESTRAINT moment — it usually names no family, so it adds no
+        #     (family, where) pair and sorts last forever. A sheet of
+        #     placements teaches "put something here", which is the fact an
+        #     imitator copies.
+        #   the HOOK — every one of these videos spends its best decision in
+        #     the first two seconds.
+        for pred in (lambda m: m.get("t_from_s") is not None
+                     and bool(set(m["families"]) & {"cut", "transition"}),
+                     lambda m: m.get("kind") == "restraint",
+                     lambda m: m["purpose"] == "hook",
+                     lambda m: m.get("t_from_s") is not None):
             m = pop(pred)
             if m:
                 take.append(m)

@@ -3568,15 +3568,18 @@ KNOWLEDGE_TOOLS = [{
     # come back attached to the tool result that asked for them.
     "name": "scrub_reference",
     "description": (
-        "LOOK AT ONE OF ZAC'S TEN REFERENCE VIDEOS, at whatever moments you "
-        "want. The frames come back as PICTURES in the result, at full "
-        "resolution, with the words spoken there. Use it when you are deciding "
-        "what a moment should carry and want to see how the standard handled a "
-        "moment of the same shape — not to copy a placement, but to see what "
-        "the decision looked like. `video` is 1-10 (call it with video=0 to "
-        "list them). `at_seconds` is up to 25 exact times IN THE REFERENCE, "
-        "not in the edit you are planning. Ask for as many moments as you "
-        "need; nobody is counting."),
+        "THE SHEETS ALREADY IN FRONT OF YOU ARE THE REFERENCE. They are the "
+        "moments of Zac's ten that teach, chosen and checked, and they are "
+        "what you rule against. This tool is for the case they do not cover: "
+        "you are deciding a beat of a shape the sheets have no example of, and "
+        "you want to see how the standard handled one. Then ask.\n"
+        "It returns PICTURES at full resolution with the words spoken there. "
+        "`video` is 1-10 (video=0 lists them). `at_seconds` is up to 25 exact "
+        "times IN THE REFERENCE, not in the edit you are planning.\n"
+        "EVERY CALL IS RECORDED AS A GAP IN THE CACHE — not as a cost, as a "
+        "finding. If you had to come here, the sheets were missing something, "
+        "and saying what you were looking for is the most useful part of the "
+        "call. Put it in `looking_for`."),
     "input_schema": {"type": "object",
                      "properties": {
                          "video": {"type": "integer",
@@ -3585,7 +3588,12 @@ KNOWLEDGE_TOOLS = [{
                                         "items": {"type": "number"},
                                         "description": "up to 25 exact times"},
                          "words_from_s": {"type": "number"},
-                         "words_to_s": {"type": "number"}},
+                         "words_to_s": {"type": "number"},
+                         "looking_for": {
+                             "type": "string",
+                             "description": "What the sheets did not cover — "
+                                            "the beat you are ruling and the "
+                                            "kind of example you wanted."}},
                      "required": ["video"]},
 }, {
     "name": "read_knowledge",
@@ -13145,7 +13153,8 @@ def edit(source_key: str, brief: str,
     # everything; the scrub is the one call whose answer is pixels.
     _scrub_blocks = {}
 
-    def scrub_reference(video, at_seconds, words_from_s=None, words_to_s=None):
+    def scrub_reference(video, at_seconds, words_from_s=None, words_to_s=None,
+                        looking_for=None):
         """(summary, image_blocks). Look at one of the ten, at named moments.
 
         A STATE IN THE SUMMARY, ALWAYS. "No frames came back" and "the
@@ -13197,11 +13206,19 @@ def edit(source_key: str, brief: str,
         _urls = _cr.frame_urls(_res)
         _st = _cr.structured(_res)
         _got, _fst = _cr.fetch(_urls, "/work/refframes/%s" % video)
-        led.setdefault("reference_scrubs", []).append(
-            {"video": int(video), "asked": len(_ts), "served": len(_got),
-             "state": _fst})
-        print("  REFERENCE SCRUB : video %s at %s -> %s"
-              % (video, ["%.1fs" % t for t in _ts], _fst), flush=True)
+        # A GAP IN THE CACHE, RECORDED AS A FINDING. Zac's ruling: the sheets
+        # are the mechanism and this is not. A call here means the cached
+        # moments did not cover the beat being ruled — which is the most
+        # useful thing a run can tell the next cache build, and it is worth
+        # nothing unless what it was LOOKING FOR is written down beside it.
+        led.setdefault("cache_gaps", []).append(
+            {"video": int(video), "at": ["%.2f" % t for t in _ts],
+             "looking_for": looking_for or "(not said)",
+             "turn": led.get("iters"), "served": len(_got), "state": _fst})
+        print("  CACHE GAP       : the sheets did not cover %r — went to "
+              "reference %s at %s (%s)"
+              % ((looking_for or "(not said)")[:70], video,
+                 ["%.1fs" % t for t in _ts], _fst), flush=True)
         _blocks = []
         for _u, _p in _got:
             _blocks.append({"type": "image", "source": {
@@ -17561,7 +17578,8 @@ def edit(source_key: str, brief: str,
             elif tu.name == "scrub_reference":
                 out, _blk = scrub_reference(
                     tu.input.get("video"), tu.input.get("at_seconds") or [],
-                    tu.input.get("words_from_s"), tu.input.get("words_to_s"))
+                    tu.input.get("words_from_s"), tu.input.get("words_to_s"),
+                    tu.input.get("looking_for"))
                 if _blk:
                     _scrub_blocks[tu.id] = _blk
             elif tu.name == "read_knowledge":
@@ -20107,6 +20125,30 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     # the ledger write; that is a different fact and it prints as one.
     _dled = (r.get("ledger") or {})
     _dst = _dled.get("source_duration_state")
+    # THE CACHE GAPS, PRINTED. A counter added to answer a question gets
+    # printed in the commit that adds it — three instances in one session, each
+    # diagnosed from the previous one. This is the feedback loop the cached
+    # sheets did not have: the moments the planner went looking for and could
+    # not find are exactly what the next build should carry.
+    #
+    # AND THE DENOMINATOR IS THE OFFER. A zero here means "the sheets covered
+    # everything" ONLY if the tool was there to reach for. read_knowledge's
+    # zero was quoted as a finding for 37 runs when it had been withheld in all
+    # of them.
+    _gaps = (r.get("ledger") or {}).get("cache_gaps") or []
+    _offered = (r.get("ledger") or {}).get("scrub_offered")
+    print("  CACHE GAPS      : %s"
+          % ("UNOFFERED — scrub_reference was not in the tool set, so a zero "
+             "here says nothing about the cache" if not _offered
+             else "none — the sheets covered every beat this run ruled"
+             if not _gaps
+             else "%d, to fold into the next build:" % len(_gaps)), flush=True)
+    for _g in _gaps:
+        print("      turn %-3s ref %-3s %-24s %s"
+              % (_g.get("turn"), _g.get("video"),
+                 ",".join(_g.get("at") or [])[:24],
+                 str(_g.get("looking_for"))[:64]), flush=True)
+
     print("  SOURCE DURATION : " + json.dumps({
         "dur_s": (round(float(_dled.get("source_duration_s")), 2)
                   if _dst == "MEASURED" and _dled.get("source_duration_s") is not None
