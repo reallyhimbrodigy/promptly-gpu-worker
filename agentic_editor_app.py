@@ -20137,12 +20137,27 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     # of them.
     _gaps = (r.get("ledger") or {}).get("cache_gaps") or []
     _offered = (r.get("ledger") or {}).get("scrub_offered")
+    # A RUN THAT RULED NOTHING NEEDED NO EXAMPLE. MEASURED 2026-09-15: a run
+    # ruled all 20 beats `none` and this line printed "the sheets covered every
+    # beat this run ruled" — true, vacuous, and reading exactly like a cache
+    # that worked. Zero gaps means the cache is sufficient ONLY if something
+    # was actually decided; otherwise it means nobody looked anything up
+    # because nobody placed anything. Two facts, one zero — the shape this
+    # whole lane has spent a week on.
+    _ruled = sum(len((_v.get("treatment") or []))
+                 for _v in ((r.get("ledger") or {}).get("executed_verdicts")
+                            or (r.get("ledger") or {}).get("beat_verdicts")
+                            or [])
+                 if set(_v.get("treatment") or []) - {"none"})
     print("  CACHE GAPS      : %s"
           % ("UNOFFERED — scrub_reference was not in the tool set, so a zero "
              "here says nothing about the cache" if not _offered
-             else "none — the sheets covered every beat this run ruled"
-             if not _gaps
-             else "%d, to fold into the next build:" % len(_gaps)), flush=True)
+             else "%d, to fold into the next build:" % len(_gaps) if _gaps
+             else "VACUOUS — this run ruled no treatment on any beat, so it "
+                  "never needed an example. A zero here is not coverage."
+             if not _ruled
+             else "none — the sheets covered every beat this run ruled "
+                  "(%d treatment ruling(s))" % _ruled), flush=True)
     for _g in _gaps:
         print("      turn %-3s ref %-3s %-24s %s"
               % (_g.get("turn"), _g.get("video"),
