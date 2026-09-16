@@ -207,3 +207,44 @@ calling it showed that.
 
 **The answer to "is there byte-level access" is `pull_asset`, by their own
 words "sandbox-only", and it is not on this surface.**
+
+### The page scraper CAN render a chosen frame of a moving picture
+
+The description says it cannot process video, and that is true of a video URL.
+It is not true of a video ON A PAGE — because the tool is a browser, and it
+accepts `actions` including `executeJavascript`.
+
+Called with a seek followed by a screenshot, the returned `javascriptReturns`,
+verbatim:
+
+```
+"videos=4 seeked_to=2 duration=8.128 src=editor-scene/structure-c/source-720p.mp4"
+```
+
+Four `<video>` elements found, one seeked to exactly 2.0s of its 8.128s, then
+the page screenshotted. And the screenshot is **fetchable by us with no auth** —
+a Google signed URL, 1920x1080 PNG, 538,037 bytes, magic `89504e470d0a1a0a`:
+
+```
+A_fetch  {"status":"OK","bytes":380324,"content_type":"image/png"}
+B_fetch  {"status":"OK","bytes":538037,"content_type":"image/png"}
+```
+
+So motion IS reachable, one chosen frame at a time, through the tool that says
+it cannot process video.
+
+**AND IT DOES NOT REACH OUR FOOTAGE.** Three limits, each fatal on its own for
+this use:
+
+1. Firecrawl fetches the URL ITSELF, with no credential of ours — so it reaches
+   PUBLIC pages only. The ChatCut asset download URL is 401 to everyone but the
+   signed-in user, so the assets in the reference project are out of reach.
+2. Our reference SOURCES are public (CloudFront, unsigned), so a page embedding
+   them could be scrubbed this way — but we already hold those bytes locally,
+   so it buys nothing there.
+3. One frame per call, each with a full page load and a scrape quota charge,
+   against `inspect_asset`'s 25 exact frames in a single call.
+
+The capability is real, it was invisible from the description, and it solves a
+problem we do not have. Recorded because "the scraper cannot do video" is the
+kind of true-sounding summary that stops the next person looking.
