@@ -2409,7 +2409,16 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
             f"  (max_results defaults to 5 — without it you get five of the "
             f"{_nsel} and the rest stay uncallable.)\n\n"
             + TWO_TURN_LOOP
-            + SHEET_RULE
+            # SHEET_RULE USED TO SIT HERE AND THE CONSTANT NO LONGER EXISTS.
+            # It was deleted in 7a86e3b with the 20-frame contact sheet it
+            # described, and TWO uses were left behind — so every run on this
+            # path has died at `NameError: name 'SHEET_RULE' is not defined`
+            # since that commit, and nothing caught it because
+            # smoke_no_undefined_names.py's file list did not include this
+            # file. The RULE itself is not lost: `pass1_message` carries it in
+            # the text block beside the frames, where it now describes what is
+            # actually sent (14 individual frames, not a tile) instead of what
+            # used to be.
             + FETCH_RULE
             + (HANDS_PARA_PLAN if use_hands else "")
             + (("EVERYTHING IS ALREADY STAGED. Create nothing and upload "
@@ -2468,7 +2477,8 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         prompt = (
             f"THE CLIP: /work/source.mp4\n"
             f"THE BRIEF: {brief}\n\n"
-            + SHEET_RULE
+            # (the second dangling SHEET_RULE — same deletion, same fix; both
+            # branches are served by pass1_message, which carries the rule)
             + FETCH_RULE
             + f"BEFORE RENDER, call preview_timeline with viewerFrameCount to see the "
             f"composed result. Both of these are checked after the run.\n\n"
@@ -2579,7 +2589,7 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     _total_frames = max([(r["from"] or 0) + (r["dur"] or 0) for r in _man]
                         or [0])
     _n_calls = len({r["call"] for r in _man}) or 1
-    _state = {"edits": 0, "sent": False}
+    _state = {"edits": 0, "sent": False, "pass2": ""}
 
     def _drive(ev, send, close):
         """PASS 2: the edit is shown to the agent, once its placements land.
@@ -2597,6 +2607,16 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
             return
         _state["sent"] = True
         _got, _want = _edit_frames(tok, _stage["projectId"], _total_frames)
+        # PRINTED IN THE SAME COMMIT THAT NEEDS IT. Run 24 could not be read:
+        # the agent scrubbed 19 frames of its own with 10 Bash calls and 156s,
+        # and NOTHING in the record said whether that was because pass 2 never
+        # arrived or because it arrived and the agent looked further anyway.
+        # Those are opposite diagnoses — a broken harness against an agent
+        # doing exactly what it was told — and they rendered identically.
+        _state["pass2"] = ("SERVED %d frame(s)" % len(_got) if _got
+                           else "NOT SERVED — _edit_frames returned nothing; "
+                                "the agent was told to scrub for itself")
+        print("  PASS 2          : %s" % _state["pass2"], flush=True)
         if _got:
             send(pass2_message(_got, _want))
         else:
@@ -2655,7 +2675,9 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     print("  TURN BUDGET     : %s" % json.dumps(
         {k: v for k, v in (_budget or {}).items() if k != "gap_detail"}),
         flush=True)
-    out = {"think_tokens": think_tokens,
+    out = {"pass2": _state.get("pass2") or "NEVER FIRED — the plan's last "
+                                           "edit_item call was not reached",
+           "think_tokens": think_tokens,
            "prestaged": bool(_stage),
            "turn_budget": _budget,
            "partial_messages": {"state": _pm_state, "supported": _pm},
@@ -2912,6 +2934,8 @@ def audio_roundtrip(clip_url: str):
 
 @app.local_entrypoint()
 def roundtrip(clip_url: str = "", out: str = "/tmp/bs/roundtrip.json"):
+    from require_detach import require_detach
+    require_detach("an audio round-trip probe")
     r = audio_roundtrip.remote(clip_url)
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(r, fh, indent=1)
@@ -2986,6 +3010,8 @@ def detect_regions(clip_url: str, duration_s: float = 0.0):
 
 @app.local_entrypoint()
 def detect(clip_url: str = "", out: str = "/tmp/bs/regions.json"):
+    from require_detach import require_detach
+    require_detach("a region-detection probe")
     r = detect_regions.remote(clip_url)
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(r, fh, indent=1)
@@ -3400,19 +3426,14 @@ def rendercheck(props_file: str = ""):
     print("\nDRAW PIXELS: %d of %d" % (r["rendered"], r["attempted"]))
 
 
-@app.local_entrypoint()
-def sweep(props_file: str = ""):
-    """Run the wiring sweep and print the table. No render, no agent."""
-    from require_detach import require_detach
-    require_detach("a wiring sweep")
-    txt = open(props_file, encoding="utf-8").read() if props_file else ""
-    r = wiring_sweep.remote(txt)
-    rows = r["components"]
-    print("\n%-22s %-9s %s" % ("COMPONENT", "STATE", "EVIDENCE"))
-    for n, v in sorted(rows.items()):
-        print("%-22s %-9s %s" % (n, v["state"], v["detail"][:96]))
-    print("\nRENDERED %d of %d attempted (baseline %sB)"
-          % (r["rendered"], r["attempted"], r["baseline_bytes"]))
+# THE `sweep` ENTRYPOINT IS GONE (2026-09-15). It called `wiring_sweep.remote`,
+# and `wiring_sweep` was deleted in 48c5c33 — so `modal run
+# chatcut_job_app.py::sweep` has raised NameError ever since, and the only
+# reason it was not noticed is that nothing has needed it. Second dangling
+# reference in this file found by the same scoped check in the same minute as
+# SHEET_RULE; the entrypoint is removed rather than repaired because the
+# function it drove no longer exists and the question it answered — do the
+# components draw — is now `bake_probe` and `component_render_check`.
 
 
 @app.local_entrypoint()

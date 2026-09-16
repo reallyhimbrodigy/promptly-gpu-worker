@@ -48,9 +48,27 @@ for f in sorted(glob.glob(os.path.join(HERE, "smoke_*.py"))
         tree = ast.parse(open(f, encoding="utf-8").read())
     except Exception:                                             # noqa: BLE001
         continue
+    # AN ABSENCE ASSERTION IS NOT A LOOKUP, and conflating them made this check
+    # fire on a correct one. `smoke_five_families` asserts
+    # `not any(... n.name == "place_cutaway" ...)` — the retired cutaway tool,
+    # which is SUPPOSED to be defined zero times, and whose absence is the
+    # whole point of the leg. Flagged as "DEFINED ZERO TIMES ... asserts
+    # nothing", it was a check inventing a failure, which this repo has already
+    # recorded as the way a check gets bypassed.
+    #
+    # The distinction is structural, not stylistic: `next(gen, None)` returns
+    # None silently and its legs then assert nothing, while `any(...)`/`all(...)`
+    # return a real boolean over the whole population and are CORRECT on an
+    # empty one. So comparisons inside an any/all are skipped.
+    _in_quantifier = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) \
+                and n.func.id in ("any", "all"):
+            for sub in ast.walk(n):
+                _in_quantifier.add(id(sub))
     for n in ast.walk(tree):
         if (isinstance(n, ast.Compare) and isinstance(n.left, ast.Attribute)
-                and n.left.attr == "name"):
+                and n.left.attr == "name" and id(n) not in _in_quantifier):
             for c in n.comparators:
                 if isinstance(c, ast.Constant) and isinstance(c.value, str):
                     looked.setdefault(c.value, set()).add(os.path.basename(f))
@@ -60,6 +78,30 @@ defs = collections.Counter()
 for n in ast.walk(ast.parse(open(APP, encoding="utf-8").read())):
     if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
         defs[n.name] += 1
+
+# DEFINED WHERE? `defs` is agentic_editor_app.py, which is right for the
+# AMBIGUITY leg — two definitions of one name in the file a check walks is the
+# defect. It is the WRONG POPULATION for the DEFINED-ZERO leg: a check may walk
+# a different module. `smoke_bands_match_production` looks up
+# `detect_face_positions`, which lives in handler.py and face_bands.py — the
+# whole point of that smoke is comparing the two — and it was reported as a leg
+# asserting nothing about a function that does not exist.
+#
+# So absence is asked of the whole tree, and the answer NAMES the file. A check
+# that says "defined zero times" had better have looked everywhere a definition
+# could be.
+_elsewhere = {}
+for _f in sorted(glob.glob(os.path.join(HERE, "*.py"))):
+    _b = os.path.basename(_f)
+    if _b.startswith(("smoke_", "red_proof_")):
+        continue
+    try:
+        _t = ast.parse(open(_f, encoding="utf-8").read())
+    except Exception:                                             # noqa: BLE001
+        continue
+    for _n in ast.walk(_t):
+        if isinstance(_n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            _elsewhere.setdefault(_n.name, set()).add(_b)
 
 app_names = [nm for nm in looked if nm in defs]
 for nm in sorted(looked):
@@ -95,7 +137,7 @@ for f in sorted(glob.glob(os.path.join(HERE, "smoke_*.py"))
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
 
 for nm in sorted(looked):
-    if nm in defs:
+    if nm in defs or nm in _elsewhere:
         continue
     # which of the looking files could NOT be talking about their own helper?
     _outside = sorted(f for f in looked[nm] if nm not in _self_defined.get(f, set()))

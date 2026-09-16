@@ -201,11 +201,19 @@ for _f in ("accept_shortfall", "shortfall_reasons"):
     check(f"{_f} is named in no live string", _f not in _alltext,
           "a removed field still quoted at the agent is an instruction it "
           "cannot follow")
-check("the excuse channel is gone from the arithmetic too",
-      "reasons" not in
-      list(__import__("inspect").signature(A.spec_shortfall).parameters),
-      "spec_shortfall still takes reasons — an excuse channel needs a demand "
-      "to be excused from, and there is none")
+# THE ARITHMETIC ITSELF IS GONE, 2026-09-15, and that is a STRONGER form of
+# the same property. The leg here used to assert `spec_shortfall` no longer
+# took a `reasons` argument — the excuse channel — which was correct while the
+# shortfall was still computed. The sweep that removed `targets` removed the
+# shortfall too, so there is no signature left to inspect. Written against the
+# property rather than the decision: nothing anywhere computes a per-family
+# shortfall against a rate, whether or not it offers an excuse for one.
+for _gone in ("spec_shortfall", "family_regimes", "spec_implies_nothing"):
+    check(f"{_gone} is gone from the module",
+          not hasattr(A, _gone),
+          "a shortfall is a demand wearing a measurement's clothes; the "
+          "grading that survives is the FAMILY MIX report, which states what "
+          "was placed and never what was owed")
 
 check("the floor-only schema fields are gone",
       '"accept_shortfall": {' not in src and '"shortfall_reasons": {' not in src,
@@ -216,15 +224,32 @@ check("the floor-only schema fields are gone",
 # stops answering the question it is FOR.
 check("the corpus rates are still defined", bool(A.REFERENCE_PER_25S))
 check("the no-speech corpus is still defined", bool(A.REFERENCE_PER_25S_NOSPEECH))
-check("spec_shortfall is still computed", callable(getattr(A, "spec_shortfall", None)),
-      "the grading question — is this in the plausible range — is still worth "
-      "asking; it is just not asked OF the agent")
-check("the shortfall is still ledgered",
-      'led["spec_shortfall"] = _short' in src)
-check("rate regimes are still classified",
-      "rate_regimes" in src and callable(getattr(A, "rate_regime", None)))
+# WHAT SURVIVES IS THE REPORT, NOT THE ARITHMETIC. The grading question — is
+# this in the plausible range — is still worth asking, and the FAMILY MIX line
+# is where it is asked, of a human reading a round. It states what was placed
+# beside what the corpus placed; it computes no shortfall and issues no verdict.
+check("the corpus rates are still defined for the report",
+      bool(A.REFERENCE_PER_25S))
 check("the family mix still reports density against reference",
       "FAMILY MIX" in src)
+# AND IT IS A REPORT, NOT A VERDICT — asked of CODE, not of text. The names
+# survive in comments on purpose (a note that records why something went is the
+# thing the next reader needs); what must not survive is a live read or write.
+import ast as _ast                                               # noqa: E402
+_dead = []
+for _n in _ast.walk(_ast.parse(src)):
+    if isinstance(_n, _ast.Constant) and isinstance(_n.value, str) \
+            and _n.value in ("spec_shortfall", "rate_regimes",
+                             "spec_shortfall_unresolved"):
+        _dead.append(_n.value)
+    if isinstance(_n, _ast.Name) and _n.id in ("spec_shortfall",
+                                               "rate_regimes",
+                                               "family_regimes"):
+        _dead.append(_n.id)
+check("and it is a REPORT, not a verdict", not _dead,
+      "these names are still LIVE in the app (%s) — a regime label and a "
+      "shortfall are both the rubric instructing, and the ruling was that it "
+      "grades and never instructs" % sorted(set(_dead)))
 
 # ── 5. AND A ZERO IS A REAL ANSWER ──────────────────────────────────────────
 # The clearest expression of the ruling: a family that placed nothing must be

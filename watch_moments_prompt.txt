@@ -1,0 +1,104 @@
+WATCH THIS VIDEO AND MARK THE MOMENTS THAT MATTER.
+
+You can see it and you can hear it. Both are evidence. Watch it once end to
+end, then go back and mark the moments where an EDITORIAL DECISION is visible
+or audible — where a graphic lands, where a cut falls, where a card carries a
+number, where a sound gives something weight, where a hold creates a wait.
+
+This is not a summary and not a transcript. It is a list of moments, each one
+pinned to a frame a person could look at and see the decision.
+
+WHAT COUNTS AS A MOMENT
+  - a graphic, word, card or number ARRIVES on screen
+  - a cut lands somewhere a cut changes the meaning (a new angle on a key word,
+    a pivot to a new chapter, a rhythmic run of cuts through a list)
+  - a cutaway leaves the speaker to show proof, a tool, or a metaphor
+  - a sound marks something (a reveal, a click, a whoosh, a hit, a music drop)
+  - a push-in, a scale, a shake or any camera/frame move that adds emphasis
+  - a HOLD: the edit deliberately does nothing while something builds
+  - silence used on purpose
+
+WHAT DOES NOT COUNT
+  - the speaker continuing to talk over an unchanged frame
+  - a caption line that is just the words being spoken, with nothing done to it
+  - anything you cannot point at a single frame and see
+
+THE FRAME
+For each moment give `t_settled_s`: the time, in seconds, of a frame where the
+thing you are describing is FULLY PRESENT and STILL — after any entrance
+animation has finished, before it leaves. Not the frame it starts moving on.
+If a graphic animates in over 0.4s and holds for 1.5s, pick the middle of the
+hold. A frame grabbed at this time must show what you describe; that is the
+one thing this timestamp is for.
+
+Do not round to whole seconds. Give one decimal.
+
+THE FIVE FIELDS, AND THEY ARE SHORT ON PURPOSE
+This artefact is read at a glance by an editor deciding what to do at a moment
+of the same shape. Long prose is not read. Stay inside the word limits; a field
+that needs more words usually means the moment is two moments.
+
+  on_screen   <= 14 words. What a viewer SEES in that frame. Name the actual
+                words if there is text ("$2,000,000 in gold 3D type"), the
+                actual subject if there is not ("speaker, tilted low angle,
+                laptop closed").
+  heard       <= 10 words. What a viewer HEARS across that moment: the spoken
+                words in quotes if they matter, and the non-speech sound if
+                there is one ("cha-ching", "bass thump", "music drops out",
+                "clicks under cursor"). If there is nothing but speech, say the
+                words. If there is silence, say silence.
+  cut_does    <= 12 words. What the EDIT does here, mechanically. "hard cut to
+                new location", "holds on face, no cut for 1.4s", "cutaway to
+                screen recording", "text in 3 frames before the word", "push-in
+                on the number", "sfx on the reveal". If the edit does nothing
+                mechanical and the moment is a graphic arriving, say so.
+  why_lands   <= 18 words. WHY this works at this moment — the condition that
+                made it the right call. Write it as a reason an editor could
+                apply somewhere else, not as praise. "the number is the claim,
+                so it gets the largest thing on screen" lands; "great editing"
+                does not.
+  where       one of: top, upper, center, lower, bottom, full, none.
+                Where in the FRAME the graphic or emphasis sits. `full` means
+                it occupies the whole frame. `none` means this moment has no
+                graphic (a cut, a hold, a sound on unchanged footage).
+
+AND TWO LABELS
+  purpose     one of: hook, claim, evidence, turn, payoff, breath, close.
+                What job this moment does in the argument.
+  families    a list, from: text, card, sfx, zoom, cutaway, cut, transition,
+                hold, silence, music. Name every one that is actually operating
+                at this moment. Use `text` for words on screen that are doing
+                something beyond transcription; `card` for a framed graphic
+                object carrying a value, stat, name or logo. If something real
+                is happening that none of these names, add it as a plain word —
+                do not force it into a family it is not.
+
+HOW MANY
+Between 6 and 14 moments. Cover the whole runtime, not just the opening — the
+turn and the close are where most edits get worse and these videos do not.
+Fewer honest moments beat more padded ones.
+
+NO RATES. Do not write "about one every three seconds", "roughly 8 per video",
+"high density" or any other count-per-time. This artefact instructs an editor
+at a moment; a rate is not actionable at a moment and it is not wanted.
+
+RETURN STRICT JSON AND NOTHING ELSE:
+
+{
+  "whole_video": {
+    "what_it_is_doing": "<= 30 words: the argument this video makes",
+    "the_turn_s": <seconds where it pivots from problem to solution, or null>
+  },
+  "moments": [
+    {
+      "t_settled_s": 3.4,
+      "purpose": "hook",
+      "families": ["text", "sfx"],
+      "where": "center",
+      "on_screen": "...",
+      "heard": "...",
+      "cut_does": "...",
+      "why_lands": "..."
+    }
+  ]
+}

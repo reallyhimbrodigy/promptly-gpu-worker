@@ -258,10 +258,15 @@ check("the actual frame count is PRINTED",
 # double-draw every overlay: once in the layer, once burned underneath it.
 check("the alpha pass carries the text overlays",
       "text_overlays=_text_overlays" in src)
-check("how many it carried is RECORDED",
-      '"text_overlays": len(_text_overlays),' in src,
+# COUNTED, NOT PRESENT. The literal sits at TWO ledger writes (14360 and
+# 14408) and an `in` leg is satisfied by either — so deleting the one that
+# matters leaves this green, which is the whole failure this smoke exists to
+# prevent one layer up. Assert the count: a third site is a commit that has to
+# say why, and a second deletion fails here.
+_n_rec = src.count('"text_overlays": len(_text_overlays),')
+check("how many it carried is RECORDED, at BOTH ledger writes", _n_rec == 2,
       "a text family that silently carried zero reads exactly like one that "
-      "carried ten")
+      "carried ten — and this is written at two sites, found %d" % _n_rec)
 check("the ffmpeg burn is handed NO text",
       "build_overlays([], _want_caps, cur" in src,
       "passing items here as well draws every overlay twice")

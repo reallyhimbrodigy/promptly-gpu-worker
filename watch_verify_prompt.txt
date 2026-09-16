@@ -1,0 +1,40 @@
+DOES EACH FRAME SHOW WHAT ITS LINE SAYS?
+
+The image is a contact sheet of numbered frames grabbed from ten videos. Below
+it is one line per number, written by a reader that watched the video — the
+frame was grabbed at the timestamp that reader gave.
+
+Your job is ONE question per tile, and it is not a taste question:
+
+    Looking ONLY at tile N, is the thing described in line N's `on_screen`
+    actually visible in that frame?
+
+You are checking that a timestamp landed. A reader that watched a video can be
+half a second out, and half a second is a different shot. A frame that shows
+the speaker mid-sentence under a line that says "$2,000,000 in gold 3D type"
+is a MISS, however good the line is.
+
+VERDICTS
+  "yes"     the described thing is visible in the tile. Minor wording
+            differences are fine — "gold 3D text reading $2,000,000" against a
+            frame showing exactly that is a yes even if the line said "huge
+            gold number".
+  "no"      the described thing is not in this frame. The frame shows something
+            else, or shows the shot before/after the described one.
+  "unsure"  you genuinely cannot tell — the tile is too small to read, or the
+            description is about something audible with no visible counterpart
+            and `where` is "none" (in that case answer "unsure", not "no": the
+            timestamp may be right and simply has nothing to show).
+
+Also return `frame_says`: <= 12 words describing what the tile ACTUALLY shows.
+Return it for every tile, including the yeses — it is how a disagreement gets
+diagnosed instead of argued.
+
+RETURN STRICT JSON AND NOTHING ELSE, one entry per tile, in tile order:
+
+{
+  "verdicts": [
+    {"n": 1, "verdict": "yes", "frame_says": "gold 3D $2,000,000 over blurred city"},
+    {"n": 2, "verdict": "no",  "frame_says": "speaker talking, no graphic on screen"}
+  ]
+}

@@ -97,8 +97,15 @@ if fn is not None:
 for p in ("/craft/knowledge", "/craft/control_distributions.json",
           "/craft/reference_index.json"):
     check(f"{p} is mounted into the image", p in SRC)
-check("the distributions are handed over as DESCRIPTION, not as a target",
-      "never a target" in SRC or "It DESCRIBES" in SRC)
+# COUNTED, AND ON BOTH SURFACES. The disclaimer is written twice on purpose —
+# once where the digest is built and once in the prompt that carries it — and
+# an `in` leg is satisfied by either, so deleting the one on the surface the
+# agent reads leaves this green. That is the same weakness this file's own
+# next paragraph is about, in the leg above it.
+_n_dis = SRC.count("never a target")
+check("the distributions are handed over as DESCRIPTION, not as a target, on "
+      "BOTH surfaces", _n_dis == 2 and "It DESCRIBES" in SRC,
+      "the rates GRADE and never instruct; found %d disclaimer(s)" % _n_dis)
 
 # AND THE DISCLAIMER MUST NOT SIT BESIDE A DEMAND. Presence of "never a target"
 # does not exclude a target being added next to it, and that is exactly how the

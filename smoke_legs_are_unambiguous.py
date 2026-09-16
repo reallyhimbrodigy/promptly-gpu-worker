@@ -33,6 +33,8 @@ import json
 import pathlib
 import sys
 
+import os                                                        # noqa: E402
+HERE = os.path.dirname(os.path.abspath(__file__))
 APP = pathlib.Path("agentic_editor_app.py")
 SMOKES = sorted(p.name for p in pathlib.Path(".").glob("smoke_*.py"))
 # Literals whose presence anywhere IS the property — a prompt sentence that
@@ -66,6 +68,25 @@ for _s in SMOKES:
         _tree = ast.parse(pathlib.Path(_s).read_text())
     except SyntaxError as _e:
         check(f"{_s} parses", False, str(_e)); continue
+    # WHICH FILE IS `src`? This counted every leg's literal in
+    # agentic_editor_app.py, always — and `smoke_pass1_is_served` binds SRC to
+    # chatcut_job_app.py. So it reported "READ IT appears 2x" from a file that
+    # leg never reads, about a literal that appears ZERO times in the file it
+    # does read. A checker measuring the wrong population, inside the check for
+    # legs that measure the wrong thing.
+    _srcfile = _src
+    _whichfile = APP.name
+    for _a in ast.walk(_tree):
+        if not (isinstance(_a, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id in ("src", "SRC")
+                        for t in _a.targets)):
+            continue
+        for _c in ast.walk(_a.value):
+            if isinstance(_c, ast.Constant) and isinstance(_c.value, str) \
+                    and _c.value.endswith(".py"):
+                _cand = pathlib.Path(HERE) / os.path.basename(_c.value)
+                if _cand.exists():
+                    _srcfile, _whichfile = _cand.read_text(), _cand.name
     for _node in ast.walk(_tree):
         if not isinstance(_node, ast.Compare) or len(_node.ops) != 1:
             continue
@@ -81,7 +102,7 @@ for _s in SMOKES:
         if len(_lit) < MIN_LEN or _lit in ALLOWED_MULTI:
             continue
         _n += 1
-        _count = _src.count(_lit)
+        _count = _srcfile.count(_lit)
         if isinstance(_node.ops[0], ast.In) and _count > 1:
             _amb.append((_s, _node.lineno, _lit[:60], _count))
         # A `not in` leg on a literal that was never there is vacuously true

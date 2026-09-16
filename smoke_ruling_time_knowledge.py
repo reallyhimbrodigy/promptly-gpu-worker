@@ -57,14 +57,15 @@ BLOCK = A.ruling_time_knowledge()
 # file also states its own precedence). Zac's call; the cost was MEASURED, not
 # estimated: +4,690 tokens per distinct prefix on round 52 (turn-1
 # cache_write + cache_read against the recorded round-51 baseline).
-check("exactly six documents are selected", len(A._RULING_TIME_DOCS) == 6,
+check("exactly five documents are selected", len(A._RULING_TIME_DOCS) == 5,
       str(A._RULING_TIME_DOCS))
-check("the standard is selected before the wider field",
-      A._RULING_TIME_DOCS.index("16_craft_the_standard.md")
-      < A._RULING_TIME_DOCS.index("17_craft_the_wider_field.md")
-      if {"16_craft_the_standard.md", "17_craft_the_wider_field.md"}
-      <= set(A._RULING_TIME_DOCS) else False,
-      str(A._RULING_TIME_DOCS))
+# FIVE since 2026-09-15: the wider-field report came out on Zac's ruling. The
+# property this leg defends is the one the ordering leg used to defend — the
+# prefix carries a standard, not a survey of strangers — and it is checked on
+# the ASSEMBLED text by smoke_craft_reports_ordered.py, where it belongs. What
+# is checked here is only that the block did not quietly grow again.
+check("the standard is selected", "16_craft_the_standard.md"
+      in A._RULING_TIME_DOCS, str(A._RULING_TIME_DOCS))
 for _d in ("02_intent_standard.md", "13_placement_findings.md",
            "14_card_text_placement_rules.md"):
     check(f"{_d} is included", _d in A._RULING_TIME_DOCS)

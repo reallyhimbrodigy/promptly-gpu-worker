@@ -35,8 +35,60 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FILES = ["agentic_editor_app.py", "handler.py", "modal_app.py",
-         "moodreel_editor.py"]
+# THE POPULATION IS DERIVED, NOT LISTED — and this is a correction, kept as
+# one. The hand-written list held four files and did NOT hold
+# `chatcut_job_app.py`, which is the ChatCut execution harness and is mounted
+# into its own container. `SHEET_RULE` was deleted on 2026-09-14 with two uses
+# left behind, and EVERY run on that path died at
+# `NameError: name 'SHEET_RULE' is not defined` from that commit until
+# 2026-09-15 — a full day, found by running the pipeline, not by a check.
+# This smoke existed, it worked, and it was aimed at a set the broken file was
+# not in: the WRONG POPULATION failure, which is the one class with no generic
+# guard.
+#
+# So the set is now every module that a Modal app mounts or defines a function
+# in — discovered from the tree — plus the fixed four. A new app file joins the
+# check on the day it is written rather than on the day someone remembers.
+# The COUNT is printed, so a population that silently shrinks is visible.
+def _population():
+    """The files whose NameError lands in a container this lane RUNS.
+
+    NOT every .py in the tree: a first attempt swept 212 files and produced 37
+    FATAL findings in `validate_deploy.py` and friends — a correct rule
+    arriving as a wave of red, which this repo has already recorded as the way
+    a correct rule gets reverted instead of investigated.
+
+    So: the two lane entry points, the three long-standing modules, and every
+    local .py either of the entry points MOUNTS into its image. That set is
+    derived from the source, so a module mounted tomorrow joins the check
+    tomorrow — which is exactly what did not happen for chatcut_job_app.py.
+    """
+    import ast as _ast
+    _roots = ["agentic_editor_app.py", "chatcut_job_app.py"]
+    _found = set(_roots) | {"handler.py", "modal_app.py", "moodreel_editor.py"}
+    for _r in _roots:
+        _p = os.path.join(HERE, _r)
+        if not os.path.exists(_p):
+            continue
+        for _n in _ast.walk(_ast.parse(open(_p, encoding="utf-8").read())):
+            if not (isinstance(_n, _ast.Call)
+                    and isinstance(_n.func, _ast.Attribute)
+                    and _n.func.attr in ("add_local_file", "add_local_dir")):
+                continue
+            for _a in _n.args:
+                # the MOUNT POINT is the second argument and names the path in
+                # the container; the first names the file here. Only a literal
+                # can be resolved, and a non-literal is REPORTED rather than
+                # skipped silently.
+                if isinstance(_a, _ast.Constant) and \
+                        isinstance(_a.value, str) and _a.value.endswith(".py"):
+                    _b = os.path.basename(_a.value)
+                    if os.path.exists(os.path.join(HERE, _b)):
+                        _found.add(_b)
+    return sorted(_found)
+
+
+FILES = _population()
 # THESE BREAK A RUN — every one is a NameError, a SyntaxError, or a silent
 # overwrite at the moment the line executes.
 FATAL = (
@@ -78,7 +130,7 @@ for name in FILES:
 # THE TOLERATED COUNT IS A BASELINE, not a shrug. If it grows, somebody added
 # dead code and should say so; the number is printed on every run so the growth
 # is visible without anyone diffing pyflakes output.
-BASELINE_TOLERATED = 46
+BASELINE_TOLERATED = 47   # 46 -> 47 when chatcut_job_app.py joined the population (2026-09-15)
 print(f"smoke_no_undefined_names: {len(FILES)} file(s), {fail} FATAL, "
       f"{tol_n} tolerated (baseline {BASELINE_TOLERATED})")
 if tol_n > BASELINE_TOLERATED:

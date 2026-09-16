@@ -77,6 +77,11 @@ app = modal.App("agentic-editor")
 # than an agent one — worth separating in the ledger.
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _KNOWLEDGE_DIR = os.path.join(_HERE, "knowledge")
+# THE WATCHED ARTEFACT — the ten, at the moments that matter, as LINES
+# and FRAMES. Built by build_watched_sheet.py; mounted at /watched. The
+# same mount-point-is-not-the-source-path rule as knowledge/ applies, so
+# both paths are tried at read time.
+_WATCHED_DIR = os.path.join(_HERE, "watched")
 # THE MOUNT POINT IS NOT THE SOURCE PATH, AND SIX READERS ASSUMED IT WAS.
 # `add_local_dir(_KNOWLEDGE_DIR, "/knowledge")` puts the documents at
 # /knowledge in the container, while _KNOWLEDGE_DIR resolves relative to the
@@ -1300,7 +1305,11 @@ IMG = (modal.Image.debian_slim(python_version="3.11")
        # own law, and without it load_reference_index returns UNREADABLE and the
        # brief honestly reports that the agent is ruling without the examples.
        # Honest and useless is still useless.
-       .add_local_file(_REFERENCE_INDEX_SRC, "/root/reference_index.json", copy=True))
+       .add_local_file(_REFERENCE_INDEX_SRC, "/root/reference_index.json", copy=True)
+       # THE WATCHED ARTEFACT. Lines and frames both — the PNGs are read
+       # as bytes and sent as image blocks, so they have to be in the
+       # image like any other file the code opens.
+       .add_local_dir(_WATCHED_DIR, "/watched", copy=True))
 
 SECRETS = [modal.Secret.from_name("promptly-secrets")]
 # The source cache must OUTLIVE the container or it is inert — /cache on a fresh
@@ -9350,8 +9359,15 @@ _RULING_TIME_DOCS = ("02_intent_standard.md",
                      "09_seam_treatments_transitions_tight_.md",
                      "13_placement_findings.md",
                      "14_card_text_placement_rules.md",
-                     "16_craft_the_standard.md",
-                     "17_craft_the_wider_field.md")
+                     "16_craft_the_standard.md")
+# 17_craft_the_wider_field.md IS NOT IN THAT TUPLE. Zac's ruling, 2026-09-15:
+# "drop the Apify document — other people's videos described in prose is the
+# weakest thing in there." MEASURED, not estimated: the block falls 7,356 ->
+# 4,931 tokens (Anthropic count_tokens on the assembled text), -2,425.
+#
+# It stays on disk. A document removed from the prefix is not a document that
+# was wrong; it is one that was not worth the tokens it cost at ruling time,
+# and the distinction matters if anyone wants to read it later.
 
 
 def ruling_time_knowledge(dirs=None, docs=None):
@@ -9396,6 +9412,98 @@ def ruling_time_knowledge(dirs=None, docs=None):
                   "incomplete and that is a gap, not a smaller standard.)"
                   % ", ".join(_missing))
     return _head + "\n\n" + "\n\n".join(_parts)
+
+
+# ── THE WATCHED ARTEFACT, IN THE PREFIX ─────────────────────────────────────
+#
+# Zac, 2026-09-15: "Gemini watches all ten with audio. Per moment: the frame,
+# what's on screen, what's heard, what the cut does, why it lands. Compressed to
+# something readable at a glance, cached in the prefix, with the frames
+# themselves beside it."
+#
+# WHY THIS AND NOT MORE PROSE. 16_craft_the_standard.md is 2,520 tokens of
+# well-written paragraphs about how the ten were edited, and the ruling turn
+# receives every word of it verbatim. It reads as advice. A moment does not:
+# it is a timestamp, a frame a person can look at, and four short fields. The
+# difference the frames make is not stylistic — a line that says "the number is
+# the largest thing on screen" is an opinion until you can see how large.
+#
+# THE FRAMES RIDE THE FIRST USER MESSAGE, not the system block: the Anthropic
+# system block is text-only. The rolling cache breakpoint marks the tail of the
+# history every turn, so the first message is inside the cached prefix from
+# turn 2 on — written once, read on every turn after. That is the same
+# treatment the component sheet gets in the ChatCut harness.
+#
+# EVERY FRAME ON THESE SHEETS PASSED A GATE. build_watched_sheet.py puts each
+# tile back in front of a reader with its own line and asks whether the frame
+# shows what the line says; only `yes` ships. A drifting timestamp does not
+# error, it produces a confident caption under the wrong shot — which would
+# then teach the opposite of what it says, on every turn, from inside the
+# cache.
+_WATCHED_DIRS = ("/watched", _WATCHED_DIR)
+
+
+def _watched_path(*parts):
+    for _d in _WATCHED_DIRS:
+        _p = os.path.join(_d, *parts)
+        if os.path.exists(_p):
+            return _p
+    return None
+
+
+def watched_moments():
+    """The glanceable lines. Absence is SPOKEN, never silently omitted."""
+    if not prefix_material_enabled("watched_moments"):
+        return ("THE TEN, AT THE MOMENTS THAT MATTER: REMOVED for this run "
+                "(PROMPTLY_DISABLE_WATCHED_MOMENTS=1) — a deliberate removal, "
+                "not a missing artefact.")
+    _p = _watched_path("SHEET.md")
+    if not _p:
+        return ("THE TEN, AT THE MOMENTS THAT MATTER: UNAVAILABLE — no "
+                "SHEET.md under %s. You are ruling without the examples."
+                % " or ".join(_WATCHED_DIRS))
+    try:
+        _t = open(_p, encoding="utf-8").read().strip()
+    except Exception as _e:                                       # noqa: BLE001
+        return ("THE TEN, AT THE MOMENTS THAT MATTER: UNREADABLE — %s: %s"
+                % (_p, _e))
+    return _t or ("THE TEN, AT THE MOMENTS THAT MATTER: EMPTY — %s is a "
+                  "zero-length file, which is not the same as no examples "
+                  "existing." % _p)
+
+
+def watched_frames():
+    """(blocks, state). The sheets as Anthropic image blocks, in tile order.
+
+    Returns a STATE beside the blocks so the caller records ABSENT rather than
+    reporting an empty list as a successful zero — the class this lane has paid
+    for four times in one day.
+    """
+    import base64
+    import glob
+    if not prefix_material_enabled("watched_frames"):
+        return [], "REMOVED (PROMPTLY_DISABLE_WATCHED_FRAMES=1)"
+    _d = _watched_path("tiles")
+    if not _d:
+        return [], "ABSENT: no tiles/ under %s" % " or ".join(_WATCHED_DIRS)
+    _files = sorted(glob.glob(os.path.join(_d, "SHEET_*.png")),
+                    key=lambda p: int("".join(c for c in os.path.basename(p)
+                                              if c.isdigit()) or 0))
+    if not _files:
+        return [], "ABSENT: %s holds no SHEET_*.png" % _d
+    _blocks = []
+    for _f in _files:
+        try:
+            _b = open(_f, "rb").read()
+        except Exception as _e:                                   # noqa: BLE001
+            return [], "FAILED: %s: %s" % (_f, _e)
+        if not _b:
+            return [], "FAILED: %s is zero bytes" % _f
+        _blocks.append({"type": "image",
+                        "source": {"type": "base64", "media_type": "image/png",
+                                   "data": base64.b64encode(_b).decode()}})
+    return _blocks, "MEASURED: %d sheet(s), %d KB" % (
+        len(_files), sum(os.path.getsize(f) for f in _files) // 1024)
 
 
 # ── REMOVAL SWITCHES FOR THE PREFIX MATERIAL ────────────────────────────────
@@ -16443,7 +16551,12 @@ def edit(source_key: str, brief: str,
                 # The judgement documents ride the SYSTEM block, which is
                 # the one thing marked cache_control — written once,
                 # read on every turn after.
-                + "\n\n" + ruling_time_knowledge())
+                + "\n\n" + ruling_time_knowledge()
+                # THE MOMENTS GO LAST, immediately before the frames that show
+                # them. The prose above says what the ten do; these say what
+                # was done at a specific second, and the sheet numbers point at
+                # the pictures in the first user message.
+                + "\n\n" + watched_moments())
     _PLAN_ONLY_NOTE = (
         "\n\nTHIS RUN IS PLAN-ONLY, AND IT CHANGES YOUR LAST STEP.\n"
         "`execute_plan` records the cut and the caption choice and STOPS — no "
@@ -16609,7 +16722,18 @@ def edit(source_key: str, brief: str,
 
     # List form, not a bare string: a string content block cannot carry a
     # cache_control marker, and this message holds the full transcript.
-    msgs = [{"role": "user", "content": [{"type": "text", "text": user}]}]
+    # THE FRAMES. First blocks of the first message, so they sit inside the
+    # cached prefix from turn 2 and are written exactly once. The STATE is
+    # recorded and PRINTED — an artefact that silently failed to mount would
+    # otherwise look identical to one that was deliberately removed, and this
+    # lane has shipped nine features dark on exactly that.
+    _wf_blocks, _wf_state = watched_frames()
+    led["watched_frames"] = _wf_state
+    led["watched_sheet_chars"] = len(watched_moments())
+    print("  WATCHED ARTEFACT  : %s | sheet %d chars"
+          % (_wf_state, led["watched_sheet_chars"]))
+    msgs = [{"role": "user",
+             "content": _wf_blocks + [{"type": "text", "text": user}]}]
     final_text = ""
     # Set by set_spec when the request needs footage that does not exist. Read
     # at the bottom of the turn loop to stop the run. Initialised HERE, not at
@@ -16994,9 +17118,13 @@ def edit(source_key: str, brief: str,
                             "already been answered twice. It cannot return "
                             "anything different, so the run is stopping here "
                             "rather than spending the remaining budget on it."),
-                    "what_was_outstanding": led.get("spec_shortfall")
-                                            or led.get("execute_plan", {}).get(
-                                                "ruled_but_not_built") or None,
+                    # `spec_shortfall` USED TO BE THE FIRST TERM HERE and it
+                    # was removed with the arithmetic (2026-09-15): a key no
+                    # producer writes reads as "nothing was outstanding" on
+                    # every repeat-stop, which is the absent-as-value class in
+                    # a field whose whole job is to name what is missing.
+                    "what_was_outstanding": led.get("execute_plan", {}).get(
+                        "ruled_but_not_built") or None,
                 }
             elif tu.name in _REPAIR_ONLY and not led.get("execute_plan"):
                 # REFUSED, not absent. The tool stays in the schema so the cached
@@ -17486,7 +17614,8 @@ def edit(source_key: str, brief: str,
                 # corpus constants stay; if density grading is wanted again it
                 # grades against THEM, not against a number the thing being
                 # graded made up.
-                led.pop("spec_shortfall", None)
+                # (the pop that stood here is gone with the key: popping a
+                # key nothing writes is a no-op that reads as a cleanup)
                 # THE RATE IS NOT ASKED OF THE AGENT. This told it "your own
                 # spec set these rates and your rulings do not reach them —
                 # rule more beats for those families", which is the rubric
@@ -17763,8 +17892,9 @@ def edit(source_key: str, brief: str,
         if _repeat_stop:
             fail("repeat_terminal",
                  f"stopped: {led.get('repeat_terminal')} — an identical call "
-                 f"answered twice and asked a third time. Outstanding at stop: "
-                 f"{led.get('spec_shortfall') or 'nothing recorded'}")
+                 f"answered twice and asked a third time. Ruled but not "
+                 f"built at stop: "
+                 f"{(led.get('execute_plan') or {}).get('ruled_but_not_built') or 'nothing recorded'}")
             break
         if _unsupported_stop:
             final_text = led.get("user_message") or ""
@@ -19188,14 +19318,10 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     # every run, sorted by cost, with the UNATTRIBUTED REMAINDER named — an
     # unattributed remainder is where the next optimisation lives, and leaving
     # it out of the table is how an uninstrumented stage stays invisible.
-    # THE EXCUSES, PRINTED. A family the agent talked its way out of is not the
-    # same as a family it satisfied, and only one of those is visible in a
-    # placement count.
-    _acc9 = (r.get("ledger") or {}).get("shortfall_accepted")
-    _sf9 = (r.get("ledger") or {}).get("spec_shortfall")
-    if _acc9 or _sf9:
-        print(f"  SPEC EXITS      : accepted={sorted(_acc9) if _acc9 else '—'}  "
-              f"outstanding={sorted(_sf9) if _sf9 else '—'}")
+    # THE SPEC EXITS LINE IS GONE (2026-09-15). It read `shortfall_accepted`
+    # and `spec_shortfall`, and the sweep that removed `targets` removed both
+    # producers — so it was a reader with no writer printing nothing, which is
+    # indistinguishable from a run that had no exits to report.
     # THE VERDICT, PRINTED IN ONE PARSEABLE LINE.
     #
     # MEASURED, round 23: the escalation fired 12 times across 4 fixtures and
@@ -19738,8 +19864,10 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
               f"({(r.get('ledger') or {}).get('reel_seconds')}s) — "
               f"the paint half of build_reel")
 
-    _regs = (r.get("ledger") or {}).get("rate_regimes") or {}
-    # THE DENOMINATOR THE RATES ARE COMPUTED AGAINST, so it says what it is.
+    # THE FAMILIES HALF OF THIS LINE IS GONE with `rate_regimes` (2026-09-15):
+    # it printed `{}` on every run once the producer went, which renders
+    # exactly like a run in which no family had a regime. What survives is the
+    # DENOMINATOR, which is still worth stating and still has a producer.
     # `or 0` printed a fabricated 0.00 here — every rate in this line is per
     # 25s of THIS number, and a zero denominator quietly makes the whole line
     # meaningless while still rendering as a result. The producer now raises on
@@ -19747,16 +19875,11 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     # the ledger write; that is a different fact and it prints as one.
     _dled = (r.get("ledger") or {})
     _dst = _dled.get("source_duration_state")
-    print("  RATE REGIMES    : " + json.dumps({
+    print("  SOURCE DURATION : " + json.dumps({
         "dur_s": (round(float(_dled.get("source_duration_s")), 2)
                   if _dst == "MEASURED" and _dled.get("source_duration_s") is not None
                   else (_dst or "ABSENT (no ledger duration — run died before "
                                 "the source was probed)")),
-        "families": {_f: {"regime": _d["regime"],
-                          "rate": _d["rate"],
-                          "expected": _d["expected"],
-                          "actual": int(_by_fam.get(_f, 0))}
-                     for _f, _d in sorted(_regs.items())},
     }, separators=(",", ":")))
 
     # THE TAIL. cache_write is 12.5x the read price, so a 7.7% token share is
