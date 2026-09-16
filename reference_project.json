@@ -1,0 +1,88 @@
+{
+ "projectId": "74036980-7215-4852-8423-0dca60e2403c",
+ "name": "Reference \u2014 Zac's ten",
+ "editorUrl": "https://app.chatcut.io/editor/74036980-7215-4852-8423-0dca60e2403c",
+ "how": "inspect_asset(assetId, sourceTimesMs=[...up to 25...], transcriptRangesMs=[{startMs,endMs} x<=6, <=120s total]) \u2014 frames are ORIGINAL SOURCE TIME, not timeline time. preview_timeline is the wrong tool for a source: it returns composed TIMELINE pixels, max 9, and ChatCut's own guidance is not to build a timeline just to look at a source.",
+ "assets": [
+  {
+   "assetId": "f0476f42-a550-4cf1-aed9-64240b447970",
+   "file": "1e5eb227a1814bc0999fd1e62ebef34e.mp4",
+   "duration_s": 43.2,
+   "w": 720,
+   "h": 1280,
+   "lufs": -13.8
+  },
+  {
+   "assetId": "c3050db0-d2d0-4775-a663-a58bcb3a7cd1",
+   "file": "56ba63210cfe4c4da625e0b457cc6703.mp4",
+   "duration_s": 52.6,
+   "w": 1080,
+   "h": 608,
+   "lufs": -13.9
+  },
+  {
+   "assetId": "07ccc1fc-b343-451f-8f6d-2fa46918745c",
+   "file": "v09044g40000cm9oa7nog65s2crhkf00.mp4",
+   "duration_s": 25.45,
+   "w": 576,
+   "h": 1024,
+   "lufs": -17.7
+  },
+  {
+   "assetId": "9d4212f4-b6ee-4027-97ab-1155e153effd",
+   "file": "v12044gd0000d855u57og65j1avugm80.mp4",
+   "duration_s": 59.309309,
+   "w": 720,
+   "h": 576,
+   "lufs": -23.4
+  },
+  {
+   "assetId": "f5ecdcf4-30ff-4d0a-abd4-afa0ceef0644",
+   "file": "v14044g50000d5la79fog65q5itovh6g.mp4",
+   "duration_s": 28.566667,
+   "w": 576,
+   "h": 1024,
+   "lufs": -19.9
+  },
+  {
+   "assetId": "ec67bdcb-73fb-4c93-9dc3-431393462641",
+   "file": "v14044g50000d9kvim7og65hg0im5sng.mp4",
+   "duration_s": 37.916735,
+   "w": 576,
+   "h": 1024,
+   "lufs": -19.1
+  },
+  {
+   "assetId": "ca9b0790-ae09-4d07-9d8f-25c6d611c3cc",
+   "file": "v15044gf0000d7akrh7og65p1f3s1ua0.mp4",
+   "duration_s": 38.566893,
+   "w": 576,
+   "h": 1024,
+   "lufs": -19.7
+  },
+  {
+   "assetId": "3d860ef5-5fdf-48f1-b087-862a472a6033",
+   "file": "v15044gf0000d8slpi7og65utp063oi0.mp4",
+   "duration_s": 43.583333,
+   "w": 576,
+   "h": 1024,
+   "lufs": -25.6
+  },
+  {
+   "assetId": "21e526a2-92ec-44fe-910e-36f5761aa755",
+   "file": "v1c044g50000d879a6nog65km3geglb0.mp4",
+   "duration_s": 37.430567,
+   "w": 576,
+   "h": 1024,
+   "lufs": -19.8
+  },
+  {
+   "assetId": "968d2c5c-ef82-454e-a761-f69e560415da",
+   "file": "v24044gl0000d2rj4k7og65tcgn43lr0.mp4",
+   "duration_s": 59.466667,
+   "w": 576,
+   "h": 1024,
+   "lufs": -16.5
+  }
+ ]
+}
