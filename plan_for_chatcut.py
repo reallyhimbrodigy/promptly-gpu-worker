@@ -1197,7 +1197,30 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
             # text, applied to everything, twice.
             _ON_A_LAYER = ("GRAPHIC", "CARD", "CUTAWAY")
             if _a["kind"] in _ON_A_LAYER:
-                L.append("      clear of a face : %s over frames %d-%d. The "
+                # THE LADDER'S VERDICT IS NOT A MEASUREMENT WHEN THE
+                # DETECTOR NEVER RAN. `_regions()` is careful: with no regions
+                # on the ruling it returns face_state ABSENT and the ladder
+                # FAILS OPEN, exactly as production does. `place_gracefully`
+                # then answers "placed" — and this block turned that into
+                # "MEASURED clear over frames 0-60", telling the agent a
+                # measurement had been made that never was.
+                #
+                # That is absence-rendered-as-a-value, in the acceptance
+                # criteria whose whole job is to say what is KNOWN. Written by
+                # me two commits ago, in the section built to stop the agent
+                # inferring what wrong looks like — handing it a false
+                # certainty instead of an open question is worse than the
+                # open question.
+                _face_known = str(_reg.get("face_state") or "ABSENT").upper()
+                if not _face_known.startswith("MEASURED"):
+                    L.append("      clear of a face : NOT CHECKED — no face "
+                             "regions on this ruling (%s). The ladder failed "
+                             "open, which is what production does, but nobody "
+                             "looked. JUDGE IT BY EYE at that frame and say so "
+                             "if it is on his face."
+                             % (_reg.get("why") or _face_known))
+                else:
+                    L.append("      clear of a face : %s over frames %d-%d. The "
                          "detector ran on this source at plan time; a "
                          "placement on the speaker's face is the defect this "
                          "checks for."

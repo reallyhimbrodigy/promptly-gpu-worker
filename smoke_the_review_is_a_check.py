@@ -104,6 +104,19 @@ def legs(txt, n_expected):
     if _acc < n_expected:
         out.append(("block", "%d acceptance entr(ies) for %d placement(s)"
                     % (_acc, n_expected)))
+    # A MEASUREMENT IS NEVER CLAIMED WHEN NOBODY LOOKED. The ladder fails open
+    # with no face regions — correctly, as production does — and this block
+    # turned that fail-open into "MEASURED clear over frames 0-60". An
+    # acceptance criterion asserting a measurement that never happened is
+    # worse than an open question, because the agent stops looking.
+    if "MEASURED clear" in txt:
+        import re as _re3
+        _has_regions = _re3.search(r"face_state.{0,20}MEASURED", txt)
+        if not _has_regions:
+            out.append(("absence", "the plan claims 'MEASURED clear' for a "
+                                   "face check on a ruling that carries no "
+                                   "face regions — the ladder failed open and "
+                                   "the wording made it a measurement"))
     for _crit, _why in (
             (r"^      stays inside    :", "the band it must stay inside"),
             (r"^      clear of a face :", "what it must not collide with"),
@@ -167,6 +180,9 @@ red = 0
 SRC = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "plan_for_chatcut.py"), encoding="utf-8").read()
 MUT = (
+    ("the fail-open is reported as a measurement", "absence",
+     lambda s: s.replace('if not _face_known.startswith("MEASURED"):',
+                         'if False:')),
     ("the acceptance section is not emitted", "block",
      lambda s: s.replace('    if _accept:\n', '    if False:\n')),
     ("the stop condition is removed", "stop",

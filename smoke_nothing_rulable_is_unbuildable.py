@@ -138,6 +138,41 @@ for fam, field in (("sfx", "sfx_name"), ("card", "card_hero"),
         bad("[halfruling] %r is buildable but %r is not in the ruling schema — "
             "the agent can rule the family and never say which" % (fam, field))
 
+# ── 5. A CONTROL IS TALLIED ONLY ACROSS FAMILIES THAT HAVE IT ───────────────
+# THIRD INSTANCE of the family-blind shape, and the quiet one: it refuses
+# nothing. `used_so_far` counted `case`/`size`/`where` across EVERY verdict, so
+# a run placing a cutaway, a transition and a sound reported
+#     case: (not set) x3, upper x2
+# — "(not set)" the majority, in the report built to make repetition visible,
+# while every text placement in that edit was `upper`. Degrading a signal in
+# the direction that hides what it exists to show.
+#
+# Driven by BEHAVIOUR on the shipped function, not by reading the source.
+_MIXED = [{"beat": 0, "treatment": ["text"], "size": "large",
+           "case": "upper", "where": "upper_third"},
+          {"beat": 1, "treatment": ["text"], "size": "large",
+           "case": "upper", "where": "upper_third"},
+          {"beat": 2, "treatment": ["cutaway"], "cutaway_from_s": 3.0},
+          {"beat": 3, "treatment": ["transition"], "transition_name": "flash"},
+          {"beat": 4, "treatment": ["sfx"], "sfx_name": "boom"}]
+_st, _txt = A.used_so_far(_MIXED)
+if _st != "MEASURED":
+    bad("[tally] used_so_far returned %r on five real verdicts" % _st)
+else:
+    if "(not set)" in _txt:
+        bad("[tally] a control is counted across families that do not have "
+            "it — %r. The families are in the same report, so the reader "
+            "cannot tell an unset control from a family that has none."
+            % _txt[_txt.find("case:"):][:80])
+    # and the families themselves MUST still all be counted
+    for _f in ("cutaway", "transition", "sfx"):
+        if _f not in _txt:
+            bad("[tally] %r vanished from the families line — restricting the "
+                "CONTROL tallies must not drop the family count" % _f)
+    if "upper x2" not in _txt:
+        bad("[tally] the text placements' own case is no longer reported: %r"
+            % _txt[:120])
+
 # ── RED PROOF ───────────────────────────────────────────────────────────────
 red = 0
 MUT = (

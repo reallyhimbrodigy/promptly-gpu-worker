@@ -8609,9 +8609,29 @@ def used_so_far(verdicts):
     for _v in _vs:
         for _t in (_v.get("treatment") or []):
             _ax["families"][str(_t).lower()] += 1
-        for _k in ("case", "size", "where"):
-            _val = str(_v.get(_k) or "").strip().lower()
-            _ax[_k][_val or "(not set)"] += 1
+        # A CONTROL IS TALLIED ONLY ACROSS THE FAMILIES THAT HAVE IT.
+        #
+        # THIRD INSTANCE OF ONE DEFECT, found by looking for it after the first
+        # two. `case`, `size` and `where` belong to text and card; a cutaway,
+        # a transition and a sound have none of them. Counting every verdict
+        # into every tally made `(not set)` the MAJORITY the moment a run
+        # placed a few of those:
+        #
+        #   case: (not set) x3, upper x2;  where: (not set) x3, upper_third x2
+        #
+        # Every text placement in that edit was `upper`, and the report built
+        # to make repetition visible said the dominant choice was "not set".
+        # It refuses nothing, so it breaks no run — it just degrades the
+        # signal in the one direction that HIDES the thing it exists to show.
+        #
+        # Its siblings were a gate refusing a correct video item and an
+        # acceptance block asking a transition about faces. Same shape, three
+        # places: a question written for text, asked of everything.
+        _fams = {str(t).lower() for t in (_v.get("treatment") or [])}
+        if _fams & {"text", "card"}:
+            for _k in ("case", "size", "where"):
+                _val = str(_v.get(_k) or "").strip().lower()
+                _ax[_k][_val or "(not set)"] += 1
     _parts = []
     for _k in ("families", "case", "size", "where"):
         _c = _ax[_k]
