@@ -1323,14 +1323,15 @@ IMG = (modal.Image.debian_slim(python_version="3.11")
                        copy=True))
 
 SECRETS = [modal.Secret.from_name("promptly-secrets"),
-           # THE REFERENCES ARE IN CHATCUT NOW, so the planner needs the grant
-           # to look at them. `scrub_reference` degrades to a NAMED failure
-           # without it rather than silently ruling blind.
-           modal.Secret.from_name("chatcut-oauth")]
-# ChatCut rotates its refresh token on use and this is where the current one
-# lives. STATED RISK: a planner scrubbing references while a ChatCut execution
-# job runs is two containers sharing one token, which races. Serialise them or
-# give the planner its own grant.
+           # THE PLANNER'S OWN GRANT, not the execution harness's. ChatCut
+           # rotates the refresh token on use, so one shared credential across
+           # two containers is two halves invalidating each other — surfacing
+           # on the NEXT use, as intermittent auth under load. Separate grant,
+           # separate Dict key, nothing shared.
+           modal.Secret.from_name("chatcut-oauth-planner")]
+# One Dict, two keys. The planner rotates `refresh_token_planner` from its own
+# grant; the execution harness rotates `refresh_token` from its own. Neither
+# reads or writes the other's, so the two halves can run at the same time.
 CHATCUT_TOKENS = modal.Dict.from_name("chatcut-tokens", create_if_missing=True)
 # The source cache must OUTLIVE the container or it is inert — /cache on a fresh
 # container is always empty, which is the "shipped and does nothing" shape this
@@ -9512,8 +9513,51 @@ def _watched_path(*parts):
     return None
 
 
+# WHAT THE REFERENCES ARE, SAID ONCE, PLAINLY, WHERE THE PLANNER READS IT.
+#
+# Zac, 2026-09-15: "Not moments with reasons — the rubric. These are finished
+# edits at the standard every output is held to; the density, the placement and
+# the restraint are the bar." It is a one-line framing gap and it may be why
+# the copy comes out generic: the sheet said "this is what an editor did at a
+# specific moment", which reads as INTERESTING REFERENCE. Nothing said it was
+# the LEVEL. An agent shown ten good edits and not told they are the bar will
+# produce something adjacent to them and call it done.
+#
+# NO NUMBERS IN HERE, DELIBERATELY. This repo's standing law is that the
+# density rates GRADE and never instruct — they must never reach the agent as a
+# target or a floor, and one sentence describing a rate survived a careful
+# removal precisely because prose about a rate looks harmless. Saying the ten
+# ARE the bar does not require quoting one: the sheets show how much these
+# videos place, where, and what they leave alone. The bar is visible in them.
+_REFERENCE_RUBRIC = (
+    "THE TEN BELOW ARE THE STANDARD. Not inspiration, not a mood board, not a "
+    "library to browse — they are FINISHED EDITS at the level every output of "
+    "this pipeline is held to, chosen by the person whose product this is.\n"
+    "\n"
+    "Your edit is judged against them. Three things in particular, and they "
+    "are all visible in the frames:\n"
+    "  HOW MUCH THEY PLACE — these videos are not quiet. Look at how often "
+    "something arrives on screen, and how rarely a beat is left bare by "
+    "accident.\n"
+    "  WHERE IT SITS — the band, the size, the relationship to the speaker's "
+    "face and to the words already burned into the frame.\n"
+    "  WHAT THEY LEAVE ALONE — the restraint moments are not gaps. Every one "
+    "of them is a place a competent editor would have reached for something "
+    "and this one did not, ON PURPOSE, and the video is better for it.\n"
+    "\n"
+    "An edit that is quieter than these is under the bar, not tasteful. An "
+    "edit that places something everywhere is not at the bar either — the "
+    "restraint is half of what you are looking at. Rule against what these "
+    "actually do, not against what a cautious editor would do.\n")
+
+
 def watched_moments():
-    """The glanceable lines. Absence is SPOKEN, never silently omitted."""
+    """The rubric, then the glanceable lines. Absence is SPOKEN, never omitted.
+
+    The RUBRIC leads because it changes how everything under it is read: the
+    same sheet is either a set of examples or the bar, and only one of those
+    makes an agent compare its own output against them.
+    """
     if not prefix_material_enabled("watched_moments"):
         return ("THE TEN, AT THE MOMENTS THAT MATTER: REMOVED for this run "
                 "(PROMPTLY_DISABLE_WATCHED_MOMENTS=1) — a deliberate removal, "
@@ -9528,9 +9572,11 @@ def watched_moments():
     except Exception as _e:                                       # noqa: BLE001
         return ("THE TEN, AT THE MOMENTS THAT MATTER: UNREADABLE — %s: %s"
                 % (_p, _e))
-    return _t or ("THE TEN, AT THE MOMENTS THAT MATTER: EMPTY — %s is a "
-                  "zero-length file, which is not the same as no examples "
-                  "existing." % _p)
+    if not _t:
+        return ("THE TEN, AT THE MOMENTS THAT MATTER: EMPTY — %s is a "
+                "zero-length file, which is not the same as no examples "
+                "existing." % _p)
+    return _REFERENCE_RUBRIC + "\n" + _t
 
 
 def watched_frames():
@@ -13196,7 +13242,7 @@ def edit(source_key: str, brief: str,
                 "startMs": int(max(0, words_from_s) * 1000),
                 "endMs": int(min(_dur, words_to_s) * 1000)}]
         try:
-            _tok = _cr.access_token(CHATCUT_TOKENS)
+            _tok = _cr.access_token(CHATCUT_TOKENS, key=_cr.PLANNER_KEY)
             _res = _cr.rpc(_tok, "tools/call",
                            {"name": "inspect_asset", "arguments": _args})
         except Exception as _e:                                   # noqa: BLE001

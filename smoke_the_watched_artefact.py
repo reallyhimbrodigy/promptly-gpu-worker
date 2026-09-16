@@ -175,6 +175,36 @@ try:
 finally:
     A._WATCHED_DIRS = _save
 
+# ── 3b. THE PREFIX SAYS WHAT THE REFERENCES ARE ─────────────────────────────
+# A one-line framing gap, and it may be why the copy came out generic: the
+# sheet said "what an editor did at a specific moment", which reads as
+# INTERESTING REFERENCE. Nothing said it was the LEVEL. An agent shown ten good
+# edits and not told they are the bar produces something adjacent to them.
+#
+# The leg is the PROPERTY — the prefix states that the ten are the standard
+# the output is judged against, and names the three things that are judged —
+# not any particular sentence.
+_rub = A.watched_moments()
+if "THE TEN" not in _rub[:400] or "STANDARD" not in _rub[:400]:
+    bad("the prefix does not open by saying the ten ARE the standard: %r"
+        % _rub[:120])
+for _w, _why in (("judged against", "that the output is compared to them"),
+                 ("PLACE", "how much they place"),
+                 ("WHERE IT SITS", "where a placement sits"),
+                 ("LEAVE ALONE", "the restraint")):
+    if _w not in _rub[:1600]:
+        bad("the rubric does not name %s" % _why)
+# AND IT CARRIES NO RATE. The standing law: the density rates GRADE and never
+# instruct. One sentence describing a rate survived a careful removal because
+# prose about a rate looks harmless beside a schema field demanding one. Saying
+# the ten ARE the bar does not require quoting a number — the sheets show the
+# density.
+import re as _re2                                                # noqa: E402
+_rates = _re2.findall(r"\d+(?:\.\d+)?\s*(?:per|/)\s*\d*\s*(?:s\b|sec|"
+                      r"second|25s|minute|min\b)", _rub, _re2.I)
+if _rates:
+    bad("the rubric quotes a RATE at the agent: %s" % _rates[:3])
+
 # ── 4. NO RATES ─────────────────────────────────────────────────────────────
 ns = {}
 for n in ast.parse(open(os.path.join(HERE, "craft_pass_app.py")).read()).body:
@@ -244,6 +274,11 @@ must_reject("gate leg", lambda: all(
 must_reject("contiguity leg", lambda:
             [1, 2, 4] == list(range(1, 4)))
 must_reject("absence leg", lambda: "UNAVAILABLE" in "the ten, at the moments")
+must_reject("rubric leg", lambda:
+            "STANDARD" in "what an editor did at a specific moment"[:400])
+must_reject("rate leg in the rubric", lambda: not _re2.findall(
+    r"\d+(?:\.\d+)?\s*(?:per|/)\s*\d*\s*(?:s\b|sec|second|25s)",
+    "overlay text is the workhorse, about 7.5 per 25s", _re2.I))
 if "rate_language" in ns:
     must_reject("rate leg", lambda: not ns["rate_language"](
         "Overlay text is the WORKHORSE (~7.5 per 25s)"))

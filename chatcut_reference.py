@@ -59,15 +59,29 @@ def manifest():
                   "cannot scrub what it cannot address." % " or ".join(_MANIFEST))
 
 
-def access_token(tokens_dict=None):
-    """A ChatCut access token, or a named failure. Never a silent None."""
+# THE PLANNER HAS ITS OWN GRANT AND ITS OWN DICT KEY. ChatCut rotates the
+# refresh token on use, so two containers sharing one stored token invalidate
+# each other — and the failure surfaces on the NEXT use, as intermittent auth
+# under load, which is the hardest kind to attribute. Serialising the two
+# halves would have closed it too, and it is a constraint somebody has to
+# remember; a second grant is not.
+PLANNER_KEY = "refresh_token_planner"
+
+
+def access_token(tokens_dict=None, key="refresh_token"):
+    """A ChatCut access token, or a named failure. Never a silent None.
+
+    `key` selects WHICH stored grant this half rotates. The execution harness
+    keeps "refresh_token"; the planner keeps PLANNER_KEY and reads its seed
+    from the chatcut-oauth-planner Secret. Neither ever writes the other's key.
+    """
     import urllib.error
     import urllib.parse
     cid = os.environ.get("CHATCUT_CLIENT_ID")
     rt = None
     if tokens_dict is not None:
         try:
-            rt = tokens_dict.get("refresh_token")
+            rt = tokens_dict.get(key)
         except Exception:                                         # noqa: BLE001
             rt = None
     rt = rt or os.environ.get("CHATCUT_REFRESH_TOKEN")
@@ -95,7 +109,7 @@ def access_token(tokens_dict=None):
         # already paid for: a warning about a credential you then discard is
         # absence-as-success wearing a log line.
         try:
-            tokens_dict["refresh_token"] = tok["refresh_token"]
+            tokens_dict[key] = tok["refresh_token"]
         except Exception:                                         # noqa: BLE001
             pass
     if not tok.get("access_token"):
