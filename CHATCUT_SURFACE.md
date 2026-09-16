@@ -133,3 +133,77 @@ true when written, a 2.8x under-ask now.
 | `track_progress` | TEXT/JSON | Manage long-running work in the editor. |
 | `trigger_transcript` | TEXT/JSON | Start transcription for one audio or video asset when its transcription state is idle or error. |
 | `web_browser` | TEXT + IMAGES | Scrape a web page via Firecrawl. |
+
+## Three probes, CALLED — 2026-09-16
+
+Not read from descriptions. Each of these is what came back.
+
+### `get_more_tools` — not on this surface
+
+```
+MCP error -32602: Tool get_more_tools not found
+```
+
+### `web_browser` — a page scraper, and it refuses media
+
+Pointed at a source `.mp4`, verbatim:
+
+```
+Firecrawl request failed (HTTP 500)
+{"success":false,"code":"SCRAPE_UNSUPPORTED_FILE_ERROR",
+ "error":"The URL returned a file type that Firecrawl cannot process:
+ video/mp4. Firecrawl supports HTML web pages, PDFs, and common document
+ formats. Raster images (PNG, JPEG, JPEG 2000, TIFF, GIF, BMP, WebP, AVIF)
+ are OCR'd when the parsers option includes \"image\" ... Other binary files
+ like vid[eo]"}
+```
+
+Its `formats` enum carries an undocumented `videos` member. Called with it,
+it returns **an array of video URLs found on the page** — links, not video:
+
+```
+"javascriptReturns": [{"type":"object","value":[
+  "https://cdn.chatcut.dev/playback/talking-head-final.mp4",
+  "https://chatcut.io/best-moments/ai-editing/final-clip.mp4", ...]}]
+```
+
+So `web_browser` cannot reach an asset and does not return motion. It finds
+URLs to files it cannot open.
+
+### `request_asset_download` — a real URL, and it is not ours to open
+
+The return, verbatim:
+
+```json
+{
+  "success": true,
+  "assetId": "07ccc1fc-b343-451f-8f6d-2fa46918745c",
+  "contentType": "video/mp4",
+  "downloadPath": "/api/assets/07ccc1fc-.../download?projectId=74036980-...",
+  "downloadUrl": "https://api.chatcut.io/api/assets/07ccc1fc-.../download?projectId=74036980-...",
+  "filename": "v09044g40000cm9oa7nog65s2crhkf00.mp4",
+  "sizeKb": 3963,
+  "type": "video",
+  "variant": "source",
+  "instruction": "Give the user the authenticated downloadUrl or downloadPath.
+                  Do not call pull_asset for a user download; pull_asset is
+                  sandbox-only. Do not expose raw storage URLs."
+}
+```
+
+**It is a genuine URL to the source file — and it returns 401 to the harness,
+with the MCP bearer token and without it.** Tested from a container holding a
+valid grant:
+
+```
+no_auth  HTTP Error 401: Unauthorized
+bearer   HTTP Error 401: Unauthorized
+```
+
+It is a user-facing door, authenticated against something the connector does
+not hold, exactly as its own `instruction` says. The hopeful reading — a URL
+the agent can fetch means the harness can fetch it — is wrong here, and only
+calling it showed that.
+
+**The answer to "is there byte-level access" is `pull_asset`, by their own
+words "sandbox-only", and it is not on this surface.**
