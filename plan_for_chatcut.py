@@ -76,9 +76,22 @@ FAMILY_MAP = {
     },
     "cutaway": {
         "item_kind": "video-item",
-        "verified": False,
-        "primitive": "a video item on a track above the base",
-        "how": "the covering item's shape has not been observed in this repo.",
+        "verified": True,
+        "primitive": ("a SECOND video item from the same asset at a different "
+                      "`sourceStartFromInSeconds`, on a track above the base"),
+        "how": ("OBSERVED LIVE 2026-09-16, and it needs NO NEW PRIMITIVE — it "
+                "is the `type:\"video\"` add already verified for the base "
+                "clip, pointed at a different moment of the source and placed "
+                "over it. Omit trackId and edit_item makes a free track "
+                "itself: it answered `createdNewTrack:true, "
+                "createdNewTrackReason:\"avoid-overlap\", trackAlias:\"V2\"`. "
+                "The readback proves the cover: `item V2 range=[60,150) "
+                "source=[18000000, 21000000)us` — source seconds 18-21 playing "
+                "while V1 is at second 2. "
+                "RETIRED IN THE FFMPEG ERA AND THE REASON IS GONE: it was "
+                "dropped because the old builder could not express it, and it "
+                "is 47% of Zac's reference beats. Verified rather than "
+                "removed from the planner."),
     },
     "sfx": {
         "item_kind": "audio-item",
@@ -104,9 +117,22 @@ FAMILY_MAP = {
     },
     "transition": {
         "item_kind": "transition-item",
-        "verified": False,
-        "primitive": "a transition entry in edit_item",
-        "how": "not observed.",
+        "verified": True,
+        "primitive": ("type:\"transition\", assetId:\"builtin:tr-<name>\", "
+                      "outgoingItemId, incomingItemId"),
+        "how": ("OBSERVED LIVE 2026-09-16. The shape is ChatCut's own library "
+                "guidance for `builtin:tr-cross-dissolve`, and placing it "
+                "returned `{type:\"transition\", outgoingItemId:..., "
+                "incomingItemId:..., durationInFrames:30}` — CHATCUT CHOOSES "
+                "THE DURATION; do not pass one. "
+                "IT NEEDS A SEAM: two items ADJACENT ON THE SAME TRACK. A "
+                "transition has nowhere to live between a clip and a gap, and "
+                "their own note says edit_item \"validates the live seam and "
+                "refuses durations that would require freeze frames\". "
+                "12 video transitions exist, all `builtin:tr-*`: "
+                "anticipation-zoom, clean-line-wipe, cross-dissolve, "
+                "dip-to-black, flash, impact-shake, luma-blend, "
+                "organic-dissolve and four more."),
     },
     "caption": {
         "item_kind": "not-an-item",
@@ -398,15 +424,55 @@ def refuse_incomplete(rows):
     over a purple backdrop. An open field does not only cost turns; it costs
     the frame.
     """
-    bad = []
+    # THE REQUIRED CONTROLS ARE PER FAMILY, and they were not.
+    #
+    # `CONTROLS` is size/case/where/colour/hold_s — the controls of a piece of
+    # TEXT. This function demanded all five from EVERY placement, which was
+    # correct while text and card were the only families that reached here.
+    # The moment cutaway and transition were verified, it refused a perfectly
+    # complete cutaway for having no `case` and no `colour`: a gate asking a
+    # video item what font weight it is.
+    #
+    # A family's controls are the decisions ITS primitive needs and nothing
+    # else. Anything not listed here needs none — and a family missing from
+    # the map is REFUSED rather than waved through, because a new family with
+    # no entry would otherwise be the one that reaches ChatCut unanswered.
+    _PER_FAMILY = {
+        "text": CONTROLS,
+        "card": CONTROLS,
+        # a cutaway's one decision is WHERE IN THE SOURCE it cuts to. Its
+        # `where`/`size`/`colour` are meaningless: it is footage, not type.
+        "cutaway": ("cutaway_from_s",),
+        # a transition's identity is which one; its DURATION is ChatCut's to
+        # choose (observed: it returned durationInFrames 30 unasked).
+        "transition": ("transition_name",),
+        "sfx": ("sfx_name",),
+        "zoom": (),
+        "caption": (),
+        "cut": (),
+    }
+    bad, unknown = [], []
     for p in rows:
         tr = [t for t in (p.get("treatment") or []) if t != "none"]
         if not tr:
             continue
-        miss = [f for f in CONTROLS if str(p.get(f) or "").strip() == ""]
-        if miss:
-            bad.append("beat %s (%s): %s" % (p.get("beat", p.get("id")),
-                                             "+".join(tr), ", ".join(miss)))
+        for t in tr:
+            if t not in _PER_FAMILY:
+                unknown.append("beat %s: family %r has no control list"
+                               % (p.get("beat", p.get("id")), t))
+                continue
+            miss = [f for f in _PER_FAMILY[t]
+                    if str(p.get(f) if p.get(f) is not None else "").strip() == ""]
+            if miss:
+                bad.append("beat %s (%s): %s"
+                           % (p.get("beat", p.get("id")), t, ", ".join(miss)))
+    if unknown:
+        raise Incomplete(
+            "a ruled family has no control list, so nothing here knows what it "
+            "needs answered:\n    " + "\n    ".join(unknown)
+            + "\n  Add it to _PER_FAMILY with the decisions ITS primitive "
+              "needs. Waving it through is how a placement reaches ChatCut "
+              "with a blank the executor has to fill.")
     if bad:
         raise Incomplete(
             "these placements reach ChatCut with controls unanswered:\n    "
@@ -881,6 +947,65 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
                   "    why                    : %s" % q.get("why"), ""]
             _zi += 1
             _emitted["zoom"] = _emitted.get("zoom", 0) + 1
+
+    # ── CUTAWAY AND TRANSITION, VERIFIED 2026-09-16 AND NOW EMITTED ────────
+    # Both were `verified: False` and refused wholesale at the boundary. Both
+    # are now observed live, so the refusal became the WRONG failure: a family
+    # the map calls buildable and the plan never writes is the same
+    # producer/consumer mismatch one step along, and the reconciliation below
+    # is what catches it.
+    _cut_rows = [q for q in rows if "cutaway" in (q.get("treatment") or [])]
+    if _cut_rows:
+        L += ["", "## 2d. THE CUTAWAYS — a SECOND video item from the same "
+                  "source, at a", "    DIFFERENT moment, on a track ABOVE the "
+                  "base. No new primitive: it is the",
+              "    same `type: video` add as the base clip, pointed elsewhere "
+              "and laid over it.", ""]
+        for q in _cut_rows:
+            _f0 = int(round(float(q.get("src_t0") or 0) * fps))
+            _f1 = int(round(float(q.get("src_t1") or 0) * fps))
+            _from_s = q.get("cutaway_from_s")
+            _gi = _idx[0]
+            _idx[0] += 1
+            L += ["  CUTAWAY at %.2fs-%.2fs" % (q.get("src_t0") or 0,
+                                                q.get("src_t1") or 0),
+                  "    CALL 1, adds[%d]:" % _gi,
+                  "      type                   : video",
+                  "      assetId                : the SOURCE assetId — the "
+                  "same clip, shown from elsewhere",
+                  "      from                   : %d" % _f0,
+                  "      durationInFrames       : %d" % (_f1 - _f0),
+                  "      sourceStartFromInSeconds: %.2f   (cut away to THIS "
+                  "moment of the source)" % float(_from_s or 0),
+                  "      (OMIT trackId. edit_item puts it on a free track "
+                  "itself — observed: createdNewTrack true, reason "
+                  "\"avoid-overlap\", trackAlias V2 — which is what makes it "
+                  "cover the speaker instead of replacing him.)",
+                  "    why                    : %s" % q.get("why"), ""]
+            _emitted["cutaway"] = _emitted.get("cutaway", 0) + 1
+
+    _tr_rows = [q for q in rows if "transition" in (q.get("treatment") or [])]
+    if _tr_rows:
+        L += ["", "## 2e. THE TRANSITIONS — they need a SEAM, and ChatCut "
+                  "chooses the duration.", ""]
+        for q in _tr_rows:
+            _nm = str(q.get("transition_name") or "").strip()
+            L += ["  TRANSITION at %.2fs" % (q.get("src_t0") or 0),
+                  "    CALL 2, adds[%d]:" % _zi,
+                  "      type                   : transition",
+                  "      assetId                : builtin:tr-%s" % _nm,
+                  "      outgoingItemId         : the id of the item ENDING at "
+                  "frame %d, from CALL 1's response"
+                  % int(round(float(q.get("src_t0") or 0) * fps)),
+                  "      incomingItemId         : the id of the item BEGINNING "
+                  "there",
+                  "      (pass NO duration. Observed live: ChatCut answered "
+                  "durationInFrames 30 unasked, and their own note says "
+                  "edit_item \"validates the live seam and refuses durations "
+                  "that would require freeze frames\".)",
+                  "    why                    : %s" % q.get("why"), ""]
+            _zi += 1
+            _emitted["transition"] = _emitted.get("transition", 0) + 1
 
     # ── THE RECONCILIATION. Loud, by name, or the plan does not exist. ──────
     _lost = {f: _ruled[f] - _emitted.get(f, 0) for f in _ruled

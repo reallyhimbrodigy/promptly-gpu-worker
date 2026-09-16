@@ -3942,6 +3942,31 @@ KNOWLEDGE_TOOLS = [{
                                                     "is where it sits, the "
                                                     "moment is what happens."
                                                     + sfx_name_teach()}),
+                                 # WHICH TRANSITION. A beat ruled `transition`
+                                 # with no name is the same half-ruling as
+                                 # `sfx: yes` with no `sfx_name`: it decides
+                                 # the moment needs a seam treatment and never
+                                 # says which, and which is not derivable.
+                                 # Names are ChatCut's own, from browse_library
+                                 # on 2026-09-16.
+                                 "transition_name": {
+                                     "type": "string",
+                                     "enum": ["cross-dissolve", "dip-to-black",
+                                              "flash", "impact-shake",
+                                              "luma-blend", "organic-dissolve",
+                                              "clean-line-wipe",
+                                              "anticipation-zoom"],
+                                     "description":
+                                         "WHICH transition, when this beat is "
+                                         "ruled `transition`. It needs a SEAM "
+                                         "— two cuts meeting on one track — so "
+                                         "rule it only where one shot ends and "
+                                         "the next begins. dip-to-black and "
+                                         "flash mark a chapter; cross-dissolve "
+                                         "softens a jump; impact-shake and "
+                                         "anticipation-zoom carry energy into "
+                                         "a reveal. ChatCut chooses the "
+                                         "DURATION — do not ask for one."},
                                  "card_hero": {"type": "string",
                                      # REQUIRED, and it says so now. Removing
                                      # card_type and card_props made this the
@@ -18059,8 +18084,17 @@ def edit(source_key: str, brief: str,
                 _nocard = [v.get("beat") for v in led["beat_verdicts"]
                            if "card" in [str(t).lower() for t in (v.get("treatment") or [])]
                            and not str(v.get("card_hero") or "").strip()]
+                # A TRANSITION WITH NO NAME IS THE SAME SHAPE, and it could
+                # not reach anything until 2026-09-16 because the translator
+                # refused the whole family as unmapped. Now that it builds, the
+                # half-ruling can arrive, and `transition_name` is no more
+                # derivable from a beat than `sfx_name` is.
+                _notr = [v.get("beat") for v in led["beat_verdicts"]
+                         if "transition" in [str(t).lower()
+                                             for t in (v.get("treatment") or [])]
+                         and not str(v.get("transition_name") or "").strip()]
                 _incomplete = {"text": set(_nocopy), "sfx": set(_nosfx),
-                               "card": set(_nocard)}
+                               "card": set(_nocard), "transition": set(_notr)}
                 _stripped = []
                 for _v4 in led["beat_verdicts"]:
                     _bi = _v4.get("beat")

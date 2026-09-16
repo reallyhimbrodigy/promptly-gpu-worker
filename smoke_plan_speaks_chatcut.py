@@ -30,9 +30,35 @@ FULL = dict(beat=0, treatment=["text"], text_content="X", src_t0=0.0,
 
 # A POPULATION CAN BE EMPTY AND ASSERT NOTHING — both arms need a floor, or a
 # map with every family verified would silently test nothing on the first arm.
-check("there is at least one unverified family to refuse",
-      any(not v["verified"] for v in T.FAMILY_MAP.values()),
-      "every family is verified — the refusal arm now asserts nothing")
+# THE REFUSAL ARM NEEDS A SUBJECT, AND ON 2026-09-16 IT RAN OUT OF ONE.
+# `cutaway` and `transition` were the last two unverified families; once both
+# were observed live, this leg went red saying "every family is verified — the
+# refusal arm now asserts nothing". That is the empty-population guard working
+# exactly as written, and the right fix is NOT to keep a family unverified so
+# the check has something to chew on. It is to give the arm a SYNTHETIC
+# subject, so the refusal mechanism is tested on its own terms however many
+# real families are verified.
+_SYNTH = "__not_a_real_family__"
+_saved_map = dict(T.FAMILY_MAP)
+try:
+    T.FAMILY_MAP[_SYNTH] = {"item_kind": "none", "verified": False,
+                            "primitive": "-", "how": "a synthetic subject for "
+                                                     "the refusal arm"}
+    try:
+        T.refuse_unmapped({_SYNTH})
+        check("an unverified family is REFUSED", False,
+              "it passed — an unmapped family would reach the agent as prose")
+    except T.Unmapped as _e:
+        check("an unverified family is REFUSED", True)
+        check("  ...and the refusal NAMES it", _SYNTH in str(_e))
+finally:
+    T.FAMILY_MAP.clear()
+    T.FAMILY_MAP.update(_saved_map)
+check("every real family in the map is now verified",
+      all(v["verified"] for v in T.FAMILY_MAP.values()),
+      "unverified: %s — a family the planner can rule and the translator "
+      "cannot build produces a refused plan every time it is reached for"
+      % sorted(k for k, v in T.FAMILY_MAP.items() if not v["verified"]))
 check("there is at least one verified family to pass",
       any(v["verified"] for v in T.FAMILY_MAP.values()))
 
@@ -44,6 +70,9 @@ check("there is at least one verified family to pass",
 # API the check went red for asserting a fact that had changed. A check that
 # restates its subject has to be edited every time the subject moves, and the
 # edit is where it silently stops matching. Ask the map instead.
+# This loop is now EMPTY BY DESIGN — every real family is verified — and the
+# synthetic subject above is what keeps the arm honest. Left in place so a
+# family that regresses to unverified is still named individually.
 for fam in sorted(f for f, v in T.FAMILY_MAP.items() if not v["verified"]):
     try:
         T.refuse_unmapped({fam})
