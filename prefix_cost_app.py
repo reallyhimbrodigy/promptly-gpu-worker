@@ -15,8 +15,13 @@ app = modal.App("promptly-prefix-cost")
 image = modal.Image.debian_slim(python_version="3.11").pip_install("anthropic")
 
 
+# `promptly-secrets`, NOT `anthropic-api-key`. The latter's account ran out of
+# credit mid-session and `count_tokens` began refusing — which made the cost of
+# an artefact unmeasurable at exactly the moment it needed measuring. The
+# planner reads ANTHROPIC_API_KEY from `promptly-secrets`, so counting through
+# the same secret measures with the key that actually pays for the run.
 @app.function(image=image, timeout=600,
-              secrets=[modal.Secret.from_name("anthropic-api-key")])
+              secrets=[modal.Secret.from_name("promptly-secrets")])
 def count(system_text: str, images: list = None,
           model: str = "claude-sonnet-4-5-20250929") -> dict:
     """{'state','input_tokens',...}. An error is a STATE, never a zero."""

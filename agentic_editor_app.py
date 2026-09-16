@@ -82,6 +82,12 @@ _KNOWLEDGE_DIR = os.path.join(_HERE, "knowledge")
 # same mount-point-is-not-the-source-path rule as knowledge/ applies, so
 # both paths are tried at read time.
 _WATCHED_DIR = os.path.join(_HERE, "watched")
+# NAMED CONSTANTS, not an inline os.path.join in the image builder: the mount
+# fingerprint resolves add_local_* arguments statically, and a call it cannot
+# resolve is an UNCOVERED path that still prints a sha — the guard said so the
+# moment these two landed as expressions.
+_CC_REF_SRC = os.path.join(_HERE, "chatcut_reference.py")
+_REF_PROJECT_SRC = os.path.join(_HERE, "reference_project.json")
 # THE MOUNT POINT IS NOT THE SOURCE PATH, AND SIX READERS ASSUMED IT WAS.
 # `add_local_dir(_KNOWLEDGE_DIR, "/knowledge")` puts the documents at
 # /knowledge in the container, while _KNOWLEDGE_DIR resolves relative to the
@@ -1309,9 +1315,23 @@ IMG = (modal.Image.debian_slim(python_version="3.11")
        # THE WATCHED ARTEFACT. Lines and frames both — the PNGs are read
        # as bytes and sent as image blocks, so they have to be in the
        # image like any other file the code opens.
-       .add_local_dir(_WATCHED_DIR, "/watched", copy=True))
+       .add_local_dir(_WATCHED_DIR, "/watched", copy=True)
+       # THE REFERENCE LIBRARY AND ITS CLIENT. A file the code opens MUST be
+       # mounted — this repo's own law, and `scrub_reference` opens both.
+       .add_local_file(_CC_REF_SRC, "/root/chatcut_reference.py", copy=True)
+       .add_local_file(_REF_PROJECT_SRC, "/craft/reference_project.json",
+                       copy=True))
 
-SECRETS = [modal.Secret.from_name("promptly-secrets")]
+SECRETS = [modal.Secret.from_name("promptly-secrets"),
+           # THE REFERENCES ARE IN CHATCUT NOW, so the planner needs the grant
+           # to look at them. `scrub_reference` degrades to a NAMED failure
+           # without it rather than silently ruling blind.
+           modal.Secret.from_name("chatcut-oauth")]
+# ChatCut rotates its refresh token on use and this is where the current one
+# lives. STATED RISK: a planner scrubbing references while a ChatCut execution
+# job runs is two containers sharing one token, which races. Serialise them or
+# give the planner its own grant.
+CHATCUT_TOKENS = modal.Dict.from_name("chatcut-tokens", create_if_missing=True)
 # The source cache must OUTLIVE the container or it is inert — /cache on a fresh
 # container is always empty, which is the "shipped and does nothing" shape this
 # repo has nine precedents for. A Volume is what makes the hit possible.
@@ -3534,6 +3554,39 @@ KNOWLEDGE_TOOLS = [{
                     "description": "one sentence: what the request specifies"},
         },
         "required": ["mode"]},
+}, {
+    # ── SCRUB THE REFERENCES, AT RULING TIME ────────────────────────────────
+    # The ten are a persistent ChatCut project now, so the standard stops being
+    # a frozen cache of moments somebody else chose and becomes a source the
+    # planner can question. `inspect_asset` addresses ORIGINAL SOURCE TIME,
+    # returns up to 25 exact frames per call at native resolution, and carries
+    # WORD-LEVEL transcript for the same window.
+    #
+    # THE HARNESS FETCHES. ChatCut returns signed URLs, and an agent left to
+    # fetch them types the URL into a curl command — 89% of everything the
+    # execution agent typed on run 24 was signed S3 URLs. Here the pictures
+    # come back attached to the tool result that asked for them.
+    "name": "scrub_reference",
+    "description": (
+        "LOOK AT ONE OF ZAC'S TEN REFERENCE VIDEOS, at whatever moments you "
+        "want. The frames come back as PICTURES in the result, at full "
+        "resolution, with the words spoken there. Use it when you are deciding "
+        "what a moment should carry and want to see how the standard handled a "
+        "moment of the same shape — not to copy a placement, but to see what "
+        "the decision looked like. `video` is 1-10 (call it with video=0 to "
+        "list them). `at_seconds` is up to 25 exact times IN THE REFERENCE, "
+        "not in the edit you are planning. Ask for as many moments as you "
+        "need; nobody is counting."),
+    "input_schema": {"type": "object",
+                     "properties": {
+                         "video": {"type": "integer",
+                                   "description": "1-10, or 0 to list them"},
+                         "at_seconds": {"type": "array",
+                                        "items": {"type": "number"},
+                                        "description": "up to 25 exact times"},
+                         "words_from_s": {"type": "number"},
+                         "words_to_s": {"type": "number"}},
+                     "required": ["video"]},
 }, {
     "name": "read_knowledge",
     "description": "Read a file of Promptly's editorial standard. Pass '_index' "
@@ -13087,6 +13140,81 @@ def edit(source_key: str, brief: str,
     led["cmds"] = []
     led["turns"] = []
     _knowledge_result_ids = {}   # tool_use_id -> filename
+    # tool_use_id -> image blocks fetched for a scrub_reference call. Held here
+    # rather than returned inline because the ordinary result path stringifies
+    # everything; the scrub is the one call whose answer is pixels.
+    _scrub_blocks = {}
+
+    def scrub_reference(video, at_seconds, words_from_s=None, words_to_s=None):
+        """(summary, image_blocks). Look at one of the ten, at named moments.
+
+        A STATE IN THE SUMMARY, ALWAYS. "No frames came back" and "the
+        reference library is not mounted" and "that time is past the end of
+        that clip" are three different facts, and an agent told only that it
+        got nothing will either guess or stop asking.
+        """
+        import base64
+        import chatcut_reference as _cr
+        _man, _mst = _cr.manifest()
+        if not _man:
+            return {"state": "ABSENT", "why": _mst,
+                    "what_to_do": "Rule without the references; say so."}, []
+        _assets = _man.get("assets") or []
+        if not video:
+            return {"state": "MEASURED", "the_ten": [
+                {"video": i + 1, "seconds": a.get("duration_s"),
+                 "shape": "%sx%s" % (a.get("w"), a.get("h"))}
+                for i, a in enumerate(_assets)],
+                "how": "scrub_reference(video=N, at_seconds=[...])"}, []
+        try:
+            _a = _assets[int(video) - 1]
+        except Exception:                                         # noqa: BLE001
+            return {"state": "REFUSED",
+                    "why": "video must be 1-%d (or 0 to list)" % len(_assets)}, []
+        _ts = [float(t) for t in (at_seconds or [])][:_cr.MAX_FRAMES]
+        _dur = float(_a.get("duration_s") or 0)
+        _bad = [t for t in _ts if not (0 <= t < _dur)]
+        _ts = [t for t in _ts if 0 <= t < _dur]
+        if not _ts:
+            return {"state": "REFUSED",
+                    "why": ("no usable time: %s are outside reference %s, "
+                            "which is %.1fs long" % (_bad, video, _dur))}, []
+        _args = {"assetId": _a["assetId"], "projectId": _man["projectId"],
+                 "sourceTimesMs": [int(round(t * 1000)) for t in _ts]}
+        if words_from_s is not None and words_to_s is not None \
+                and words_to_s > words_from_s:
+            _args["transcriptRangesMs"] = [{
+                "startMs": int(max(0, words_from_s) * 1000),
+                "endMs": int(min(_dur, words_to_s) * 1000)}]
+        try:
+            _tok = _cr.access_token(CHATCUT_TOKENS)
+            _res = _cr.rpc(_tok, "tools/call",
+                           {"name": "inspect_asset", "arguments": _args})
+        except Exception as _e:                                   # noqa: BLE001
+            return {"state": "FAILED",
+                    "why": "%s: %s" % (type(_e).__name__, str(_e)[:200]),
+                    "what_to_do": "Rule without it and say the look failed."}, []
+        _urls = _cr.frame_urls(_res)
+        _st = _cr.structured(_res)
+        _got, _fst = _cr.fetch(_urls, "/work/refframes/%s" % video)
+        led.setdefault("reference_scrubs", []).append(
+            {"video": int(video), "asked": len(_ts), "served": len(_got),
+             "state": _fst})
+        print("  REFERENCE SCRUB : video %s at %s -> %s"
+              % (video, ["%.1fs" % t for t in _ts], _fst), flush=True)
+        _blocks = []
+        for _u, _p in _got:
+            _blocks.append({"type": "image", "source": {
+                "type": "base64", "media_type": "image/jpeg",
+                "data": base64.b64encode(open(_p, "rb").read()).decode()}})
+        return {"state": "MEASURED" if _blocks else "ABSENT",
+                "video": int(video), "file": _a.get("file"),
+                "frames": _fst,
+                "at_seconds": ["%.2f" % t for t in _ts],
+                "outside_the_clip": _bad or None,
+                "words": _cr.transcript_lines(_st),
+                "note": ("The frames are in this result, in the order you "
+                         "asked for them. Ask again for any other moment.")}, _blocks
 
     def read_knowledge(name: str) -> dict:
         d = "/knowledge"
@@ -16697,6 +16825,18 @@ def edit(source_key: str, brief: str,
     _READERS = {"read_knowledge", "search_skills"}
     if _judgment_only:
         tools = [t for t in tools if t.get("name") not in _READERS]
+    # `scrub_reference` IS NOT A READER AND IS NEVER STRIPPED. The readers above
+    # are lookups into documents that were already summarised into the prefix —
+    # called 0 times in 37 runs, and withheld on the cheap arm for that reason.
+    # This is the opposite: it is the only way to see the standard AT ALL once
+    # the frozen frames come out of the prefix, and withholding it would leave
+    # the planner ruling against prose about ten videos it cannot look at.
+    #
+    # RECORDED, so a run where it was never offered cannot be read as a run
+    # where nobody wanted it — the exact mistake made with read_knowledge's
+    # zero, quoted in a scope document as evidence the agent did not need it.
+    led["scrub_offered"] = any(t.get("name") == "scrub_reference"
+                               for t in tools)
     # THE DENOMINATOR FOR THE READER COUNTERS, RECORDED WHERE IT IS DECIDED.
     # `read_knowledge` has been called 0 times in 37 runs and `skill_searches`
     # is empty on all of them — and BOTH zeros are this filter, not a finding.
@@ -17418,6 +17558,12 @@ def edit(source_key: str, brief: str,
                     # Handed BACK to the agent, not raised: a vague scope is
                     # something it can fix on the next turn.
                     out = {"error": str(_se)}
+            elif tu.name == "scrub_reference":
+                out, _blk = scrub_reference(
+                    tu.input.get("video"), tu.input.get("at_seconds") or [],
+                    tu.input.get("words_from_s"), tu.input.get("words_to_s"))
+                if _blk:
+                    _scrub_blocks[tu.id] = _blk
             elif tu.name == "read_knowledge":
                 out = read_knowledge(tu.input.get("file", "_index"))
                 _knowledge_result_ids[tu.id] = tu.input.get("file", "_index")
@@ -17931,8 +18077,18 @@ def edit(source_key: str, brief: str,
                     f"payload, same answer. A third stops the run. If something "
                     f"is missing, change the payload or say what is outstanding.")
             cap = 26000 if tu.name == "read_knowledge" else 6000
-            results.append({"type": "tool_result", "tool_use_id": tu.id,
-                            "content": json.dumps(out)[:cap]})
+            if tu.id in _scrub_blocks:
+                # A LIST, NOT A STRING. The Anthropic tool_result takes content
+                # blocks, so the frames ride the result of the call that asked
+                # for them rather than arriving in a later message the model
+                # has to associate by itself.
+                results.append({"type": "tool_result", "tool_use_id": tu.id,
+                                "content": [{"type": "text",
+                                             "text": json.dumps(out)[:cap]}]
+                                + _scrub_blocks.pop(tu.id)})
+            else:
+                results.append({"type": "tool_result", "tool_use_id": tu.id,
+                                "content": json.dumps(out)[:cap]})
             _mark(led, f"tool:{tu.name}", _tt0)
         msgs.append({"role": "user", "content": results})
         # TERMINAL: the request asked for something this editor does not do. Stop

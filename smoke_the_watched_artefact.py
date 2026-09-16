@@ -69,19 +69,38 @@ else:
     # restating it, so a change to the layout cannot pass this leg by accident.
     bs = ast.parse(open(os.path.join(HERE, "build_watched_sheet.py")).read())
     g = {}
+    # BOTH ASSIGNMENT SHAPES. `TILE_W, TILE_H, HEAD_H = ...` is a Tuple target
+    # and `STRIP_N = 5` is a Name target; reading only the first reported "could
+    # not read the tile geometry" while holding seven of the nine constants —
+    # an incomplete read announcing itself as a failure, which is the honest
+    # direction, but it was still the READER that was short.
     for n in bs.body:
+        if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Name) \
+                and n.targets[0].id.startswith(("TILE_", "STRIP_", "HEAD_",
+                                                "COLS", "ROWS")):
+            try:
+                g[n.targets[0].id] = ast.literal_eval(n.value)
+            except Exception:                                     # noqa: BLE001
+                pass
         if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Tuple):
             names = [t.id for t in n.targets[0].elts if isinstance(t, ast.Name)]
-            if set(names) <= {"TILE_W", "TILE_H", "HEAD_H", "COLS", "ROWS"}:
+            if set(names) <= {"TILE_W", "TILE_H", "HEAD_H", "COLS", "ROWS",
+                              "STRIP_W", "STRIP_H", "STRIP_N", "STRIP_ROWS"}:
                 try:
                     vals = ast.literal_eval(n.value)
                 except Exception:                                 # noqa: BLE001
                     continue
                 g.update(dict(zip(names, vals)))
-    if not {"TILE_W", "TILE_H", "HEAD_H", "COLS", "ROWS"} <= set(g):
+    if not {"TILE_W", "TILE_H", "HEAD_H", "COLS", "ROWS", "STRIP_W",
+            "STRIP_H", "STRIP_N", "STRIP_ROWS"} <= set(g):
         bad("could not read the tile geometry out of build_watched_sheet.py: %s"
             % g)
     else:
+        # BOTH GEOMETRIES. A moment that is a CHANGE ships as a STRIP — one
+        # ROW of five frames on a STRIP_ sheet — and counting only SHEET_
+        # tiles reported "room for 18 tiles but 37 moments ship" on a
+        # correct artefact where 23 of the 37 were strips. The leg was
+        # measuring the population it was written for, one artefact shape ago.
         seen = 0
         for p in sorted(glob.glob(os.path.join(HERE, "watched", "tiles",
                                                "SHEET_*.png"))):
@@ -94,6 +113,19 @@ else:
                     % (os.path.basename(p), im.width, im.height, g["TILE_W"],
                        g["TILE_H"] + g["HEAD_H"]))
             seen += cols * rows
+        _srow = g["STRIP_H"] + g["HEAD_H"] + 16
+        for p in sorted(glob.glob(os.path.join(HERE, "watched", "tiles",
+                                               "STRIP_*.png"))):
+            im = Image.open(p)
+            _rows = round(im.height / _srow)
+            if abs(_rows * _srow - im.height) > 2:
+                bad("%s is %dx%d, not a whole number of %dpx strip rows"
+                    % (os.path.basename(p), im.width, im.height, _srow))
+            if abs(round(im.width / g["STRIP_W"]) * g["STRIP_W"]
+                   - im.width) > 2:
+                bad("%s is %dpx wide, not a whole number of %dpx frames"
+                    % (os.path.basename(p), im.width, g["STRIP_W"]))
+            seen += _rows
         # The last sheet is padded to a full row only if the builder pads; it
         # does not, so the tile count is bounded, not exact.
         if seen < len(shipped):
