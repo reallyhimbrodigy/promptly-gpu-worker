@@ -1865,7 +1865,7 @@ SOURCE_FRAMES_N = 14
 # claim about someone else's limit is the thing that kept the PLAN asking for
 # nine review frames long after twenty-five were available. Half evenly spaced so nothing is unwatched, half on the biggest
 # frame-to-frame changes, which is where entrances, exits and collisions are.
-EDIT_FRAMES_N = 16
+EDIT_FRAMES_N = 25                   # preview_timeline's cap, re-read 2026-09-16
 
 
 def _frames_of(video, n, out_dir, width=480):
@@ -1953,6 +1953,31 @@ def pass1_message(plan, beats, inventory_png, source_video):
                            % (b.get("t_start", 0), b.get("t_end", 0),
                               str(b.get("text") or "").split(" \u00b7 ")[0])
                            for b in beats)})
+    # ── WHAT GOOD LOOKS LIKE, IN THE EXECUTING HALF TOO ────────────────
+    # The PLANNER knows the ten references are the bar; this half never did.
+    # It got a plan and an inventory and nothing telling it what it is aiming
+    # at, which is how "place the adds and export" becomes the whole job. The
+    # plan's ACCEPTANCE block says what each placement must be true of; this
+    # says what the edit as a whole is being held to. No rates — the density
+    # rates GRADE and never instruct, and that law does not bend for being in
+    # a different file.
+    blocks.append({"type": "text", "text":
+                   "WHAT THIS EDIT IS HELD TO. The pipeline that wrote your "
+                   "plan is graded against ten finished videos the owner of "
+                   "this product chose as the standard — not as inspiration, "
+                   "as the LEVEL. Those videos are not quiet: something "
+                   "arrives on screen often, it sits clear of the speaker's "
+                   "face and clear of the words already burned into the "
+                   "frame, and the moments they leave bare are left bare ON "
+                   "PURPOSE.\n"
+                   "You are not being asked to add to the plan — every "
+                   "editorial decision in it is already made, and inventing "
+                   "more is the failure. You ARE being asked to make the plan "
+                   "land: every placement it names, where it says, legible "
+                   "and clear at the frames it names. A placement that is "
+                   "present but illegible, or covered, or on a face, has not "
+                   "landed, and reporting it as placed is the one thing that "
+                   "cannot be recovered downstream."})
     blocks.append({"type": "text", "text": plan})
     return _message(blocks)
 
@@ -1999,7 +2024,7 @@ def pass2_message(frames, plan_frames):
                "If it is right, submit the export. A further pass is only for "
                "a defect you can NAME — and if you take one, say which frame "
                "you saw it in and what you changed."
-               % (len(frames), ", ".join(str(f) for f in plan_frames[:9]))}]
+               % (len(frames), ", ".join(str(f) for f in plan_frames[:25]))}]
     for fp in frames:
         blocks.append(_img_block(fp))
     return _message(blocks)
@@ -2215,7 +2240,10 @@ def _review_sheet(tok, pid, frames, out="/work/review.jpg"):
     try:
         pv = _mcp_call(tok, "preview_timeline",
                        {"projectId": pid, "views": ["viewer"],
-                        "viewerFrames": list(frames)[:9]})
+                        # 25, re-read from tools/list 2026-09-16. This was the
+                        # live one: a [:9] on the frames handed to
+                        # preview_timeline, against a cap that is now 25.
+                        "viewerFrames": list(frames)[:25]})
         uris = list(pv.get("_links") or [])
         if not uris:
             print("  REVIEW SHEET    : ABSENT  the viewer returned no frame "
@@ -2848,7 +2876,7 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                                 "will be sent to you as pictures. Then say in "
                                 "your final message that the harness could not "
                                 "render the edit."
-                                % ", ".join(str(f) for f in _want[:9])}]))
+                                % ", ".join(str(f) for f in _want[:25])}]))
             close()
 
         _state["render_thread"] = _th.Thread(target=_render_and_send,

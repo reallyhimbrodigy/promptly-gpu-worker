@@ -70,6 +70,22 @@ def legs():
         bad.append(("inventory", "the prompt still tells the agent to READ the "
                                  "sheet — that is fetching, not serving"))
 
+    # THE RUBRIC REACHES THE EXECUTOR TOO. The planner has known the ten are
+    # the bar since the artefact landed; this half never did — it got a plan
+    # and an inventory and nothing saying what it was aiming at. A rule that
+    # reaches one half of a two-half pipeline is a rule half the system has.
+    if "HELD TO" not in p1:
+        bad.append(("rubric", "pass 1 never says what the edit is held to"))
+    for _w in ("burned into", "clear of", "landed"):
+        if _w not in p1:
+            bad.append(("rubric", "the executor's rubric does not say %r" % _w))
+    # AND NO RATE IN IT. The density rates GRADE and never instruct, and that
+    # law does not bend for being in a different file.
+    import re as _re
+    if _re.search(r"\d+(?:\.\d+)?\s*(?:per|/)\s*\d*\s*(?:s\b|sec|25s)",
+                  p1, _re.I):
+        bad.append(("rubric", "the executor's rubric quotes a RATE"))
+
     # SOURCE — many frames, not one tile
     if "_frames_of" not in p1:
         bad.append(("source", "the source is not sent as a frame sequence"))

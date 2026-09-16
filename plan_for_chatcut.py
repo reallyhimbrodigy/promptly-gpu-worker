@@ -910,6 +910,11 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
                   "    NOTE: library sounds REFUSE validateOnly by design — "
                   "commit them, do not dry-run them.",
                   "    why                    : %s" % q.get("why"), ""]
+            _accept.append({"n": len(_accept) + 1, "kind": "SFX",
+                            "band": None, "f0": int(round(_t0 * fps)),
+                            "f1": int(round(_t0 * fps)),
+                            "settle": int(round(_t0 * fps)), "ladder": "n/a",
+                            "text": q.get("sfx_name")})
             _emitted["sfx"] = _emitted.get("sfx", 0) + 1
         for _t, _w, _st in _sfx_unplayed:
             L += ["  NO SOUND AT %.2fs — ruled %r, %s." % (_t, _w, _st),
@@ -946,6 +951,12 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
                   '"shape": "%s"}' % (q.get("zoom_arc") or "payoff"),
                   "    why                    : %s" % q.get("why"), ""]
             _zi += 1
+            _accept.append({"n": len(_accept) + 1, "kind": "ZOOM",
+                            "band": None, "f0": int(round(_t0 * fps)),
+                            "f1": int(round(_t0 * fps)),
+                            "settle": int(round(_t0 * fps)), "ladder": "n/a",
+                            "arc": q.get("zoom_arc") or "payoff",
+                            "text": q.get("why")})
             _emitted["zoom"] = _emitted.get("zoom", 0) + 1
 
     # ── CUTAWAY AND TRANSITION, VERIFIED 2026-09-16 AND NOW EMITTED ────────
@@ -982,6 +993,11 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
                   "\"avoid-overlap\", trackAlias V2 — which is what makes it "
                   "cover the speaker instead of replacing him.)",
                   "    why                    : %s" % q.get("why"), ""]
+            _accept.append({"n": len(_accept) + 1, "kind": "CUTAWAY",
+                            "band": None, "f0": _f0, "f1": _f1,
+                            "settle": min(_f0 + 8, max(_f0, (_f0 + _f1) // 2)),
+                            "ladder": "n/a", "from_s": float(_from_s or 0),
+                            "text": q.get("why")})
             _emitted["cutaway"] = _emitted.get("cutaway", 0) + 1
 
     _tr_rows = [q for q in rows if "transition" in (q.get("treatment") or [])]
@@ -1005,6 +1021,14 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
                   "that would require freeze frames\".)",
                   "    why                    : %s" % q.get("why"), ""]
             _zi += 1
+            _accept.append({"n": len(_accept) + 1, "kind": "TRANSITION",
+                            "band": None,
+                            "f0": int(round(float(q.get("src_t0") or 0) * fps)),
+                            "f1": int(round(float(q.get("src_t0") or 0) * fps)),
+                            "settle": int(round(float(q.get("src_t0") or 0)
+                                                * fps)),
+                            "ladder": "n/a", "name": _nm,
+                            "text": q.get("why")})
             _emitted["transition"] = _emitted.get("transition", 0) + 1
 
     # ── THE RECONCILIATION. Loud, by name, or the plan does not exist. ──────
@@ -1153,7 +1177,9 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
                                         str(_a.get("text") or "")[:48]))
             L.append("      judged at frame : %d  (%.2fs) — the settled frame, "
                      "not the entrance" % (_a["settle"], _a["settle"] / fps))
-            if _y:
+            if _a["kind"] in ("CUTAWAY", "TRANSITION", "SFX", "ZOOM"):
+                pass          # no band: these are not type on a layer
+            elif _y:
                 L.append("      stays inside    : the %s band, y %.0f-%.0f of "
                          "1920. Anything outside it is the defect."
                          % (_a["band"], _y[0], _y[1]))
@@ -1162,31 +1188,93 @@ def render(result_json, fps=FPS_DEFAULT, staged=False, allow_drop=False):
                          "offsetY %s — COMPUTED against the title's band and "
                          "the caption's, and the nearest position that clears "
                          "both." % _a["offsetY"])
-            L.append("      clear of a face : %s over frames %d-%d. The "
-                     "detector ran on this source at plan time; a graphic on "
-                     "the speaker's face is the defect this checks for."
-                     % ({"placed": "MEASURED clear",
-                         "repositioned": "MEASURED clear after the end was "
-                                         "contracted to fit",
-                         "computed offsetY": "MEASURED, and the offset was "
-                                             "computed from it"}.get(
-                             _a["ladder"], _a["ladder"]),
-                        _a["f0"], _a["f1"]))
-            _col = ", ".join("%s %d (%s band, frames %d-%d)"
-                             % (x["kind"], x["n"], x["band"], x["f0"], x["f1"])
-                             for x in _ov2) or "nothing"
-            L.append("      must not touch  : %s" % _col)
-            if _cap_band:
-                L.append("                        the caption track, y %.0f-%.0f "
-                         "— MEASURED from the component, not guessed"
-                         % (_cap_band[0] * 1920, _cap_band[1] * 1920))
-            elif _wants_captions:
-                L.append("                        the caption track — ITS BAND "
-                         "COULD NOT BE MEASURED HERE (%s), so judge it by eye "
-                         "at that frame and say so if you cannot"
-                         % (_cap_why or "no measurement available"))
-            L.append("      legible         : readable at that frame without "
-                     "leaning in — right size, not clipped by the frame edge.")
+            # A FACE CHECK AND A COLLISION LIST ARE LAYER QUESTIONS. A
+            # transition is a seam and a sound is not on screen at all; asking
+            # either "is it clear of the face" printed
+            # `clear of a face : n/a over frames 224-224` beside a sentence
+            # about graphics on faces. Same defect as the completeness gate
+            # demanding a font weight from a video item — a check written for
+            # text, applied to everything, twice.
+            _ON_A_LAYER = ("GRAPHIC", "CARD", "CUTAWAY")
+            if _a["kind"] in _ON_A_LAYER:
+                L.append("      clear of a face : %s over frames %d-%d. The "
+                         "detector ran on this source at plan time; a "
+                         "placement on the speaker's face is the defect this "
+                         "checks for."
+                         % ({"placed": "MEASURED clear",
+                             "repositioned": "MEASURED clear after the end was "
+                                             "contracted to fit",
+                             "computed offsetY": "MEASURED, and the offset was "
+                                                 "computed from it",
+                             "n/a": "NOT CHECKED — a cutaway REPLACES the "
+                                    "picture in its span, so a face under it "
+                                    "is covered by design"}.get(
+                                 _a["ladder"], _a["ladder"]),
+                            _a["f0"], _a["f1"]))
+                _col = ", ".join("%s %d (%s band, frames %d-%d)"
+                                 % (x["kind"], x["n"], x["band"] or "-",
+                                    x["f0"], x["f1"])
+                                 for x in _ov2 if x["kind"] in _ON_A_LAYER) \
+                    or "nothing"
+                L.append("      must not touch  : %s" % _col)
+                if _cap_band:
+                    L.append("                        the caption track, y "
+                             "%.0f-%.0f — MEASURED from the component, not "
+                             "guessed"
+                             % (_cap_band[0] * 1920, _cap_band[1] * 1920))
+                elif _wants_captions:
+                    L.append("                        the caption track — ITS "
+                             "BAND COULD NOT BE MEASURED HERE (%s), so judge "
+                             "it by eye at that frame and say so if you cannot"
+                             % (_cap_why or "no measurement available"))
+            # ── WHAT WRONG LOOKS LIKE, PER FAMILY ──────────────────────
+            # These lines were built for TEXT and every family got the text
+            # ones: "stays inside the band", "legible at that frame". A
+            # cutaway has no band and a sound has no frame, so the agent was
+            # left to infer what a wrong cutaway even IS — which is the 102
+            # seconds this whole section exists to remove, still being spent
+            # on four families out of six.
+            _k = _a["kind"]
+            if _k in ("GRAPHIC", "CARD"):
+                L.append("      legible         : readable at that frame "
+                         "without leaning in — right size, not clipped by the "
+                         "frame edge.")
+            elif _k == "CUTAWAY":
+                L.append("      covers, not replaces: it must sit ABOVE the "
+                         "base on its own track. If the speaker VANISHES for "
+                         "this span instead of being covered, it landed on V1 "
+                         "and that is the defect.")
+                L.append("      a different moment: source %.2fs, which is "
+                         "not where the timeline is. If the cutaway frame "
+                         "looks identical to the frame before it, it is "
+                         "showing the same moment and is not a cutaway."
+                         % _a.get("from_s", 0.0))
+                L.append("      lands back      : the base is visible again "
+                         "at frame %d. A cutaway that never ends is a cut."
+                         % _a["f1"])
+            elif _k == "TRANSITION":
+                L.append("      has a seam      : two items must MEET at "
+                         "frame %d on one track. Against a gap there is "
+                         "nothing to transition between and edit_item will "
+                         "refuse — which is the check, not a failure."
+                         % _a["f0"])
+                L.append("      is %-13s and no duration was passed. If a "
+                         "duration appears in your call, remove it: ChatCut "
+                         "sets it." % ("builtin:tr-%s" % _a.get("name", "?")))
+            elif _k == "SFX":
+                L.append("      audible         : the sound is heard at %d, "
+                         "above the speech under it. A sound you cannot hear "
+                         "in the render is not placed." % _a["f0"])
+                L.append("      on the anchor   : `fromFrame` is where the "
+                         "sound's PEAK lands, not where the file starts. "
+                         "edit_item shifts the item by the attack itself.")
+            elif _k == "ZOOM":
+                L.append("      moves           : the frame is larger at the "
+                         "peak than at frame %d. A zoom that reads identical "
+                         "to the untouched clip did not apply." % _a["f0"])
+                L.append("      keeps the face  : the push must not crop the "
+                         "speaker's head. magnification is 1.12 for that "
+                         "reason — do not raise it.")
             L.append("")
         # ── THE STOP CONDITION ──────────────────────────────────────────────
         # Nothing told the agent when it was finished, so "have I looked enough"
