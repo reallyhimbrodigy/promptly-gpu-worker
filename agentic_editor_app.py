@@ -87,6 +87,34 @@ _WATCHED_DIR = os.path.join(_HERE, "watched")
 # resolve is an UNCOVERED path that still prints a sha — the guard said so the
 # moment these two landed as expressions.
 _CC_REF_SRC = os.path.join(_HERE, "chatcut_reference.py")
+# ── THE MODE RULE, IN ONE FILE BECAUSE TWO SURFACES NOW READ IT ─────────────
+# The single ChatCut agent decides its own mode, so the Q1/Q2 rule has to
+# reach its prefix too. Copying it there would be two copies of a rule, which
+# is precisely how a rule ends up enforced on one of them — the same failure
+# `half_ruling_refusal` was extracted for when `beat_verdict` ran none of its
+# checks. So it lives in `mode_rule.txt` and both images mount it.
+#
+# ABSENT IS FATAL, AND DELIBERATELY. A missing mount would otherwise produce a
+# prompt with no mode rule and no error: the agent reads the brief, answers Q2
+# by judgement, and 43% of runs deliver an empty edit that passes every gate.
+# That failure took a day to find WITH the rule present; without it and with
+# nothing said, it is invisible.
+_MODE_RULE_SRC = os.path.join(_HERE, "mode_rule.txt")
+
+
+def _load_mode_rule():
+    for _p in (_MODE_RULE_SRC, "/root/mode_rule.txt", "/craft/mode_rule.txt"):
+        if os.path.isfile(_p):
+            return open(_p, encoding="utf-8").read()
+    raise RuntimeError(
+        "mode_rule.txt is ABSENT (looked in %s). It carries the Q1/Q2 rule, "
+        "and a run without it answers Q2 by judgement — which is the defect "
+        "that made 3 of 7 runs deliver an empty edit. Mount it."
+        % ", ".join((_MODE_RULE_SRC, "/root/mode_rule.txt",
+                     "/craft/mode_rule.txt")))
+
+
+_MODE_RULE = _load_mode_rule()
 _REF_PROJECT_SRC = os.path.join(_HERE, "reference_project.json")
 # THE MOUNT POINT IS NOT THE SOURCE PATH, AND SIX READERS ASSUMED IT WAS.
 # `add_local_dir(_KNOWLEDGE_DIR, "/knowledge")` puts the documents at
@@ -1312,13 +1340,15 @@ IMG = (modal.Image.debian_slim(python_version="3.11")
        # brief honestly reports that the agent is ruling without the examples.
        # Honest and useless is still useless.
        .add_local_file(_REFERENCE_INDEX_SRC, "/root/reference_index.json", copy=True)
-       # THE WATCHED ARTEFACT. Lines and frames both — the PNGs are read
-       # as bytes and sent as image blocks, so they have to be in the
-       # image like any other file the code opens.
-       .add_local_dir(_WATCHED_DIR, "/watched", copy=True)
+       # THE REFERENCE STANDARD, written from watching all ten. The /watched
+       # directory is NOT mounted any more: sixteen contact sheets at 45,871
+       # image tokens, for 38 sampled seconds of 426.
+       .add_local_file(os.path.join(_HERE, "reference_standard.md"),
+                       "/craft/reference_standard.md", copy=True)
        # THE REFERENCE LIBRARY AND ITS CLIENT. A file the code opens MUST be
        # mounted — this repo's own law, and `scrub_reference` opens both.
        .add_local_file(_CC_REF_SRC, "/root/chatcut_reference.py", copy=True)
+       .add_local_file(_MODE_RULE_SRC, "/root/mode_rule.txt", copy=True)
        .add_local_file(_REF_PROJECT_SRC, "/craft/reference_project.json",
                        copy=True))
 
@@ -3389,110 +3419,7 @@ TOOLS = [
 KNOWLEDGE_TOOLS = [{
     "name": "set_spec",
     "description": (
-        "FIRST CALL OF EVERY RUN. The user's request is the COMPLETE "
-        "SPECIFICATION of this job. Everything you place derives from it — "
-        "there is nothing else to satisfy.\n\n"
-        "Read the request and say what it specifies:\n"
-        "THE BRIEF SETS THE SCOPE ON EVERY RUN, not only on "
-        "re-edits. A brief that asks for LITTLE MUST PRODUCE LITTLE. Placing "
-        "more than was asked is a FAILURE, not generosity — it is the edit the "
-        "user did not request, delivered over the one they did. 'Just add "
-        "captions' is a targeted_change naming text, and an output carrying "
-        "four zooms has failed it however good the zooms are.\n\n"
-        "PICK THE MODE BY READING, NOT BY WEIGHING. Two questions, asked of "
-        "the brief, in order. This is a reading — it has an answer — and it "
-        "should take you seconds:\n"
-        "  Q1. Does the brief NAME a change? ('add zooms', 'burn captions', "
-        "'remove the filler', 'make the text bigger', 'cut it down'.) Every "
-        "one it names goes in `families`. These are GUARANTEED — the edit must "
-        "deliver them.\n"
-        "  Q2. Does the brief carry VIBE language? ANSWER THIS BY MATCHING, "
-        "NOT BY INTERPRETING. If any of these appears anywhere in the brief, "
-        "in any form, Q2 IS YES:\n"
-        "        punchy  snappy  tight/tighter  clean  crisp  slick  polished\n"
-        "        cinematic  professional  premium  dynamic  energetic  hype\n"
-        "        engaging  scroll-stopping  viral  like a <something>\n"
-        "        'more energy'  'make it pop'  'make it good'  'make it better'\n"
-        "      The list is not exhaustive and a word not on it can still be a "
-        "vibe — but a word ON it is NEVER not one. Do not reason about whether "
-        "'punchy vertical short' is really asking for a vibe or just "
-        "describing the format. It is on the list. Q2 is yes.\n\n"
-        "  WHY THIS ONE IS A MATCH AND NOT A JUDGEMENT, measured 2026-09-15: "
-        "three of seven runs on the brief 'Cut this into a punchy vertical "
-        "short. Remove silence and filler. Keep the meaning intact. Burn "
-        "readable captions.' answered Q2 NO and wrote, verbatim: 'Names cut "
-        "(remove silence/filler) and caption (burn readable captions); NO VIBE "
-        "LANGUAGE, so scope is limited to those two families only.' Every one "
-        "of those runs then ruled `none` on every beat and delivered an EMPTY "
-        "EDIT — correctly, given that scope. The word 'punchy' was in the "
-        "brief, is listed above as a vibe word, and appears in this rule's own "
-        "worked example. More prose did not fix it; reading it as a lookup "
-        "does.\n\n"
-        "  AND THE TWO MISTAKES DO NOT COST THE SAME. Call Q2 wrongly YES and "
-        "you deliver the named families plus whatever the beats deserved — the "
-        "guarantees still hold and a fidelity note records the extras. Call it "
-        "wrongly NO and you deliver NOTHING: every beat rules `none`, the user "
-        "gets their footage back with captions on it, and every gate passes. "
-        "An under-scoped edit is a total failure wearing a clean report. When "
-        "the reading is genuinely close, it is BOTH.\n\n"
-        "Then the mode falls out:\n"
-        "  Q1 yes, Q2 no   -> targeted_change, families = what it named, and "
-        "quote the brief in `existing_edit_quote`. The named things, nothing "
-        "else.\n"
-        "  Q1 no,  Q2 yes  -> full_edit, no families. The vibe is the whole "
-        "spec.\n"
-        "  BOTH yes        -> full_edit WITH families, and quote the brief. "
-        "The named families are guaranteed AND the vibe adds whatever the "
-        "beats deserve. This is the commonest real brief and it used to have "
-        "nowhere to go: forced to targeted_change it delivered the named "
-        "things and threw the punch away; forced to bare full_edit nothing "
-        "could check the things they actually asked for.\n"
-        "  NEITHER         -> it is a question, or it needs footage you do not "
-        "have. Say which.\n\n"
-        "Do not agonise over the boundary. If a word could be either, it is a "
-        "vibe AND a named change and the answer is BOTH — that branch exists "
-        "precisely so the tie does not need breaking. `targeted_change` is for "
-        "a brief that names changes and carries NO vibe word at all: 'add "
-        "captions', 'remove the filler', 'make the text bigger'. If you are "
-        "about to choose it on a brief with an adjective in it, re-read the "
-        "Q2 list first.\n\n"
-        "  full_edit       — the request describes a VIBE ('punchy and direct', "
-        "'clean and professional', 'like a movie trailer'). The vibe is the "
-        "spec: derive the whole edit from it. DENSITY IS NOT YOUR DECISION — "
-        "there is no rate to set. Rule each beat on its own merits and the "
-        "count is whatever the beats deserved.\n"
-        "                    A VIBE WORD AND NAMED CHANGES IS STILL full_edit, "
-        "and you LIST THE NAMED ONES IN `families`. 'Cut this into a punchy "
-        "vertical short, remove filler, burn readable captions' is a vibe "
-        "(punchy) plus two named changes (cut, caption): mode full_edit, "
-        "families ['cut','caption'], and quote the brief in "
-        "`existing_edit_quote`. On a full_edit those families are GUARANTEES, "
-        "not a ceiling — they MUST be delivered, and the vibe is free to add "
-        "whatever else the beats deserve. Calling that targeted_change "
-        "delivers the two named things and nothing else, which throws the "
-        "punch away; calling it full_edit with no families leaves nothing able "
-        "to check the two things they actually asked for.\n"
-        "  targeted_change — the request names a specific change ('add zooms and "
-        "light transitions', 'make the captions bigger', 'shorten the intro'). "
-        "List the families it asks for. If they asked for zooms, the output has "
-        "zooms and is OTHERWISE UNCHANGED.\n"
-        "  question        — the user asked something. Answer it; edit nothing.\n"
-        "  unsupported     — the request needs footage that does not exist in "
-        "the upload. This editor works with what the user gave you: it cuts, "
-        "times, and adds text, cards, sound and zooms to THEIR footage. It "
-        "cannot generate a shot, fetch stock b-roll, or change what is in the "
-        "frame. Two classes:\n"
-        "      generate_footage — 'add a shot of a city', 'put some b-roll "
-        "over this', 'make a scene where...'\n"
-        "      change_in_frame  — 'remove the background', 'change my shirt', "
-        "'make it night', 'put me on a beach'\n"
-        "    Say so plainly and stop. Do NOT deliver a competent edit that "
-        "ignores what they asked for — that reads as the product not working. "
-        "No credit is charged. This is not a failure and not a refusal to try; "
-        "it is the honest shape of the tool.\n\n"
-        "Name what the request asks for, not what you could add. Anything you "
-        "did not derive from the request was not asked for, and what is not "
-        "asked for is not built."),
+        _MODE_RULE),
     "input_schema": {
         "type": "object",
         "properties": {
@@ -4673,7 +4600,8 @@ def split_beat_text(beat, t, words):
 # re-checks. When a rate is missing the cost is ABSENT — never zero, never
 # partial.
 _MODEL_USD_PER_MTOK = {
-    # in, out. cache_write is 1.25x input and cache_read 0.1x input.
+    # in, out. cache_write and cache_read multipliers are below —
+    # CACHE_WRITE IS 2.00x, NOT 1.25x, measured on this lane's own CLI path.
     # SOURCE: this file, line ~3487 — "Haiku's confirmed $1/$5 per MTok with
     # cache_write 1.25x and cache_read 0.1x", written against MEASURED spend.
     "claude-haiku-4-5": {"in": 1.00, "out": 5.00,
@@ -4682,7 +4610,23 @@ _MODEL_USD_PER_MTOK = {
     "claude-sonnet-5": {"in": 3.00, "out": 15.00,
                         "src": "build_reference_records.py:52, 2026-08"},
 }
-_CACHE_WRITE_MULT, _CACHE_READ_MULT = 1.25, 0.10
+# MEASURED 2026-09-16, NOT INHERITED. This read 1.25 — the FIVE-MINUTE cache
+# write rate — and every cached-prefix figure this lane has produced was
+# therefore 60% light on the write.
+#
+# The claude CLI writes to the ONE-HOUR cache. Measured directly with
+# `--output-format json`, seeding a session with a real document and resuming
+# it:
+#     seed    cache_creation_input_tokens 65,099   ephemeral_1h 65,099
+#                                                  ephemeral_5m 0
+#     resume  cache_read_input_tokens     65,099   <- the history IS cached,
+#             cache_creation_input_tokens  5,112      only the delta is written
+#
+# Anthropic prices the 1h write at 2.00x input and the 5m write at 1.25x, so
+# this path is 2.00x. A caller that sets a 5-minute cache_control would be
+# 1.25x — if one ever exists here, this constant becomes a per-TTL lookup
+# rather than being quietly halved back.
+_CACHE_WRITE_MULT, _CACHE_READ_MULT = 2.00, 0.10
 # SOURCE: query_recovery_metrics_app.py:19-20, which carries the caveat this
 # inherits verbatim — THE MODAL DASHBOARD IS AUTHORITATIVE, this is a computed
 # estimate from the container's shape.
@@ -5964,7 +5908,12 @@ def sfx_start_s(attack_ms, at_s):
 # the corpus, it had nothing to describe.
 #
 # PRICED BEFORE BUILDING (Rule 6), against measured spend at Haiku's confirmed
-# $1/$5 per MTok with cache_write 1.25x and cache_read 0.1x:
+# $1/$5 per MTok. NOTE, 2026-09-16: the figures below were computed with a
+# cache_write of 1.25x, which is the FIVE-MINUTE rate. The CLI writes to the
+# ONE-HOUR cache at 2.00x, so every write term here is 60% light. The
+# CONCLUSION (frames inline are cheap relative to the run) survives; the
+# absolute numbers do not, and are left as written rather than silently
+# re-stated, because the wrong figure is the evidence that this class recurs.
 #   frames inline in the editorial loop   +$0.0097 on a $0.0460 run  (+21%)
 #   ONE batched caption call, text in     +$0.0091                   (+20%)
 # A wash on cost. B wins on contract fit — its output is TEXT going into the
@@ -9495,8 +9444,17 @@ def _reference_block(our_beats, k=2):
 _RULING_TIME_DOCS = ("02_intent_standard.md",
                      "09_seam_treatments_transitions_tight_.md",
                      "13_placement_findings.md",
-                     "14_card_text_placement_rules.md",
-                     "16_craft_the_standard.md")
+                     "14_card_text_placement_rules.md")
+# 16_craft_the_standard.md IS NO LONGER IN THAT TUPLE EITHER. Zac's ruling,
+# 2026-09-16, cutting it alongside the Gemini artefact: both were PROSE ABOUT
+# the references — one model's reading, handed on. What replaces them is
+# `reference_standard.md`, written from watching all ten at 2fps through
+# inspect_asset (852 samples against the old artefact's 38). 17 went on
+# 2026-09-15 for the same reason a day earlier.
+#
+# Both stay on disk. A document removed from the prefix is not a document that
+# stopped being true — it is one whose claims are now made by something that
+# looked at the footage.
 # 17_craft_the_wider_field.md IS NOT IN THAT TUPLE. Zac's ruling, 2026-09-15:
 # "drop the Apify document — other people's videos described in prose is the
 # weakest thing in there." MEASURED, not estimated: the block falls 7,356 ->
@@ -9574,129 +9532,36 @@ def ruling_time_knowledge(dirs=None, docs=None):
 # EVERY FRAME ON THESE SHEETS PASSED A GATE. build_watched_sheet.py puts each
 # tile back in front of a reader with its own line and asks whether the frame
 # shows what the line says; only `yes` ships. A drifting timestamp does not
-# error, it produces a confident caption under the wrong shot — which would
-# then teach the opposite of what it says, on every turn, from inside the
-# cache.
-_WATCHED_DIRS = ("/watched", _WATCHED_DIR)
-
-
-def _watched_path(*parts):
-    for _d in _WATCHED_DIRS:
-        _p = os.path.join(_d, *parts)
-        if os.path.exists(_p):
-            return _p
-    return None
-
-
-# WHAT THE REFERENCES ARE, SAID ONCE, PLAINLY, WHERE THE PLANNER READS IT.
+# ── THE GEMINI WATCHED ARTEFACT IS GONE FROM THIS PATH ──────────────────────
+# Zac's ruling, 2026-09-16: the watched lines and the sixteen strips come out.
+# They were 45,871 image tokens plus 6,487 of prose, for 38 sampled moments of
+# 426 seconds, described by a model that watched once. `reference_standard.md`
+# replaces them, written from 852 samples looked at directly.
 #
-# Zac, 2026-09-15: "Not moments with reasons — the rubric. These are finished
-# edits at the standard every output is held to; the density, the placement and
-# the restraint are the bar." It is a one-line framing gap and it may be why
-# the copy comes out generic: the sheet said "this is what an editor did at a
-# specific moment", which reads as INTERESTING REFERENCE. Nothing said it was
-# the LEVEL. An agent shown ten good edits and not told they are the bar will
-# produce something adjacent to them and call it done.
-#
-# NO NUMBERS IN HERE, DELIBERATELY. This repo's standing law is that the
-# density rates GRADE and never instruct — they must never reach the agent as a
-# target or a floor, and one sentence describing a rate survived a careful
-# removal precisely because prose about a rate looks harmless. Saying the ten
-# ARE the bar does not require quoting one: the sheets show how much these
-# videos place, where, and what they leave alone. The bar is visible in them.
-_REFERENCE_RUBRIC = (
-    "THE TEN BELOW ARE THE STANDARD. Not inspiration, not a mood board, not a "
-    "library to browse — they are FINISHED EDITS at the level every output of "
-    "this pipeline is held to, chosen by the person whose product this is.\n"
-    "\n"
-    "Your edit is judged against them. Three things in particular, and they "
-    "are all visible in the frames:\n"
-    "  HOW MUCH THEY PLACE — these videos are not quiet. Look at how often "
-    "something arrives on screen, and how rarely a beat is left bare by "
-    "accident.\n"
-    "  WHERE IT SITS — the band, the size, the relationship to the speaker's "
-    "face and to the words already burned into the frame.\n"
-    "  WHAT THEY LEAVE ALONE — the restraint moments are not gaps. Every one "
-    "of them is a place a competent editor would have reached for something "
-    "and this one did not, ON PURPOSE, and the video is better for it.\n"
-    "\n"
-    "An edit that is quieter than these is under the bar, not tasteful. An "
-    "edit that places something everywhere is not at the bar either — the "
-    "restraint is half of what you are looking at. Rule against what these "
-    "actually do, not against what a cautious editor would do.\n")
+# `watched_reference.py` and `watched/` STAY ON DISK — removed from the prefix
+# is not deleted, the same treatment 16_craft and 17_craft got, so the artefact
+# can be reconsidered rather than reconstructed. What goes is the CODE PATH:
+# the import, the two wrappers and the image mount, because a reader nobody
+# calls is dead weight that reads as live.
 
 
-def watched_moments():
-    """The rubric, then the glanceable lines. Absence is SPOKEN, never omitted.
+def reference_standard():
+    """What Claude wrote from watching all ten through inspect_asset.
 
-    The RUBRIC leads because it changes how everything under it is read: the
-    same sheet is either a set of examples or the bar, and only one of those
-    makes an agent compare its own output against them.
+    ABSENCE IS SPOKEN, never an empty string: a prefix that quietly lost its
+    standard reads as an agent editing generically, with nothing anywhere
+    saying why.
     """
-    if not prefix_material_enabled("watched_moments"):
-        return ("THE TEN, AT THE MOMENTS THAT MATTER: REMOVED for this run "
-                "(PROMPTLY_DISABLE_WATCHED_MOMENTS=1) — a deliberate removal, "
-                "not a missing artefact.")
-    _p = _watched_path("SHEET.md")
-    if not _p:
-        return ("THE TEN, AT THE MOMENTS THAT MATTER: UNAVAILABLE — no "
-                "SHEET.md under %s. You are ruling without the examples."
-                % " or ".join(_WATCHED_DIRS))
-    try:
-        _t = open(_p, encoding="utf-8").read().strip()
-    except Exception as _e:                                       # noqa: BLE001
-        return ("THE TEN, AT THE MOMENTS THAT MATTER: UNREADABLE — %s: %s"
-                % (_p, _e))
-    if not _t:
-        return ("THE TEN, AT THE MOMENTS THAT MATTER: EMPTY — %s is a "
-                "zero-length file, which is not the same as no examples "
-                "existing." % _p)
-    return _REFERENCE_RUBRIC + "\n" + _t
-
-
-def watched_frames():
-    """(blocks, state). The sheets as Anthropic image blocks, in tile order.
-
-    Returns a STATE beside the blocks so the caller records ABSENT rather than
-    reporting an empty list as a successful zero — the class this lane has paid
-    for four times in one day.
-    """
-    import base64
-    import glob
-    if not prefix_material_enabled("watched_frames"):
-        return [], "REMOVED (PROMPTLY_DISABLE_WATCHED_FRAMES=1)"
-    _d = _watched_path("tiles")
-    if not _d:
-        return [], "ABSENT: no tiles/ under %s" % " or ".join(_WATCHED_DIRS)
-    # BOTH KINDS, AND THE STRIPS FIRST. A SHEET_ is single settled frames; a
-    # STRIP_ is rows of five frames through a change — a cut, a transition, a
-    # sound landing — which one settled frame cannot show. Globbing SHEET_*
-    # alone would have mounted the strips into the image and shown the agent
-    # none of them: a producer with no consumer, in the half of the artefact
-    # that exists because one frame was not enough.
-    _files = sorted(glob.glob(os.path.join(_d, "STRIP_*.png"))) + \
-        sorted(glob.glob(os.path.join(_d, "SHEET_*.png")))
-    _files = sorted(_files, key=lambda p: (os.path.basename(p)[:5],
-                                           int("".join(c for c in
-                                                       os.path.basename(p)
-                                                       if c.isdigit()) or 0)))
-    if not _files:
-        return [], "ABSENT: %s holds no SHEET_*.png or STRIP_*.png" % _d
-    _blocks = []
-    for _f in _files:
-        try:
-            _b = open(_f, "rb").read()
-        except Exception as _e:                                   # noqa: BLE001
-            return [], "FAILED: %s: %s" % (_f, _e)
-        if not _b:
-            return [], "FAILED: %s is zero bytes" % _f
-        _blocks.append({"type": "image",
-                        "source": {"type": "base64", "media_type": "image/png",
-                                   "data": base64.b64encode(_b).decode()}})
-    _ns = sum(1 for f in _files if os.path.basename(f).startswith("STRIP_"))
-    return _blocks, "MEASURED: %d sheet(s) (%d strip, %d frame), %d KB" % (
-        len(_files), _ns, len(_files) - _ns,
-        sum(os.path.getsize(f) for f in _files) // 1024)
+    for _p in ("/craft/reference_standard.md",
+               os.path.join(_HERE, "reference_standard.md")):
+        if os.path.isfile(_p):
+            try:
+                return open(_p, encoding="utf-8").read()
+            except Exception as _e:                               # noqa: BLE001
+                return ("THE REFERENCE STANDARD: UNREADABLE (%s)" % _e)
+    return ("THE REFERENCE STANDARD: ABSENT — reference_standard.md is not "
+            "mounted. You are ruling without the bar this output is graded "
+            "against.")
 
 
 # ── REMOVAL SWITCHES FOR THE PREFIX MATERIAL ────────────────────────────────
@@ -16869,11 +16734,11 @@ def edit(source_key: str, brief: str,
                 # the one thing marked cache_control — written once,
                 # read on every turn after.
                 + "\n\n" + ruling_time_knowledge()
-                # THE MOMENTS GO LAST, immediately before the frames that show
-                # them. The prose above says what the ten do; these say what
-                # was done at a specific second, and the sheet numbers point at
-                # the pictures in the first user message.
-                + "\n\n" + watched_moments())
+                # THE GEMINI MOMENTS ARE GONE, and so are the sheets they
+                # pointed at. They were 38 sampled seconds of 426, described by
+                # a model that watched once; `reference_standard.md` is written
+                # from 852 samples of the same footage, looked at directly.
+                + "\n\n" + reference_standard())
     _PLAN_ONLY_NOTE = (
         "\n\nTHIS RUN IS PLAN-ONLY, AND IT CHANGES YOUR LAST STEP.\n"
         "`execute_plan` records the cut and the caption choice and STOPS — no "
@@ -17056,13 +16921,13 @@ def edit(source_key: str, brief: str,
     # recorded and PRINTED — an artefact that silently failed to mount would
     # otherwise look identical to one that was deliberately removed, and this
     # lane has shipped nine features dark on exactly that.
-    _wf_blocks, _wf_state = watched_frames()
-    led["watched_frames"] = _wf_state
-    led["watched_sheet_chars"] = len(watched_moments())
-    print("  WATCHED ARTEFACT  : %s | sheet %d chars"
-          % (_wf_state, led["watched_sheet_chars"]))
-    msgs = [{"role": "user",
-             "content": _wf_blocks + [{"type": "text", "text": user}]}]
+    # NO IMAGE BLOCKS ANY MORE. The sixteen contact sheets were 45,871 image
+    # tokens; the reading that replaces them is text, and the agent can open
+    # any reference itself with inspect_asset when it wants to look at one.
+    led["reference_standard_chars"] = len(reference_standard())
+    print("  REFERENCE STANDARD: %d chars (sheets removed)"
+          % led["reference_standard_chars"])
+    msgs = [{"role": "user", "content": [{"type": "text", "text": user}]}]
     final_text = ""
     # Set by set_spec when the request needs footage that does not exist. Read
     # at the bottom of the turn loop to stop the run. Initialised HERE, not at

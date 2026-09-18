@@ -10,6 +10,7 @@
   "red_proof_caption_signal",
   "red_proof_card_derived",
   "red_proof_card_props",
+  "red_proof_chatcut_schema",
   "red_proof_claim_index_retired",
   "red_proof_counters_can_grow",
   "red_proof_cutaway_across_sources",
@@ -17,6 +18,7 @@
   "red_proof_durable_plan",
   "red_proof_edit_quality",
   "red_proof_encode_threads_pinned",
+  "red_proof_face_clearance",
   "red_proof_flag_never_guesses",
   "red_proof_judge_placements",
   "red_proof_knowledge_reach",
@@ -35,9 +37,12 @@
   "red_proof_ruling_time_knowledge",
   "red_proof_run_cost",
   "red_proof_source_duration_state",
+  "red_proof_the_machine_holds",
+  "red_proof_the_watch_is_resumed",
   "red_proof_tree_parses",
   "red_proof_truncated_lists",
   "red_proof_visual_vocabulary",
-  "red_proof_zoom_unmeasured"
+  "red_proof_zoom_unmeasured",
+  "red_proof_no_retired_vocabulary"
  ]
 }

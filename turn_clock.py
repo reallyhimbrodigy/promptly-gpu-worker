@@ -96,8 +96,35 @@ def cpu_quota():
         return "ABSENT", None
 
 
+def _mem_bytes():
+    """(state, current_bytes) for THIS CONTAINER, from its own cgroup.
+
+    NOT psutil and NOT os — the question is what the CONTAINER is using, and
+    an observable must be computed on the side of the boundary it describes.
+    cgroup v2 first, then v1, then ABSENT with the paths named: a memory
+    figure that silently fell back to the host is the defect this lane has
+    already paid for on cpu_count.
+    """
+    for _p in ("/sys/fs/cgroup/memory.current",
+               "/sys/fs/cgroup/memory/memory.usage_in_bytes"):
+        try:
+            with open(_p, encoding="utf-8") as fh:
+                return "MEASURED", int(fh.read().strip())
+        except Exception:                                         # noqa: BLE001
+            continue
+    return "ABSENT", 0
+
+
 class CpuSampler(threading.Thread):
-    """Samples container CPU on a fixed interval so a gap can be attributed."""
+    """Samples container CPU AND MEMORY so a gap can be attributed and the
+    container can be SIZED.
+
+    RSS WAS NOT SAMPLED AND THE CONTAINER IS SIZED BY GUESS BECAUSE OF IT.
+    Measured on run-1789522875: 0.146 cores mean against 16.125 given — 0.9%
+    — with zero throttling, because the container spends its wall WAITING on
+    the model and on ChatCut. The CPU side of that was recorded; the memory
+    side was not, so half the sizing question had no number at all.
+    """
 
     def __init__(self, t0, every=0.25):
         super().__init__(daemon=True)
@@ -106,6 +133,8 @@ class CpuSampler(threading.Thread):
         self._lastthr = self._thr0
         self.quota_state, self.quota = cpu_quota()
         self.nproc = os.cpu_count()
+        self.mem_state, self.mem_peak = _mem_bytes()
+        self.mem_rows = []
 
     def run(self):
         while not self._stop:
@@ -120,6 +149,11 @@ class CpuSampler(threading.Thread):
                               round((now - self._last) / 1e6 / self.every, 3),
                               round((thr - self._lastthr) / 1e6, 4)))
             self._last, self._lastthr = now, thr
+            _ms, _mb = _mem_bytes()
+            if _ms == "MEASURED":
+                self.mem_rows.append((round(t, 3), _mb))
+                if _mb > self.mem_peak:
+                    self.mem_peak = _mb
 
     def stop(self):
         self._stop = True
@@ -152,6 +186,21 @@ def run_timed(cmd, cwd, stream_path, timing_path, timeout, env=None,
                          stdin=subprocess.PIPE if stdin_first else None,
                          text=True, bufsize=1, env=_env)
     killed = False
+    # A TIMEOUT THAT ONLY TICKS WHEN OUTPUT ARRIVES IS NOT A TIMEOUT.
+    #
+    # The deadline below was checked INSIDE `for line in p.stdout`, so it could
+    # only fire on a line. A child that goes SILENT — the exact failure the
+    # timeout exists for — blocks that loop forever and the check never runs.
+    # MEASURED: a 5-second timeout was still running at 30 seconds against a
+    # child that printed once and slept. The run then burns to the Modal
+    # container timeout instead, and `killed` comes back False, so the record
+    # says the agent finished rather than that it hung.
+    #
+    # It matters more now than it did: the single agent's review pass fires on
+    # the agent writing /work/DONE, so "waiting for something that never
+    # comes" is a reachable state rather than a theoretical one.
+    _killed_by_watchdog = [False]
+    _finished = [False]
     _stdin_open = [bool(stdin_first)]
     _io_lock = threading.Lock()
 
@@ -188,13 +237,50 @@ def run_timed(cmd, cwd, stream_path, timing_path, timeout, env=None,
                 except Exception:                                 # noqa: BLE001
                     pass
 
+    # ON A THREAD, AND THE ROUTE TO THAT IS WORTH KEEPING because I got it
+    # wrong in both directions before measuring the right thing.
+    #
+    # It was synchronous, which was harmless while the first message fitted in
+    # the 64K pipe buffer. The single agent's first message carries the ten
+    # reference sheets — 27.6 MB — so the parent now blocks here until the
+    # child has read it. Whether that deadlocks depends ENTIRELY on what the
+    # child does first:
+    #
+    #   child reads its stdin line first   28 MB write returns in 0.02s, all
+    #                                      301 lines arrive, exit 0
+    #   child writes before it reads       THE WRITE BLOCKS. The child is
+    #                                      blocked writing stdout at 64K, we
+    #                                      are blocked writing stdin, and
+    #                                      NEITHER DRAIN HAS STARTED YET —
+    #                                      the stderr drain and the deadline
+    #                                      watchdog are both started AFTER
+    #                                      this. Measured: a 10-second timeout
+    #                                      had not returned at 60 seconds.
+    #
+    # The second case is unrecoverable rather than slow: no error, no output,
+    # and not even the watchdog is alive to kill it. Which case the real CLI
+    # is has not been measured, so this takes the side where being wrong is
+    # survivable.
+    #
+    # It takes the SAME LOCK as `_send`, because a background render can send
+    # a message while this write is in flight and two threads interleaving
+    # JSON on one stdin corrupts both. The watchdog takes no lock, so it can
+    # still kill a run whose write is stuck.
     if stdin_first:
-        try:
-            p.stdin.write(stdin_first if stdin_first.endswith("\n")
-                          else stdin_first + "\n")
-            p.stdin.flush()
-        except Exception:                                         # noqa: BLE001
+        def _write_first():
+            with _io_lock:
+                if not _stdin_open[0]:
+                    return
+                try:
+                    p.stdin.write(stdin_first if stdin_first.endswith("\n")
+                                  else stdin_first + "\n")
+                    p.stdin.flush()
+                    return
+                except Exception:                                 # noqa: BLE001
+                    pass
             _close_stdin()
+
+        threading.Thread(target=_write_first, daemon=True).start()
 
     # DRAIN STDERR CONCURRENTLY OR THE RUN CAN DEADLOCK. With stderr=PIPE and
     # nobody reading it, a chatty child fills the 64K pipe buffer and blocks on
@@ -213,6 +299,36 @@ def run_timed(cmd, cwd, stream_path, timing_path, timeout, env=None,
     _et = threading.Thread(target=_drain, daemon=True)
     _et.start()
 
+    def _watchdog():
+        """Kill on the deadline whether or not anything is being printed."""
+        while not _finished[0]:
+            if time.monotonic() - t0 > timeout:
+                _killed_by_watchdog[0] = True
+                try:
+                    p.kill()
+                except Exception:                                 # noqa: BLE001
+                    pass
+                return
+            time.sleep(0.5)
+
+    threading.Thread(target=_watchdog, daemon=True).start()
+
+    # A KILL THE DRIVER CAN CALL. `_close_stdin` only stops the NEXT message;
+    # the turn already in progress runs to completion, and a turn can be 28
+    # tool calls. Measured on run 9: the spend ceiling closed stdin at
+    # assistant event 10 with 2.57M read, and the agent read another 10M
+    # across 28 more events before its turn ended — $11.81 on a run the
+    # ceiling had "stopped". A ceiling that closes bounds messages; one that
+    # kills bounds spend.
+    _killed_by_driver = [None]
+
+    def _kill(why="driver"):
+        _killed_by_driver[0] = why
+        try:
+            p.kill()
+        except Exception:                                         # noqa: BLE001
+            pass
+
     with open(stream_path, "w", encoding="utf-8") as raw:
         for line in p.stdout:
             t = round(time.monotonic() - t0, 4)
@@ -230,7 +346,10 @@ def run_timed(cmd, cwd, stream_path, timing_path, timeout, env=None,
                 continue
             if on_event is not None:
                 try:
-                    on_event(ev, _send, _close_stdin)
+                    try:
+                        on_event(ev, _send, _close_stdin, _kill)
+                    except TypeError:
+                        on_event(ev, _send, _close_stdin)
                 except Exception:                                 # noqa: BLE001
                     # A DRIVER FAULT MUST NOT HANG THE RUN. If the injection
                     # raises, stop driving and let the agent finish on its own
@@ -249,8 +368,18 @@ def run_timed(cmd, cwd, stream_path, timing_path, timeout, env=None,
                 elif inner.get("type") in ("content_block_delta",
                                            "content_block_stop"):
                     rec["idx"] = inner.get("index")
+            elif ev.get("type") == "result":
+                # THE CLI'S OWN BILL. One event, one total; the authority every
+                # per-event sum below is reconciled against.
+                rec["result_usage"] = ev.get("usage")
+                rec["result_cost_usd"] = ev.get("total_cost_usd")
             elif ev.get("type") == "assistant":
                 blocks = (ev.get("message") or {}).get("content") or []
+                # ONE ASSISTANT EVENT PER CONTENT BLOCK, EACH REPEATING THE
+                # MESSAGE'S USAGE (measured locally 2026-09-17: a thinking +
+                # tool_use call arrived as two events, both write=60999). The
+                # message id is what makes a sum count a call once.
+                rec["msg_id"] = (ev.get("message") or {}).get("id")
                 rec["tools"] = [b.get("name") for b in blocks
                                 if b.get("type") == "tool_use"]
                 # A `Bash: sleep N` is the agent parking the loop ON PURPOSE and
@@ -265,6 +394,21 @@ def run_timed(cmd, cwd, stream_path, timing_path, timeout, env=None,
                               if b.get("type") == "tool_use"]
                 u = (ev.get("message") or {}).get("usage") or {}
                 rec["out_tok"] = u.get("output_tokens")
+                # THE INPUT SIDE, WHICH THIS HAS NEVER RECORDED. Only
+                # output_tokens was captured, so the ChatCut path has never
+                # measured what its own PREFIX costs — and the question of
+                # whether a large cached prefix is affordable is exactly a
+                # cache_read question. Without these three fields the answer
+                # can only ever be arithmetic.
+                #
+                # They also settle a question arithmetic cannot: whether a
+                # RESUMED session's history is cache_control'd by the CLI. If
+                # it is, the history is cache_write once then cache_read at
+                # 0.1x; if it is not, it is full input price on EVERY turn,
+                # which is roughly a 30x difference on a 129,000-token watch.
+                rec["in_tok"] = u.get("input_tokens")
+                rec["cache_write_tok"] = u.get("cache_creation_input_tokens")
+                rec["cache_read_tok"] = u.get("cache_read_input_tokens")
                 # THE PAYLOAD SIZE, not its content. 4,845 tool_use deltas is
                 # the volume; which CALL carries it was unattributable because
                 # the classifier truncates inputs at 110 chars — a denominator
@@ -278,13 +422,27 @@ def run_timed(cmd, cwd, stream_path, timing_path, timeout, env=None,
                                   if b.get("type") == "tool_result"]
             events.append(rec)
     rc = p.wait()
+    # STOP THE WATCHDOG, AND FOLD ITS VERDICT IN. A kill by the watchdog is a
+    # timeout exactly as much as a kill by the loop, and reporting only the
+    # loop's would say a hung run finished normally.
+    _finished[0] = True
+    killed = killed or _killed_by_watchdog[0] or bool(_killed_by_driver[0])
     _et.join(timeout=5)
     err = "".join(_err)[-4000:]
     cpu.stop()
     wall = round(time.monotonic() - t0, 3)
+    # WHO KILLED IT, NAMED. A run ended by the spend ceiling and one ended by
+    # the deadline look identical as `killed=True`; the reason is the
+    # difference between "we chose to stop" and "it hung".
+    _kill_reason = ("watchdog deadline" if _killed_by_watchdog[0]
+                    else _killed_by_driver[0] or None)
     with open(timing_path, "w", encoding="utf-8") as fh:
         json.dump({"wall": wall, "events": events,
+                   "killed": bool(killed), "kill_reason": _kill_reason,
                    "cpu_state": cpu.state, "cpu": cpu.rows,
+                   "mem_state": cpu.mem_state,
+                   "mem_peak_mb": round(cpu.mem_peak / 1048576.0, 1),
+                   "mem": cpu.mem_rows,
                    "quota_state": cpu.quota_state, "quota_cores": cpu.quota,
                    "os_cpu_count": cpu.nproc,
                    "throttled_total_s": round(
@@ -460,8 +618,49 @@ def budget(timing):
     # PER-TURN, RETURNED. Unused data is the same defect as unmeasured data.
     _pt = [{"n": _k + 1, "s": _d["s"], "blocks": _d["blocks"]}
            for _k, _d in enumerate(per_turn_block)]
+    # ONE ROW PER API CALL, in order, deduped by message id — the table the
+    # 624k question is answered from: which call wrote what.
+    _seen_ids, _calls = set(), []
+    for e in ev:
+        if e.get("type") != "assistant" or e.get("cache_read_tok") is None:
+            continue
+        _mid = e.get("msg_id")
+        if _mid and _mid in _seen_ids:
+            continue
+        _seen_ids.add(_mid)
+        _calls.append(e)
+    _usage_by_call = [{"n": i + 1, "msg_id": str(e.get("msg_id"))[:16],
+                       "tools": e.get("tools") or [],
+                       "read": e.get("cache_read_tok"),
+                       "write": e.get("cache_write_tok"),
+                       "in": e.get("in_tok"), "out": e.get("out_tok")}
+                      for i, e in enumerate(_calls)]
+    # ONE RESULT EVENT PER USER TURN — pass 1, rewatch 1, rewatch 2 — each
+    # carrying THAT turn's usage. final-arch-2's reader took the first and
+    # reported a three-turn run's bill as its first turn's ($2.36 of ~$8).
+    # The bill is the sum over all of them; the count says how many there were.
+    _results = [e for e in ev if e.get("type") == "result" and e.get("result_usage")]
+    _rsum = {}
+    for _r in _results:
+        for _k, _v in (_r.get("result_usage") or {}).items():
+            if isinstance(_v, (int, float)) and not isinstance(_v, bool):
+                _rsum[_k] = _rsum.get(_k, 0) + _v
+    _result = ({"result_usage": _rsum,
+                "result_cost_usd": sum((r.get("result_cost_usd") or 0) for r in _results),
+                "result_turns": len(_results)} if _results else None)
+
     return {
         "per_turn": _pt,
+        "usage_by_call": _usage_by_call,
+        "result_usage": (_result or {}).get("result_usage"),
+        "result_cost_usd": (_result or {}).get("result_cost_usd"),
+        "result_turns": (_result or {}).get("result_turns", 0),
+        # WHO STOPPED IT, IN THE RECORD. A run the ceiling killed, one the
+        # experiment stopped after its first batch, and one the deadline
+        # killed all read killed=True; the reason is the difference between
+        # chose-to-stop and hung, and the arm report has to say which.
+        "killed": bool(timing.get("killed")),
+        "kill_reason": timing.get("kill_reason"),
         "wall_s": wall,
         "mode": "PARTIAL_MESSAGES" if have_partials else
                 "COARSE (no deltas — queue, prefill and generation are ONE bucket)",
@@ -487,6 +686,19 @@ def budget(timing):
         # carry no usage block, so the sum silently covered a handful of turns.
         # Report the denominator beside it and let a thin sample say so.
         "output_tokens": {
+            # DEDUPED BY MESSAGE ID. The previous sums ran over every assistant
+            # event and over-counted every multi-block call by its block
+            # count — final-arch-1 read "2,725,573" over 10 events for 6
+            # calls. `_calls` keeps the first event of each message id.
+            "dedupe": "BY MESSAGE ID — one assistant event per content block "
+                      "repeats the message usage (measured 2026-09-17)",
+            "api_calls": len(_calls),
+            "in_sum": sum(e.get("in_tok") or 0 for e in _calls
+                          if e.get("in_tok") is not None),
+            "cache_write_sum": sum(e.get("cache_write_tok") or 0 for e in _calls
+                                   if e.get("cache_write_tok") is not None),
+            "cache_read_sum": sum(e.get("cache_read_tok") or 0 for e in _calls
+                                  if e.get("cache_read_tok") is not None),
             "sum": sum(e.get("out_tok") or 0 for e in ev
                        if e.get("type") == "assistant"),
             "from_events": sum(1 for e in ev if e.get("type") == "assistant"

@@ -64,7 +64,57 @@ fail = []
 MUST_MATCH = ("punchy", "clean", "cinematic", "professional", "tight")
 
 
-def legs(src=None, tree=None):
+RULE_PATH = os.path.join(HERE, "mode_rule.txt")
+RULE = open(RULE_PATH, encoding="utf-8").read()
+
+
+def _resolve_description(tree, rule):
+    """set_spec's description text — THROUGH ITS BINDING, not just as a literal.
+
+    THE RULE MOVED TO A FILE 2026-09-16, because the single ChatCut agent
+    decides its own mode and two copies of a rule is how a rule ends up
+    enforced on one of them. So the description is now the NAME `_MODE_RULE`,
+    bound at module scope from `mode_rule.txt`.
+
+    This leg used to read `ast.Constant` and fall back to `literal_eval`, which
+    on a Name raises — reporting "set_spec has no description" about a rule
+    that was perfectly present. One hop of indirection is still scope, and this
+    repo already has that rule; resolving through the binding is the fix, not
+    loosening the leg.
+    """
+    for d in ast.walk(tree):
+        if not isinstance(d, ast.Dict):
+            continue
+        ks = {k.value: v for k, v in zip(d.keys, d.values)
+              if isinstance(k, ast.Constant)}
+        nm = ks.get("name")
+        if not (isinstance(nm, ast.Constant) and nm.value == "set_spec"):
+            continue
+        ds = ks.get("description")
+        if isinstance(ds, ast.Constant):
+            return ds.value, "literal"
+        if isinstance(ds, ast.Name):
+            # the name must be bound at module scope, and bound to the LOADER —
+            # a name bound to "" would satisfy a looser check perfectly.
+            for n in tree.body:
+                if isinstance(n, ast.Assign) and any(
+                        isinstance(t, ast.Name) and t.id == ds.id
+                        for t in n.targets):
+                    if "_load_mode_rule" in ast.unparse(n.value):
+                        return rule, "file:%s" % ds.id
+                    return None, ("%s is bound to %s, not to the rule loader"
+                                  % (ds.id, ast.unparse(n.value)[:40]))
+            return None, "%s is never bound at module scope" % ds.id
+        if ds is not None:
+            try:
+                return ast.literal_eval(ds), "expr"
+            except Exception:                                     # noqa: BLE001
+                return None, "description is an unevaluable %s" % type(ds).__name__
+    return None, "no set_spec in KNOWLEDGE_TOOLS"
+
+
+def legs(rule=None, src=None, tree=None):
+    rule = rule if rule is not None else RULE
     src = src if src is not None else SRC
     tree = tree if tree is not None else ast.parse(src)
     out = []
@@ -79,25 +129,10 @@ def legs(src=None, tree=None):
     # fire however wrong the source became: a check exercising a copy of the
     # thing it claims to test, which is the trap this repo hoists rules out of
     # dispatches to avoid.
-    _spec = ""
-    for _d in ast.walk(tree):
-        if not isinstance(_d, ast.Dict):
-            continue
-        _keys = {k.value: v for k, v in zip(_d.keys, _d.values)
-                 if isinstance(k, ast.Constant)}
-        _nm = _keys.get("name")
-        if isinstance(_nm, ast.Constant) and _nm.value == "set_spec":
-            _ds = _keys.get("description")
-            if isinstance(_ds, ast.Constant):
-                _spec = _ds.value
-            elif _ds is not None:
-                try:
-                    _spec = ast.literal_eval(_ds)
-                except Exception:                                 # noqa: BLE001
-                    _spec = ""
+    _spec, _how = _resolve_description(tree, rule)
     if not _spec:
-        out.append(("match", "set_spec has no description in KNOWLEDGE_TOOLS "
-                             "— the rule reaches no prompt"))
+        out.append(("match", "set_spec's description does not resolve to the "
+                             "rule — the rule reaches no prompt (%s)" % _how))
         return out
     if "ANSWER THIS BY MATCHING, NOT BY INTERPRETING" not in _spec:
         out.append(("match", "Q2 no longer says it is answered by MATCHING"))
@@ -157,35 +192,63 @@ for k, m in legs():
 
 # ── RED PROOF ───────────────────────────────────────────────────────────────
 red = 0
+# EACH MUTATION NAMES THE ARTEFACT IT EDITS. Three of these used to edit the
+# string literal in agentic_editor_app.py; the rule moved to mode_rule.txt on
+# 2026-09-16 and all three reported `anchor 0x` on the next run — the fifth
+# recorded way a mutation stops mutating, caught by the guard rather than by a
+# green tally, which is the only reason this file did not go on claiming 4/4.
 MUT = (
-    ("Q2 goes back to being a judgement", "match",
-     lambda s: s.replace('VIBE language? ANSWER THIS BY MATCHING, "',
-                         'VIBE language? Decide. "')),
-    ("the word that broke it is dropped from the list", "match",
-     lambda s: s.replace('"        punchy  snappy', '"        snappy')),
-    ("the asymmetry is removed", "asymmetry",
+    ("Q2 goes back to being a judgement", "match", "rule",
+     lambda s: s.replace("ANSWER THIS BY MATCHING, NOT BY INTERPRETING",
+                         "Decide.")),
+    ("the word that broke it is dropped from the list", "match", "rule",
+     lambda s: s.replace("        punchy  snappy", "        snappy")),
+    ("the asymmetry is removed", "asymmetry", "rule",
      lambda s: s.replace("AND THE TWO MISTAKES DO NOT COST THE SAME.",
                          "AND THE TWO MISTAKES ARE SYMMETRIC.")),
-    ("the spec stops being printed", "printed",
+    ("the counter-example is deleted", "evidence", "rule",
+     lambda s: s.replace("NO VIBE LANGUAGE", "no such language")),
+    ("the spec stops being printed", "printed", "src",
      lambda s: s.replace('print("  SPEC            : mode=%s families=%s\\n"',
                          'str("  SPEC            : mode=%s families=%s\\n"')),
 )
-for label, kind, mut in MUT:
-    m = mut(SRC)
-    if m == SRC:
-        print("  *** MUTATION DID NOT APPLY: %s (anchor 0x)" % label)
+for label, kind, which, mut in MUT:
+    base = RULE if which == "rule" else SRC
+    m = mut(base)
+    if m == base:
+        print("  *** MUTATION DID NOT APPLY: %s (anchor 0x, in the %s)"
+              % (label, which))
         red += 1
         continue
     try:
-        r = legs(m, ast.parse(m))
+        r = (legs(rule=m) if which == "rule"
+             else legs(src=m, tree=ast.parse(m)))
     except SyntaxError as e:
         print("  *** MUTANT DOES NOT PARSE: %s (%s)" % (label, e))
         red += 1
         continue
     hit = any(k == kind for k, _ in r)
-    print("    %-40s -> names %s: %s" % (label, kind, hit))
+    print("    %-46s -> names %s: %s" % (label, kind, hit))
     if not hit:
         red += 1
+
+# THE RULE MUST BE MOUNTED, OR IT REACHES NO CONTAINER. Moving the rule into a
+# file created a new way for it to go missing that no leg above can see: the
+# text is perfect, the resolver finds it, and the image does not carry it.
+for _app, _need in (("agentic_editor_app.py", "/root/mode_rule.txt"),
+                    ("chatcut_job_app.py", "/craft/mode_rule.txt")):
+    _src = open(os.path.join(HERE, _app), encoding="utf-8").read()
+    _mounted = any(
+        isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        and n.func.attr == "add_local_file"
+        and any(isinstance(a, ast.Constant) and a.value == _need
+                for a in n.args)
+        for n in ast.walk(ast.parse(_src)))
+    if not _mounted:
+        fail.append("[mount] %s does not mount mode_rule.txt at %s — the rule "
+                    "is a file now, and a file the code reads MUST be mounted "
+                    "or the container has no mode rule and says nothing"
+                    % (_app, _need))
 
 for m in fail:
     print("  *** " + m)

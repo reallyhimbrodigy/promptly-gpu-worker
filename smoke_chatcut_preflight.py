@@ -78,10 +78,8 @@ if fn is not None:
     # the agent" has been unproven ever since. Find the launch by what it IS —
     # the argv whose first element is the literal "claude" — not by the name of
     # whatever runs it.
-    agent_ln = [n.lineno for n in ast.walk(fn)
-                if isinstance(n, ast.List) and n.elts
-                and isinstance(n.elts[0], ast.Constant)
-                and n.elts[0].value == "claude"]
+    agent_ln = [n.lineno for n in ast.walk(fn) if isinstance(n, ast.Call)
+                and getattr(n.func, "id", "") == "run_three_turns"]   # the launch is the loop (2026-09-17)
     check("preflight is CALLED inside the job", bool(pre_ln))
     check("the agent is launched inside the job", bool(agent_ln))
     if pre_ln and agent_ln:

@@ -16,6 +16,13 @@ import sys
 
 SRC = open("chatcut_job_app.py", encoding="utf-8").read()
 
+def _joined(src):
+    """Adjacent string literals joined, so a sentence wrapped across source
+    lines reads as one sentence — and a mutation of the SOURCE still reaches
+    the leg (a leg over the imported VALUE could not go red by mutating text)."""
+    return re.sub(r'"\s*\n\s*"', "", src)
+
+
 LEGS = [
     ("the constant exists",
      lambda s: re.search(r"^TWO_TURN_LOOP = \(", s, re.M)),
@@ -39,30 +46,29 @@ LEGS = [
     # batching rule had not changed at all: the phrase it tested lived in a
     # different rule the whole time. It now accepts either spelling of the
     # thing it means.
-    ("pass 1 batches, and forbids placing one item at a time",
-     lambda s: (re.search(r"(TURN|PASS) 1", s)
-                and re.search(r"one (item )?at a time", s)
-                and re.search(r"BATCHES THE PLAN NAMES|SINGLE edit_item call"
-                              r"|ONE BATCH", s))),
+    ("turn 1 places everything in ONE edit_item call",
+     lambda s: re.search(r"TURN 1 — PLACE", s) and re.search(r"send ONE edit_item call carrying all", s)),
     # THIS ASSERTED A GAG THAT WAS DELIBERATELY REMOVED. It required "YOUR
     # TURN ENDS ... do not preview" — bounding how often the agent could LOOK,
     # which was a wall problem solved by taking away the thing that makes it an
     # editor. Not a reader keyed to wording this time: a check encoding a
     # DESIGN DECISION that was later reversed. That fails the same way and is
     # harder to catch, because the check was right when it was written.
-    ("the edit is SENT to pass 1 — a head start, not a ration",
-     lambda s: re.search(r"RENDERED AND SENT TO YOU", s)
-     and re.search(r"HEAD START", s)),
-    ("and the agent may look wherever, as often as it needs",
-     lambda s: re.search(r"SCRUB WHEREVER YOU WANT", s)
-     and re.search(r"[Nn]obody is counting", s)),
+    # RE-AIMED 2026-09-18 (rulings 2-4): frames are SENT between turns and the
+    # agent makes no discovery call of its own.
+    ("the composed frames are sent to the agent between turns",
+     lambda s: re.search(r"sends you the composed frames", s)
+     and re.search(r"TURN 2 — REVIEW", s)),
+    ("and the agent never fetches, inspects or previews on its own (ruling 4)",
+     lambda s: re.search(r"you never fetch, inspect or preview anything yourself", s)
+     and not re.search(r"SCRUB WHEREVER YOU WANT", s)),
     ("pass 2 is look-then-fix on the composed picture",
      lambda s: re.search(r"(TURN|PASS) 2", s)
      and "COMPOSED PICTURE" in s
      and re.search(r"ONE edit_item call", s)),
-    ("pass 3 is gated on a NAMED defect",
-     lambda s: re.search(r"(TURN|PASS) 3", s) and "UNJUSTIFIED" in s),
-    ("it is concatenated into the plan-path prompt",
+    ("turn 3 is export or ONE fix, a fourth only for what the fix broke, and no fifth",
+     lambda s: re.search(r"TURN 3 — CONFIRM", s) and "single word: export" in s and "there is no fifth" in s),
+    ("it is concatenated into the deciding prompt",
      lambda s: re.search(r"\+ TWO_TURN_LOOP\b", s)),
     ("the superseded one-revision prose is gone",
      lambda s: "ONE REVISION, AND ONLY ON WHAT YOU CAN SEE" not in s),
@@ -70,34 +76,31 @@ LEGS = [
 
 
 def run(s):
-    return [name for name, leg in LEGS if not leg(s)]
+    return [name for name, leg in LEGS if not leg(_joined(s))]
 
 
 if __name__ == "__main__":
     bad = run(SRC)
     for name, leg in LEGS:
-        print("  [%s] %s" % ("ok" if leg(SRC) else "FAIL", name))
+        print("  [%s] %s" % ("ok" if leg(_joined(SRC)) else "FAIL", name))
 
     # RED PROOF — each leg fails when the thing it checks is removed.
     print("\n  RED PROOF")
     reds = [
         ("constant deleted", SRC.replace("TWO_TURN_LOOP = (", "X_UNUSED = (")),
         ("not concatenated", SRC.replace("+ TWO_TURN_LOOP", "+ \"\"")),
-        ("turn 3 gate removed", SRC.replace("UNJUSTIFIED", "fine")),
+        ("turn 3 no longer ends on export", SRC.replace("single word: export", "single word: done")),
         # THE MUTATION MUST MATCH THE LEG. This deleted the old wording, which
         # the leg no longer reads — so the RED proof printed 0 red and the
         # batching leg was, for that moment, a check that could not fail.
         ("batching removed",
-         SRC.replace("one item at a time", "however you like")
-            .replace("one at a time", "however you like")),
+         SRC.replace("send ONE edit_item call carrying all", "send the calls you like for")),
         # The mutations that matter now are the HEAD START and the SCRUB
         # invitation — the turn-end gag they replaced is gone on purpose.
-        ("the head start removed",
-         SRC.replace("RENDERED AND SENT TO YOU", "yours to go and get")),
-        ("the scrub invitation removed",
-         SRC.replace("SCRUB WHEREVER YOU WANT", "get on with it")
-            .replace("Nobody is counting", "You get one look")
-            .replace("nobody is counting", "you get one look")),
+        ("the frames are no longer sent",
+         SRC.replace("sends you the composed frames", "leaves you to fetch the frames")),
+        ("the agent is invited to scrub again",
+         SRC.replace("you never fetch, ", "you may fetch, ")),
     ]
     red_ok = True
     for label, mutated in reds:

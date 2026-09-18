@@ -1,0 +1,18 @@
+{
+  "source": "BRIEF_CORPUS.md and minimal_briefs_harness.py — verbatim strings from production video_jobs.vibe_input (11,722 rows, 5,943 distinct briefs, 7,958 users, 2026-06-25..2026-09-12)",
+  "why_these": "Not invented. Every string below appears verbatim in a lane document that quotes the production request table. The clusters they cover are the large ones by USER: viral/unspecific 48.2%, zoom 17.7%, caption 13.0%, cut/trim 11.8%, negative constraint 4.2%.",
+  "briefs": [
+    {"text": "no problem", "cluster": "viral / unspecific"},
+    {"text": "just make it pop", "cluster": "viral / unspecific"},
+    {"text": "viral and engaging no captions in video", "cluster": "negative constraint"},
+    {"text": "only zooms", "cluster": "zoom"},
+    {"text": "add zooms. no text on screen or captions", "cluster": "negative constraint"},
+    {"text": "make it a viral engaging video with no captions on it", "cluster": "negative constraint"},
+    {"text": "only captions", "cluster": "caption"},
+    {"text": "dont change face", "cluster": "negative constraint"},
+    {"text": "just add captions", "cluster": "caption"},
+    {"text": "cut the part where I stumble", "cluster": "cut / trim"},
+    {"text": "just add visual zooms and transitions nothing else no trimming no cutting anything", "cluster": "negative constraint"},
+    {"text": "make the captions bigger", "cluster": "caption"}
+  ]
+}

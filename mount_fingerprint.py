@@ -56,6 +56,19 @@ def mounted_paths(app_path=APP):
             val = ast.literal_eval(node.args[0])
         except Exception:
             val = ns.get(getattr(node.args[0], "id", ""), None)
+        if val is None:
+            # AN INLINE os.path.join(...) IS ALSO A PATH. This resolved a
+            # literal and a module-level NAME and nothing else, so
+            # `add_local_file(os.path.join(_HERE, "x.py"), ...)` silently
+            # resolved to nothing — an UNCOVERED MOUNT, which is precisely the
+            # failure this module exists to make impossible, and it was the
+            # only form the app had not happened to use yet. Evaluated against
+            # the same namespace the assignments were exec'd into.
+            try:
+                val = eval(compile(ast.Expression(node.args[0]),   # noqa: S307
+                                   "<mounts>", "eval"), dict(ns))
+            except Exception:                                     # noqa: BLE001
+                val = None
         if isinstance(val, str):
             paths.append(val)
     # The app file itself is mounted by `modal run` as the entrypoint.

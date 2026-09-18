@@ -38,13 +38,25 @@ def check(label, cond, detail=""):
 
 
 # ── THE ARITHMETIC, AGAINST A HAND-COMPUTED FIGURE ──────────────────────────
-# Haiku at $1/$5 per MTok, cache_write 1.25x in, cache_read 0.1x in:
-#   1e6*1 + 1e6*5 + 1e6*1.25 + 1e6*0.10  =  $7.35 for a million of each
+# Haiku at $1/$5 per MTok, cache_write 2.00x in, cache_read 0.1x in:
+#   1e6*1 + 1e6*5 + 1e6*2.00 + 1e6*0.10  =  $8.10 for a million of each
+#
+# THE EXPECTATION MOVED BECAUSE THE RATE WAS WRONG, not because the code
+# changed. This read 7.35, computed with cache_write 1.25x — the FIVE-MINUTE
+# rate. Measured 2026-09-16: the claude CLI writes to the ONE-HOUR cache
+# (`ephemeral_1h_input_tokens`), which Anthropic prices at 2.00x. Every
+# cached-prefix figure this lane produced was 60% light on the write, and this
+# check was pinning the error in place — a hand-computed expectation is only
+# as good as the constant it was computed from.
 _T = {"claude-haiku-4-5": {"in": 1e6, "out": 1e6, "cache_write": 1e6,
                            "cache_read": 1e6}}
 _st, _usd, _d = A.model_usd(_T)
 check("the token arithmetic matches a hand-computed figure",
-      _st == "MEASURED" and abs(_usd - 7.35) < 1e-6, f"{_st} {_usd}")
+      _st == "MEASURED" and abs(_usd - 8.10) < 1e-6, f"{_st} {_usd}")
+check("the cache write multiplier is the ONE-HOUR rate",
+      abs(A._CACHE_WRITE_MULT - 2.00) < 1e-9,
+      "%.2f (1.25 is the 5-minute rate; this path writes ephemeral_1h)"
+      % A._CACHE_WRITE_MULT)
 # cpu=8, mem=16GiB: 8*0.0000375 + 16*0.00000667 = 0.00040672 per second
 check("the container rate matches a hand-computed figure",
       abs(A.container_usd_per_s(8, 16384) - 0.00040672) < 1e-9,

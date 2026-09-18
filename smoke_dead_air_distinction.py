@@ -19,10 +19,18 @@ import modal_stub                                                # noqa: E402
 modal_stub.install()
 import agentic_editor_app as A                                   # noqa: E402
 
-text = A.ruling_time_knowledge()
-i = text.find("THE STANDARD — HOW THE EXAMPLES")
-j = text.find("THE WIDER FIELD — WHAT OTHER PEOPLE")
-std = text[i:j if j > i else len(text)] if i >= 0 else ""
+# THE SOURCE MOVED, AND THE PROPERTY DID NOT. This read the STANDARD section
+# of 16_craft_the_standard.md, which Zac cut on 2026-09-16 along with the
+# Gemini artefact. The rule it defends — that a pre-speech beat with visible
+# content is SETUP and not dead air, so "trim all dead air" never stands
+# unqualified — is still load-bearing, and it now lives in
+# `reference_standard.md`, written from watching the ten.
+#
+# WHAT WAS LOST WITH 16, STATED RATHER THAN QUIETLY DROPPED: the AUDIO half of
+# the definition — "silence with NOTHING IN IT" — cannot be re-derived from
+# frames, and the replacement says so in its own text instead of implying
+# coverage it does not have. This leg therefore checks the VISIBLE half.
+std = A.reference_standard()
 
 fail = 0
 if not std:
@@ -32,13 +40,17 @@ else:
     low = std.lower()
     # The DEFINITION, not merely the phrase: dead air distinguished from what
     # a silence with content in it is.
-    if "dead air is silence with nothing in it" not in low:
-        print("  *** the standard does not DEFINE dead air as silence with "
-              "nothing in it")
+    if "silence with visible content in it is setup" not in low:
+        print("  *** the standard does not name a pre-speech beat with visible "
+              "content as SETUP")
         fail += 1
-    if "setup" not in low or "visible content" not in low:
-        print("  *** the standard does not name pre-speech visible content as "
-              "SETUP")
+    if "not dead air" not in low or "earns its time" not in low:
+        print("  *** the standard does not say the question is whether the "
+              "SHOT earns its time")
+        fail += 1
+    if "without sound" not in low:
+        print("  *** the standard does not state that the audio half of this "
+              "rule is absent — implied coverage it does not have")
         fail += 1
     # And the flat instruction must not be standing unqualified.
     import re

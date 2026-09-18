@@ -782,9 +782,23 @@ for _n2 in ast.walk(tree):
                if isinstance(k, ast.Constant)}
         if getattr(_kv.get("name"), "value", "") == "set_spec" \
                 and "description" in _kv:
-            _spec_desc = "".join(
-                c.value for c in ast.walk(_kv["description"])
-                if isinstance(c, ast.Constant) and isinstance(c.value, str))
+            # THROUGH THE BINDING. The rule moved into `mode_rule.txt` on
+            # 2026-09-16 so the single ChatCut agent could read the SAME copy
+            # — two copies of a rule is how a rule ends up enforced on one of
+            # them. The description is now the Name `_MODE_RULE`, and walking
+            # it for Constants yields NOTHING: this assembled 0 chars and the
+            # three legs below reported the Q1/Q2 procedure as missing from a
+            # prompt that carries it in full. One hop of indirection is still
+            # scope. The non-vacuity guard is what made it a finding instead
+            # of a silent pass, which is exactly what it is there for.
+            _d2 = _kv["description"]
+            if isinstance(_d2, ast.Name):
+                _spec_desc = (pathlib.Path(__file__).parent
+                              / "mode_rule.txt").read_text(encoding="utf-8")
+            else:
+                _spec_desc = "".join(
+                    c.value for c in ast.walk(_d2)
+                    if isinstance(c, ast.Constant) and isinstance(c.value, str))
 check("the set_spec description could be assembled (non-vacuity)",
       len(_spec_desc) > 400, f"{len(_spec_desc)} chars")
 check("set_spec tells the agent a small brief must produce a small edit",

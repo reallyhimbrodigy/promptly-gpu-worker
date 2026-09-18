@@ -33,6 +33,13 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 SRC = open(os.path.join(HERE, "chatcut_job_app.py"), encoding="utf-8").read()
+
+def _joined(src):
+    """Adjacent string literals joined, so a sentence wrapped across source
+    lines reads as one sentence — and a mutation of the SOURCE still reaches
+    the leg (a leg over the imported VALUE could not go red by mutating text)."""
+    return re.sub(r'"\s*\n\s*"', "", src)
+
 TREE = ast.parse(SRC)
 
 
@@ -51,11 +58,11 @@ def _re_sub_scrub(s):
 def legs():
     bad = []
     p1 = fn_source("pass1_message")
-    p2 = fn_source("pass2_message")
+    p2 = fn_source("rewatch_message")   # pass2_message retired 2026-09-18; the rewatch message is what the agent reads
     if not p1:
         return [("build", "pass1_message does not exist — nothing is served")]
     if not p2:
-        bad.append(("build", "pass2_message does not exist"))
+        bad.append(("build", "rewatch_message does not exist"))
 
     # INVENTORY — a picture, in the message, not a path to read
     # THE INVENTORY SPECIFICALLY, not "an image block exists somewhere". The
@@ -66,7 +73,14 @@ def legs():
     if not re.search(r"_img_block\(\s*inventory_png", p1):
         bad.append(("inventory", "the inventory is not an image block in "
                                  "message 1"))
-    if "READ IT" in SRC:
+    # ASKED OF WHAT REACHES THE AGENT, NOT OF THE WHOLE FILE. This was
+    # `"READ IT" in SRC` — a bare substring over 4,000 lines — and it went red
+    # on a DOCSTRING that happened to contain the words: "THE THIRD OCCUPANT,
+    # AND NOTHING READ IT", in a function about the caption band. A check that
+    # reads source cannot tell code from prose, and a reader keyed to wording
+    # fires on any sentence containing its needle. The property is that the
+    # MESSAGE does not instruct a read; `p1` is that message's builder.
+    if re.search(r"READ IT", p1):
         bad.append(("inventory", "the prompt still tells the agent to READ the "
                                  "sheet — that is fetching, not serving"))
 
@@ -74,11 +88,9 @@ def legs():
     # the bar since the artefact landed; this half never did — it got a plan
     # and an inventory and nothing saying what it was aiming at. A rule that
     # reaches one half of a two-half pipeline is a rule half the system has.
-    if "HELD TO" not in p1:
-        bad.append(("rubric", "pass 1 never says what the edit is held to"))
-    for _w in ("burned into", "clear of", "landed"):
-        if _w not in p1:
-            bad.append(("rubric", "the executor's rubric does not say %r" % _w))
+    # THE RUBRIC LEGS ARE RETIRED (Zac's table, 2026-09-17): the "held to"
+    # preamble and the reference standard no longer ride in the first message
+    # — the watch holds the ten readings, the paragraph names them as the bar.
     # AND NO RATE IN IT. The density rates GRADE and never instruct, and that
     # law does not bend for being in a different file.
     import re as _re
@@ -87,8 +99,9 @@ def legs():
         bad.append(("rubric", "the executor's rubric quotes a RATE"))
 
     # SOURCE — many frames, not one tile
-    if "_frames_of" not in p1:
-        bad.append(("source", "the source is not sent as a frame sequence"))
+    if "for fp in _sw['sheets']" not in p1 or "watch_asset(" not in SRC:
+        bad.append(("source", "the source is not served as watch_asset's sheets "
+                              "(inspect_asset, dense, tiled) — the one instrument for seeing"))
     for n in ast.walk(TREE):
         if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") \
                 == "SOURCE_FRAMES_N":
@@ -110,11 +123,13 @@ def legs():
     # the agent could LOOK. That was a wall problem solved by removing the
     # thing that makes it an editor. What must hold is that the harness SENDS
     # the edit, and that the agent is told it may scrub freely.
-    if "RENDERED AND SENT TO YOU" not in SRC:
-        bad.append(("served", "pass 1 is not told the edit will be sent to it"))
-    if not re.search(r"scrub|as often as you need", SRC, re.I):
-        bad.append(("scrub", "nothing tells the agent it may look wherever and "
-                             "as often as it wants"))
+    # RE-AIMED 2026-09-18 (rulings 2-4): the harness sends the frames between
+    # turns and the agent makes NO discovery calls — the old legs asked for a
+    # scrubbing invitation that the ruling reversed.
+    if "sends you the composed frames" not in _joined(SRC):
+        bad.append(("served", "pass 1 is not told the harness sends it the composed frames"))
+    if "you never fetch, inspect or preview anything yourself" not in _joined(SRC):
+        bad.append(("no-discovery", "nothing tells the agent the rewatch is served, not fetched (ruling 4)"))
 
     # PASS 2 — frames the harness fetched
     if "_edit_frames" not in SRC or "preview_timeline" not in fn_source(
@@ -142,12 +157,12 @@ if __name__ == "__main__":
              lambda s: s.replace("_img_block(inventory_png", "open(inventory_png"),
              "inventory"),
             ("the source back to one tile",
-             lambda s: s.replace("_frames_of(source_video", "_tile(source_video"),
+             lambda s: s.replace('        for fp in _sw["sheets"]:', '        for fp in []:'),
              "source"),
             ("the transcript dropped",
              lambda s: s.replace("t_start", "unused_key"), "words"),
-            ("the scrub invitation gone",
-             lambda s: _re_sub_scrub(s), "scrub")):
+            ("the no-discovery sentence gone",
+             lambda s: s.replace("you never fetch, ", "you may fetch, "), "no-discovery")):
         _orig = globals()["SRC"]
         globals()["SRC"] = mutate(_orig)
         globals()["TREE"] = ast.parse(globals()["SRC"])

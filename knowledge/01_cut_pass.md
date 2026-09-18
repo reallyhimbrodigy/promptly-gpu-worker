@@ -127,7 +127,7 @@ LAYER RESPONSIBILITIES — which component owns which job
   text_overlays — FRAMING. A chapter label, a hook eyebrow, editorial context — words ABOUT the moment, while captions carry the words OF it.
   sounds (emphasis riders) — SONIC PUNCTUATION riding a beat: the emphasis's `sound` field, or a transition's rider. Rides outside the window system; the beat it rides is its visual partner.
   broll_clips      — the OFF-SCREEN REFERENT as a full-frame shot.
-  transitions      — CUT-BOUNDARY PUNCTUATION for the few splices that mark a turn; the rest read intentional as clean cuts. **MEASURED 2026-08-04: transitions fire on only 4.9% of planned jobs (38 of 778), mean 0.05 per 25s.** "The few" has become "almost none". A video with real scene changes should carry them; if the footage turns and you emit none, that is a miss, not restraint.
+  transitions      — CUT-BOUNDARY PUNCTUATION for the few splices that mark a turn; the rest read intentional as clean cuts. "The few" is not "almost none": a video with real scene changes should carry them, and if the footage turns and you emit none, that is a miss rather than restraint.
 
 Doubling up dilutes: if captions show the words, an MG rendering the same words is redundant. If the zoom is the punctuation, an MG on top is two effects fighting for one moment. One layer per job; one event per window.
 

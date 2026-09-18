@@ -22,7 +22,9 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
+import threading
 import sys
 import time
 import urllib.error
@@ -39,9 +41,10 @@ TOKEN_URL = "https://api.chatcut.io/auth/mcp/token"
 # THE CRAFT, BAKED IN. Copied into the image rather than fetched at run time —
 # a mid-edit download lands as an opaque stall, which is the lesson the Chrome
 # download and the knowledge-mount path both taught this lane.
+CLI_PIN = "2.1.226"   # the claude-code version baked into IMG; see the npm line below
 IMG = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("curl", "ca-certificates", "git", "ffmpeg")
+    .apt_install("curl", "ca-certificates", "git", "ffmpeg", "openssl")   # openssl: the transparent proxy's throwaway CA
     # PILLOW, because run 1 errored on `from PIL import Image`: the agent was
     # building its own contact sheet, a module this image did not have. The
     # sheet is already at /work/source_sheet.png, so this is insurance rather
@@ -92,7 +95,14 @@ IMG = (
     .run_commands(
         "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -",
         "apt-get install -y nodejs",
-        "npm install -g @anthropic-ai/claude-code",
+        # PINNED (2026-09-17). Unpinned, the image took 2.1.272, measured in the
+        # container: cache entries written with a 5-MINUTE TTL (local 2.1.226
+        # writes 1h — the keep-warm ruling's premise), and with ANTHROPIC_BASE_URL
+        # set (the fingerprint proxy, ruling 1's instrument) cache markers only on
+        # the system prompt — the 181k-token watch uncached on every call
+        # (message_start: input 181,191 / read 41,631 / written 0). 2.1.226
+        # through the same proxy marks the last message and writes 1h entries.
+        "npm install -g @anthropic-ai/claude-code@" + CLI_PIN,
     )
     # THE CHATCUT PLUGIN, BAKED IN. Its MCP server carries a MANDATORY
     # precondition: invoke chatcut:chatcut-plugin-basics-claude before the
@@ -169,8 +179,81 @@ JSON""",
                     "/craft/chatcut_catalogue.json", copy=True)
     .add_local_file(os.path.join(_HERE, "turn_clock.py"),
                     "/root/turn_clock.py", copy=True)
+    # THE RECORDING PROXY (2026-09-17): every /v1/messages request the CLI
+    # sends is fingerprinted segment by segment before it is forwarded, so a
+    # cache miss comes with the bytes that moved. Proven locally: it streamed
+    # a real run and showed the tool block growing 169 -> 289 between call 1
+    # and call 2 as MCP servers finished connecting — the whole-prefix rewrite.
+    .add_local_file(os.path.join(_HERE, "api_proxy.py"),
+                    "/root/api_proxy.py", copy=True)
+    # THE MCP SHIM (2026-09-17): advertises the nine tools this job may call,
+    # forwards their calls, and answers `initialize` WITHOUT the hosted
+    # server's instructions (the Skill-turn mandate). Proven locally through
+    # the proxy: upstream 59 -> kept 9, present on call 1, identical on call 2.
+    .add_local_file(os.path.join(_HERE, "mcp_shim.py"),
+                    "/root/mcp_shim.py", copy=True)
+    # THE REFERENCE INSTRUMENT (frame_urls / fetch / structured /
+    # transcript_lines): watch_asset imports it at run time. Measured on the
+    # rewatch probe of 2026-09-17: ModuleNotFoundError — every rewatch and the
+    # source watch would have died. The leg below reads every run-time import
+    # against these mounts so the next one cannot be missed.
+    .add_local_file(os.path.join(_HERE, "chatcut_reference.py"),
+                    "/root/chatcut_reference.py", copy=True)
     .add_local_file(os.path.join(_HERE, "verify_chain.py"),
                     "/root/verify_chain.py", copy=True)
+    # GATE B. `gate_b` does `import chatcut_gate` at /root, so an unmounted
+    # module is an ImportError in the container and a gate that never runs.
+    # It is also how the undefined-name smoke finds a file at all: that
+    # population is DERIVED from these mounts, so a module the image does not
+    # carry is a module no check covers. One omission, two failures.
+    .add_local_file(os.path.join(_HERE, "chatcut_gate.py"),
+                    "/root/chatcut_gate.py", copy=True)
+    # THE MODE RULE AND THE VERIFIED PRIMITIVES — the two things the single
+    # agent needs that only the planner and the translator used to carry.
+    # ONE COPY EACH: the rule is a file both images mount, and FAMILY_MAP is
+    # imported from the translator rather than restated here. The translator
+    # is being retired as a STEP; its map is the record of what was observed
+    # on a live timeline, and that outlives it.
+    .add_local_file(os.path.join(_HERE, "mode_rule.txt"),
+                    "/craft/mode_rule.txt", copy=True)
+    .add_local_file(os.path.join(_HERE, "plan_for_chatcut.py"),
+                    "/root/plan_for_chatcut.py", copy=True)
+    .add_local_file(os.path.join(_HERE, "chatcut_sound_library.json"),
+                    "/craft/chatcut_sound_library.json", copy=True)
+    # THE REFERENCE STANDARD — what Claude wrote from watching all ten through
+    # inspect_asset. The Gemini sheets and their reader are NOT here any more:
+    # 45,871 image tokens for 38 sampled moments, replaced by a document
+    # written from 852.
+    .add_local_file(os.path.join(_HERE, "reference_standard.md"),
+                    "/craft/reference_standard.md", copy=True)
+    # THE WATCH ITSELF, NOT A DOCUMENT ABOUT IT. 21 MB of real Claude Code
+    # session: 41 contact sheets over 852 frames of the ten references, and the
+    # model's own reading of each clip turn by turn. Resumed, the run holds the
+    # frames it looked at and can be asked about a moment no summary mentions.
+    # A FIXTURE BELONGS IN THE TREE — a session file at a /tmp path is the
+    # recorded failure set (MISSING, DRIFTED, STALE FROM A BRANCH), and the
+    # third of those restores silently under a green tally.
+    .add_local_file(os.path.join(_HERE, "watch_session.jsonl"),
+                    "/craft/watch_session.jsonl", copy=True)
+    .add_local_file(os.path.join(_HERE, "watch_session_id.txt"),
+                    "/craft/watch_session_id.txt", copy=True)
+    # THE CHATCUT SKILL, INLINED RATHER THAN INVOKED. The MCP server's own
+    # instructions tell the model to call the Skill tool before its first
+    # ChatCut call — a whole model turn (~$0.054 and ~2.6s) spent loading text
+    # we can simply put in the prefix. 9,030 tokens cached costs $0.0027 a
+    # turn warm; the turn it replaces costs $0.054. It is a PROMPT-LEVEL fold:
+    # the server asks, and the prefix answers before it is asked.
+    .add_local_file(os.path.join(_HERE, "chatcut_skill_basics.md"),
+                    "/craft/chatcut_skill_basics.md", copy=True)
+    # THE PRE-TOOL GATE. Withholding preview_timeline until the edit exists is
+    # the one fold that could not be done with --allowedTools, because that
+    # list is fixed at launch and this withholding is CONDITIONAL. A
+    # PreToolUse hook refuses per call: verified locally, two Bash calls
+    # denied in one run with the reason surfaced to the model verbatim.
+    .add_local_file(os.path.join(_HERE, "withhold_preview.sh"),
+                    "/root/withhold_preview.sh", copy=True)
+    .add_local_file(os.path.join(_HERE, "chatcut_hooks.json"),
+                    "/root/chatcut_hooks.json", copy=True)
     .add_local_file(os.path.join(_HERE, "burned_text.py"),
                     "/root/burned_text.py", copy=True)
     .add_local_file(os.path.join(_HERE, "face_bands.py"),
@@ -202,6 +285,40 @@ TOKENS = modal.Dict.from_name("chatcut-tokens", create_if_missing=True)
 # returned to a client that may not be there. A job whose answer dies with the
 # launcher is a job that did the work and reported nothing.
 RESULTS = modal.Dict.from_name("chatcut-results", create_if_missing=True)
+# SPEND AND SETUP SURVIVE A PREEMPTION, KEYED BY RUN ID.
+#
+# Modal restarts a preempted Function WITH THE SAME INPUT, in a fresh
+# container. Measured on run 9: attempt 1 reached the ceiling at 2,663,652
+# tokens, was preempted, and the retry reached it again at 2,574,041 — one
+# launch, two full attempts, both billed. The ceiling bounded an ATTEMPT and
+# not a JOB, so the instrument built to cap spend was silently doubled by the
+# thing it could not see.
+#
+# And run 3 left an ORPHAN PROJECT the same way: the retry re-prestaged,
+# creating a second ChatCut project and paying twice for the same setup.
+#
+# Both are the same gap — per-container state where the job is the unit — so
+# both live here, keyed by run id.
+JOBSTATE = modal.Dict.from_name("chatcut-jobstate", create_if_missing=True)
+WARM = modal.Dict.from_name("chatcut-warm", create_if_missing=True)
+
+
+def job_state(run_id):
+    """Durable per-JOB state that survives a preemption restart."""
+    try:
+        return dict(JOBSTATE.get(run_id) or {})
+    except Exception:                                             # noqa: BLE001
+        return {}
+
+
+def job_state_put(run_id, **kw):
+    """Merge into the durable job state. Never raises into the run."""
+    try:
+        _s = job_state(run_id)
+        _s.update(kw)
+        JOBSTATE[run_id] = _s
+    except Exception:                                             # noqa: BLE001
+        pass
 
 
 def _access_token():
@@ -353,6 +470,8 @@ def classify_stream(path):
     activity and says nothing about whether any of it moved the edit forward.
     """
     import collections
+    _init_tools = {"state": "ABSENT", "why": "no system/init event in the stream"}
+    _msg_ids = set()
     calls, errors, turns = [], 0, 0
     # THE REASONING, KEPT. Until 2026-09-15 this function counted thinking
     # deltas and `turn_clock` timed them to the tenth of a second, and NOT ONE
@@ -369,6 +488,31 @@ def classify_stream(path):
     # (classify_stream counts assistant events, turn_clock counts
     # message_start..message_stop; 17 against 8 on the same run).
     reasoning = []
+    # THINKING ARRIVES AS DELTAS, NOT AS A BLOCK ON THE ASSISTANT MESSAGE.
+    #
+    # This collector only read `type == "thinking"` blocks off the `assistant`
+    # event and captured ZERO on run 6 — while turn_clock, reading the same
+    # file, counted 321 thinking deltas. The run could say turn 7 spent 206
+    # SECONDS thinking (53% of all model time) and not one word of what about:
+    # the largest single cost in the run, unreadable by construction.
+    #
+    # With --include-partial-messages the text is in
+    # stream_event -> content_block_delta -> delta.thinking, keyed by the
+    # block index whose type came from content_block_start. Accumulated here
+    # and flushed onto the assistant event that closes the turn.
+    _blk_types, _think_buf = {}, []
+    # THE RAW WIRE, VERBATIM, BECAUSE TWICE NOW I HAVE GUESSED THE SHAPE.
+    #
+    # The collector below was written against an assumed delta shape and
+    # captured nothing on runs 6 and 7 — 209 and 321 thinking deltas, zero
+    # kept — while a synthetic fixture written to the SAME assumption passed.
+    # A fixture that agrees with your assumption tests the assumption, not the
+    # wire. These are the first few block-start and block-delta lines exactly
+    # as they arrived, carried in the durable record so the shape is READ once
+    # instead of inferred a third time. Bounded so the record stays small.
+    _raw_starts, _raw_deltas = [], []
+    _think_tok, _think_deltas = [0], [0]
+    _think_tok_total = [0]
     last_text = ""
     by_tool = collections.Counter()
     per_turn = collections.Counter()
@@ -383,12 +527,73 @@ def classify_stream(path):
             except Exception:                                     # noqa: BLE001
                 continue
             t = ev.get("type")
+            if t == "stream_event":
+                _inner = ev.get("event") or {}
+                _it = _inner.get("type")
+                if _it == "content_block_start" and len(_raw_starts) < 8:
+                    _raw_starts.append(line[:600])
+                elif _it == "content_block_delta" and len(_raw_deltas) < 8:
+                    _raw_deltas.append(line[:600])
+                if _it == "content_block_start":
+                    _blk_types[_inner.get("index")] = (
+                        (_inner.get("content_block") or {}).get("type"))
+                elif _it == "content_block_delta":
+                    if _blk_types.get(_inner.get("index")) == "thinking":
+                        _d = _inner.get("delta") or {}
+                        _think_buf.append(str(_d.get("thinking")
+                                              or _d.get("text") or ""))
+                        # THE CONTENT IS NOT ON THE WIRE — READ, NOT GUESSED.
+                        # Two collectors captured nothing and both parse paths
+                        # were CORRECT: the CLI emits
+                        #   {"type":"thinking_delta","thinking":"",
+                        #    "estimated_tokens":50}
+                        # — an empty string and a token estimate. Verbatim
+                        # from run 8's wire sample. So no third collector can
+                        # recover the text, and the honest instrument reports
+                        # REDACTED with the size rather than ABSENT with a
+                        # shrug. The estimate is a real measure and was being
+                        # thrown away.
+                        _think_tok[0] = max(_think_tok[0],
+                                            int(_d.get("estimated_tokens") or 0))
+                        _think_deltas[0] += 1
+                elif _it == "content_block_stop":
+                    _blk_types.pop(_inner.get("index"), None)
+            if t == "system" and ev.get("subtype") == "init":
+                _tl = ev.get("tools") or []
+                _init_tools = {"count": len(_tl),
+                               "toolsearch": "ToolSearch" in _tl,
+                               "mcp": sum(1 for x in _tl if str(x).startswith("mcp__")),
+                               "state": "MEASURED"}
             if t == "assistant":
                 turns += 1
+                _mid0 = (ev.get("message") or {}).get("id")
+                if _mid0:
+                    _msg_ids.add(_mid0)
+                # THE MESSAGE'S OWN BLOCKS FIRST, THEN THE DELTAS. Either
+                # source is legitimate — which one carries the text depends on
+                # whether partial messages are on — and taking whichever is
+                # non-empty means this cannot go silently blank again if that
+                # flag changes.
                 _think = " ".join(
                     str(b.get("thinking") or b.get("text") or "")
                     for b in ((ev.get("message") or {}).get("content") or [])
                     if b.get("type") == "thinking").strip()
+                if not _think and _think_buf:
+                    _think = "".join(_think_buf).strip()
+                _think_buf = []
+                _think_tok_total[0] += _think_tok[0]
+                _turn_think = (_think_tok[0], _think_deltas[0])
+                _think_tok, _think_deltas = [0], [0]
+                if not _think and _turn_think[1]:
+                    # DELTAS ARRIVED AND CARRIED NO TEXT: redacted, not absent.
+                    reasoning.append({
+                        "turn": turns, "chars": 0, "truncated": False,
+                        "text": "", "redacted": True,
+                        "est_thinking_tokens": _turn_think[0],
+                        "thinking_deltas": _turn_think[1],
+                        "tools": [b.get("name") for b in
+                                  ((ev.get("message") or {}).get("content") or [])
+                                  if b.get("type") == "tool_use"]})
                 if _think:
                     # TRUNCATED WITH ITS DENOMINATOR, never silently. A thought
                     # cut at 6000 characters reads as a complete one that
@@ -473,16 +678,34 @@ def classify_stream(path):
         if k in seen:
             repeats += 1
         seen.add(k)
-    return {"assistant_turns": turns, "tool_calls": len(calls),
+    return {"assistant_turns": turns,
+            "api_calls": len(_msg_ids),
+            "init_tools": _init_tools, "tool_calls": len(calls),
             "tool_errors": errors, "identical_repeats": repeats,
             # WHAT IT WAS WORKING OUT, per assistant event, beside the call
             # that event made. A STATE, not a possibly-empty list: a run whose
             # reasoning was never captured and a run that did not think read
             # identically once you are only looking at a list length.
             "reasoning": reasoning,
+            # THE EVIDENCE FOR THE NEXT FIX, not a summary of it.
+            "stream_shape_sample": {
+                "content_block_start": _raw_starts,
+                "content_block_delta": _raw_deltas,
+                "why": ("verbatim wire lines — the reasoning collector has "
+                        "been written against a guessed shape twice; read "
+                        "these before writing a third")},
             "reasoning_state": ("MEASURED: %d event(s) carried thinking, "
                                 "%d chars" % (len(reasoning),
                                               sum(r["chars"] for r in reasoning))
+                                if any(not r.get("redacted") for r in reasoning)
+                                else
+                                "REDACTED — %d turn(s) carried thinking "
+                                "deltas totalling ~%d estimated token(s), and "
+                                "the CLI transmits them with an EMPTY text "
+                                "field. The content is not on the wire; no "
+                                "collector can recover it. Verified against "
+                                "run 8's raw delta lines."
+                                % (len(reasoning), _think_tok_total[0])
                                 if reasoning else
                                 "ABSENT — no thinking block reached the "
                                 "transcript. Either the model emitted none, or "
@@ -502,10 +725,12 @@ def classify_stream(path):
 
 CRAFT_CONTEXT = """\
 You are editing a short vertical video for Promptly, through the ChatCut MCP
-tools. You own the judgment; ChatCut owns the timeline and the render.
+tools. You own the judgment; ChatCut owns the timeline and the render, and the
+harness owns every look: it watches the source and your edit for you and sends
+the frames. You never import, preview, inspect, export or read files.
 
-THE CRAFT IS MOUNTED, NOT SUMMARISED. Read what you need from /craft before you
-decide anything:
+THE CRAFT IS MOUNTED, NOT SUMMARISED. What you need is in your context already;
+the rest is on disk for a job that needs it:
 
   /craft/knowledge/          the craft documents — the cut pass, captions, text
                              overlays, motion graphics, emphasis zoom, sound
@@ -518,54 +743,14 @@ decide anything:
   /craft/reference_index.json
                              the annotated reference beats themselves.
 
-HOW TO WORK — THE LOOP, AND IT IS A LOOP ON PURPOSE
-
-  PLACE EVERYTHING IN ONE BATCH. PREVIEW THE WHOLE TIMELINE ONCE. REVISE IN ONE
-  BATCH. PREVIEW AGAIN. RENDER.
-
-  `edit_item` takes `adds`, `updates` and `deletes` together and commits them
-  atomically — one call places every overlay, card and trim you have decided on.
-  Eleven separate calls to place eleven things is eleven round trips and eleven
-  turns for one decision you already made.
-
-  THE REVIEW PASSES ARE NOT OPTIONAL. The batch is only safe BECAUSE they
-  exist: placing eleven things blind and rendering would be faster and worse.
-  Never skip a preview to save time. If you are short of budget, cut the number
-  of placements, never the number of looks.
-
-  LOOK AT FRAMES IN CONTACT SHEETS, NOT ONE AT A TIME. Reading 25 stills is 25
-  turns. Tile them into ONE image and read that:
-
-    ffmpeg -v error -i /work/source.mp4 -vf \
-      "select='not(mod(n\\,NN))',scale=240:-1,tile=5x3" -frames:v 1 /tmp/sheet.png
-
-  One sheet across the whole clip tells you the shots, the burned-in graphics
-  and the free bands. Go to individual frames only for a moment the sheet
-  cannot resolve. The same applies to verification: `preview_timeline` with
-  `viewerFrameCount` returns several composed frames in ONE call.
-
-  1. Import the clip, wait for transcription, place it.
-  2. Read the transcript with read_script before deciding the cut. The cut is
-     what you REMOVE: a false start, a restated point, a run-up that says
-     nothing. Saying "nothing to cut" is a real answer; padding is not.
-  3. Look at the actual frames with preview_timeline views:["viewer"] BEFORE
-     choosing where anything goes. The frame decides placement, not the
-     timing. Footage with burned-in graphics has different free bands than a
-     clean talking head.
-  4. Place what the moment needs, ALL IN ONE edit_item BATCH. Vary size, case
-     and position deliberately — the reference shares are in your context.
-  5. Verify composed frames before you call it done. A successful tool call is
-     not verification. Use one preview_timeline call with viewerFrameCount
-     rather than one call per frame.
-  6. Export video, h264, 1080p.
-
-A BUDGET, SO THE LOOP STAYS A LOOP: about fifteen ChatCut calls is the shape of
-a good edit here — setup, transcript, one batch, two previews, export. If you
-are heading past thirty, you are working one item at a time; stop and batch.
-This is a budget on ROUND TRIPS, never on placements or on looks.
-
-Report what you cut and why, what you placed and where, and the render id.
+`edit_item` takes `adds`, `updates` and `deletes` together and commits them
+atomically — one call places every overlay, card and trim you have decided on.
+Vary size, case and position deliberately. Judge the COMPOSED PICTURE the
+harness sends back: a successful tool call is not verification.
 """
+# REWRITTEN 2026-09-18: the previous block described previews, ffmpeg contact
+# sheets, importing the clip, read_script, export and a fifteen-call budget —
+# every one dead under rulings 2-4. The vocabulary gate reads every surface now.
 
 
 # THE DOCUMENTS THE AGENT ACTUALLY READ, chosen from the transcript rather than
@@ -588,22 +773,54 @@ CHATCUT_AUDIO_LEAD_MS = 42
 
 
 NEEDED_TOOLS = [
-    # SIX, NOT TWENTY-FIVE. The plan now carries the project, the assets, the
-    # sound ids, the item references and the review frames, so the agent
-    # creates nothing, imports nothing, searches nothing and discovers nothing.
-    # Every tool it was offered for those jobs was a tool it could spend a turn
-    # on. What is left is: place, look, fix, deliver.
+    # THE SINGLE AGENT'S SURFACE, 2026-09-16. It now DECIDES as well as places,
+    # so it authors its own graphics — the harness can no longer prestage a
+    # title it does not know. What it still does not get is anything it would
+    # spend a turn DISCOVERING: the project, the media, the sound ids and the
+    # component contract all arrive in the prefix.
     "edit_item",          # place, and fix by `updates` on the one revision
+    "edit_captions",      # captions are a separate surface that owns its text
     "preview_timeline",   # scrub: any frame, any moment, as often as needed —
                           # and views:["transcript"] for the words against the
                           # TIMELINE, mapped through trim, offset and rate
     "read_captions",      # the viewer-facing caption Cards at any frame, with
                           # their timing, layout, line count and overflow
     "inspect_item",       # a named defect may need one item's full state
+    "inspect_asset",      # ...and the SOURCE, at source time, with its words —
+                          # this is how the one agent watches the footage
     "edit_asset",         # ...or a property on the asset behind it
-    "submit_export",      # deliver
-    "track_export",       # and report where it got to
+    # ADDED 2026-09-16 after a live run spent four of its seven tool errors on
+    # permission refusals, this one among them. prestage() imports the SOURCE
+    # itself, so this is not for the clip — it is for anything the agent
+    # decides it needs to bring in. A job the design assigns to the agent must
+    # be a job the tool list permits; we advertised the work and forbade the
+    # tool, which is `when we advertise a shape, the acceptor must take it`
+    # one layer out.
+    # import_media LEFT the list 2026-09-17: the harness imports the source
+    # and places the base item; the paragraph says so. Eight tools, as ruled.
+    "read_project",
+    # ── NOT HERE, AND THE ABSENCES ARE THE DESIGN ───────────────────────────
+    # create_motion_graphic_from_code: I ADDED THIS AND IT WAS WRONG. The
+    #   reasoning was "the harness can no longer prestage a title it does not
+    #   know" — but `prestage` registers the WHOLE component registry, 35
+    #   components with assetIds, independent of any title. The agent places a
+    #   registered component and sets its text through `propertyOverrides`.
+    #   Offering the authoring tool contradicted the prefix outright ("you
+    #   never author component code"), and resolving a contradiction is
+    #   deciding, which is the cost this path exists to remove. It also opened
+    #   a route whose validator has a strict contract this lane has measured —
+    #   0 of 29 ported blobs loadable — so an agent-authored graphic is more
+    #   likely refused than placed.
+    # submit_export / track_export: THE HARNESS EXPORTS, after the gate. An
+    #   agent told not to export until the gate passes is obeying a preference;
+    #   an agent without the tool is a property. This lane's own law, earned
+    #   when the prompt said "do not orchestrate" and the agent orchestrated.
+    # browse_library: the sound catalogue is in the prefix. Five browse_library
+    #   calls went on ONE placement when it was reachable. The GATE reads the
+    #   live library — cached for the agent, live for the check.
+    # create_project / import_media: the harness prestages both.
 ]
+
 
 
 def control_digest(path="/craft/control_distributions.json"):
@@ -770,8 +987,12 @@ def prestage(access_token, title_text, controls=None, source_path=None,
     """Create the project and register the title BEFORE the agent starts.
 
     Scoped deliberately to the two calls whose shapes have been OBSERVED here —
-    create_project and create_motion_graphic_from_code. `import_media` is left
-    to the agent because nobody has read its schema, and guessing one is what
+    create_project and create_motion_graphic_from_code. `import_media` WAS left
+    to the agent, and no longer is — this function calls it (create_session +
+    the node upload helper) and returns `sourceAssetId`. The sentence that
+    said otherwise survived the change and was read as fact on 2026-09-16,
+    including by me, while diagnosing a run. Kept as the correction. What
+    guessing a schema costs is what
     cost ten turns of parameter spelling in the 999s run.
     """
     def _find(obj, key):
@@ -797,6 +1018,8 @@ def prestage(access_token, title_text, controls=None, source_path=None,
                 if got:
                     return got
         return None
+
+    _pt0 = time.time()
 
     def call(name, args, mid):
         r = mcp_rpc(access_token, "tools/call",
@@ -828,6 +1051,43 @@ def prestage(access_token, title_text, controls=None, source_path=None,
         pid = _m.group(1) if _m else None
     if not pid:
         raise RuntimeError(f"prestage: no projectId anywhere in {str(proj)[:300]}")
+    _pt = {"project": round(time.time() - _pt0, 2)}
+    # ── THE 37 REGISTRATIONS START NOW, ON A POOL, WHILE THE SOURCE UPLOADS ──
+    # Arm A (sub-watch-3, 2026-09-17): prestage took 44.3s of a 90s budget,
+    # 37 serial create_motion_graphic_from_code calls at that container's
+    # ~1.1s round trip. Registration needs only the project id; the import
+    # needs only the project id. Neither waits on the other.
+    from concurrent.futures import ThreadPoolExecutor
+    registered, reg_failed = {}, {}
+    try:
+        _bp = "/craft/chatcut_registry_baked.json"
+        _rp = _bp if os.path.exists(_bp) else "/craft/chatcut_registry.json"
+        _raw = json.load(open(_rp, encoding="utf-8"))
+        _reg = _raw.get("components") or _raw
+        print(f"  REGISTRY SOURCE : {_rp}  ({len(_reg)} components)", flush=True)
+    except Exception as e:                                        # noqa: BLE001
+        _reg = {}
+        print(f"  REGISTRY        : ABSENT ({e}) — the agent will have to "
+              f"author any component it needs", flush=True)
+
+    def _register_one(_i, _n, _c):
+        try:
+            _r = call("create_motion_graphic_from_code",
+                      {"projectId": pid, "name": _n, "code": _c["code"],
+                       "width": w, "height": h, "durationInSeconds": 5,
+                       "properties": _c["properties"]}, 100 + _i)
+            _ov = _c.get("overrides") or {}
+            _v = _find(_r, "validation") or {}
+            if _v.get("errors"):
+                return _n, None, _v["errors"][:2]
+            return _n, ({"assetId": _find(_r, "assetId"), "overrides": _ov}
+                        if _ov else _find(_r, "assetId")), None
+        except Exception as e:                                    # noqa: BLE001
+            return _n, None, [f"{type(e).__name__}: {e}"][:1]
+    _reg_items = [(_i, _n, _c) for _i, (_n, _c) in enumerate(sorted(_reg.items()))
+                  if not (want_components and _n not in want_components)]
+    _pool = ThreadPoolExecutor(max_workers=8)
+    _reg_futs = [_pool.submit(_register_one, *_it) for _it in _reg_items]
     # A PLAN WITH NO GRAPHICS STILL WANTS THE PROJECT AND THE SOURCE STAGED.
     # The house title was a required argument, so pre-staging was coupled to
     # having something to title — and a cut-only plan would either skip the
@@ -899,7 +1159,7 @@ def prestage(access_token, title_text, controls=None, source_path=None,
                   "the delivered audio will be ~%dms late"
                   % ((_r.stderr or "")[-120:], CHATCUT_AUDIO_LEAD_MS), flush=True)
 
-    src_asset = None
+    src_asset, _base_id, _sframes = None, None, None
     if source_path and os.path.exists(source_path):
         sess = call("import_media",
                     {"action": "create_session", "projectId": pid}, 22)
@@ -934,6 +1194,42 @@ def prestage(access_token, title_text, controls=None, source_path=None,
                 f"prestage: the upload reported success and returned no "
                 f"assetId — the agent would have nothing to place. "
                 f"{str(_imp)[:300]}")
+        # THE BASE ITEM IS THE HARNESS'S TO PLACE. The whole source on V1
+        # from frame 0 is deterministic — the agent was spending an
+        # inspect_asset turn to learn the frame count (arm A, 2026-09-17) and
+        # once sent 612 frames for a 610.86-frame source, which ChatCut
+        # accepted unclamped. The harness knows the duration; it places it.
+        _pr = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
+                              "format=duration", "-of", "csv=p=0",
+                              source_path], capture_output=True, text=True,
+                             timeout=60)
+        _sdur = float((_pr.stdout or "0").strip() or 0)
+        _sframes = int(_sdur * fps)
+        if _sframes > 0 and _find(proj, "trackId"):
+            _add = {"type": "video", "assetId": src_asset,
+                    "trackId": _find(proj, "trackId"), "fromFrame": 0,
+                    "durationInFrames": _sframes}
+            # THROUGH _mcp_call, WHICH PARSES. The `call` closure returns the
+            # raw MCP envelope ({_meta, content, structuredContent}) and
+            # final-arch-1 printed "edit_item echoed no id: {'_meta': ..." over
+            # an add that had in fact landed. _mcp_call reads the payload the
+            # three ways ChatCut returns it and raises if `adds` is absent.
+            try:
+                _ar = _mcp_call(access_token, "edit_item",
+                                {"projectId": pid, "adds": [_add]}, expect="adds")
+                for _e in (_ar.get("adds") or []):
+                    if isinstance(_e, dict) and _e.get("id"):
+                        _base_id = str(_e["id"])
+                        break
+            except Exception as _bae:                             # noqa: BLE001
+                _ar = {"error": "%s: %s" % (type(_bae).__name__, str(_bae)[:160])}
+            print("  BASE ITEM       : %s  %d frame(s) of %.2fs on %s"
+                  % ("MEASURED id=%s" % _base_id if _base_id else
+                     "FAILED — edit_item echoed no id: %s" % str(_ar)[:160],
+                     _sframes, _sdur, _find(proj, "trackId")), flush=True)
+        else:
+            print("  BASE ITEM       : ABSENT — source frames %d, trackId %r"
+                  % (_sframes, _find(proj, "trackId")), flush=True)
 
     # ── ONE ASSET PER PLANNED TITLE ────────────────────────────────────────
     # A plan with fifteen graphics needs fifteen different strings, and one
@@ -984,45 +1280,15 @@ def prestage(access_token, title_text, controls=None, source_path=None,
     # register is one the agent would have to author, which is the cost this
     # exists to remove, and a silent partial registry looks exactly like a
     # complete one.
-    registered, reg_failed = {}, {}
-    # THE BAKED REGISTRY, AND THE RIGHT LEVEL OF IT. This read the file and
-    # iterated it directly — but the file is {"components": ..., "refused": ...},
-    # so every iteration handed a two-key envelope where a component was
-    # expected. It also read the UNBAKED registry, whose list components carry
-    # their content as an empty string. Both fixed here, with the same accessor
-    # the render check uses, so the thing that is PROVEN to draw is the thing
-    # that gets staged.
-    try:
-        _bp = "/craft/chatcut_registry_baked.json"
-        _rp = _bp if os.path.exists(_bp) else "/craft/chatcut_registry.json"
-        _raw = json.load(open(_rp, encoding="utf-8"))
-        _reg = _raw.get("components") or _raw
-        print(f"  REGISTRY SOURCE : {_rp}  ({len(_reg)} components)", flush=True)
-    except Exception as e:                                        # noqa: BLE001
-        _reg = {}
-        print(f"  REGISTRY        : ABSENT ({e}) — the agent will have to "
-              f"author any component it needs", flush=True)
-    for _i, (_n, _c) in enumerate(sorted(_reg.items())):
-        if want_components and _n not in want_components:
-            continue
-        try:
-            _r = call("create_motion_graphic_from_code",
-                      {"projectId": pid, "name": _n, "code": _c["code"],
-                       "width": w, "height": h, "durationInSeconds": 5,
-                       "properties": _c["properties"]}, 100 + _i)
-            _ov = _c.get("overrides") or {}
-            _v = _find(_r, "validation") or {}
-            if _v.get("errors"):
-                reg_failed[_n] = _v["errors"][:2]
-            else:
-                # THE SCALAR HALF TRAVELS WITH THE COMPONENT. Structured
-                # content is already inside the code; the overrides are what
-                # propertyOverrides is for, and carrying them here means the
-                # agent never has to re-derive them from a fixture file.
-                registered[_n] = {"assetId": _find(_r, "assetId"),
-                                  "overrides": _ov} if _ov else _find(_r, "assetId")
-        except Exception as e:                                    # noqa: BLE001
-            reg_failed[_n] = [f"{type(e).__name__}: {e}"][:1]
+    _pt["import_done_at"] = round(time.time() - _pt0, 2)
+    for _f in _reg_futs:
+        _n, _val, _err = _f.result(timeout=300)
+        if _err:
+            reg_failed[_n] = _err
+        else:
+            registered[_n] = _val
+    _pool.shutdown(wait=False)
+    _pt["registrations_done_at"] = round(time.time() - _pt0, 2)
     if _reg:
         print("  REGISTRY        : MEASURED  %d registered / %d attempted"
               % (len(registered), len(registered) + len(reg_failed)), flush=True)
@@ -1034,11 +1300,14 @@ def prestage(access_token, title_text, controls=None, source_path=None,
         raise RuntimeError(f"prestage: the title registered but returned no "
                            f"assetId — the agent would have nothing to place: "
                            f"{str(mg)[:300]}")
+    _pt["total"] = round(time.time() - _pt0, 2)
+    print("  PRESTAGE PHASES : %s" % json.dumps(_pt), flush=True)
     return {"projectId": pid, "timelineId": _find(proj, "timelineId"),
             "trackId": _find(proj, "trackId"), "titleAssetId": aid,
             "sourceAssetId": src_asset, "titles": made,
+            "baseItemId": _base_id, "sourceFrames": _sframes,
             "components": registered, "components_refused": reg_failed,
-            "editorUrl": _find(proj, "editorUrl")}
+            "editorUrl": _find(proj, "editorUrl"), "phases": _pt}
 
 
 # ── THE SHEET IS REQUIRED, AND THE GATE AND THE PROMPT SHARE THIS SENTENCE ──
@@ -1096,39 +1365,36 @@ FETCH_RULE = (
     "final message — a frame you did not see is not a frame that was fine.\n\n")
 
 TWO_TURN_LOOP = (
-    "THE LOOP IS TWO PASSES. A third is a failure state, not a budget.\n\n"
-    "  PASS 1 — YOU WATCH THE SOURCE, THEN PLACE EVERYTHING IN ONE BATCH.\n"
-    "  Everything you need is in this message: the component inventory as "
-    "pictures, the source as a sequence of frames, the transcript against "
-    "them, and the plan. You look nothing up. Decide every placement — which "
-    "component, where it sits, when it runs — and send them in the calls the "
-    "plan names (usually one for the items, a second for any EFFECT, because "
-    "an effect names an item that must already exist).\n\n"
-    "  THEN THE EDIT IS RENDERED AND SENT TO YOU. You do not have to go and "
-    "get it — the next message carries your timeline with everything on it. "
-    "That is a HEAD START, not a limit.\n\n"
-    "  PASS 2 — YOU WATCH THE EDIT, THEN FIX IT IN ONE BATCH. The next "
-    "message carries frames of your timeline with everything on it. Judge the "
-    "COMPOSED PICTURE — tool results cannot show you a collision.\n\n"
-    "  AND SCRUB WHEREVER YOU WANT. `preview_timeline` is yours: ask for any "
-    "moment, at any time, as often as you need. If a frame looks wrong, look "
-    "at the frames either side of it. If an entrance looks late, look at the "
-    "frames it enters over. If you cannot tell whether two things collide, "
-    "ask for that exact frame. The frames you were sent are a starting point "
-    "and nothing more — an editor scrubs, and nobody is counting your looks.\n\n"
-    "  Then fix what is wrong in ONE edit_item call: a graphic colliding with "
-    "another or with the captions, something illegible or off-frame, something "
-    "on the speaker's face, a title on the wrong moment, wrong size, drift. If "
-    "it is right, submit the export and stop.\n\n"
-    "  PASS 3 — ONLY ON A DEFECT YOU CAN NAME. If you take one, your final "
-    "message must name the defect, the frame you saw it in, and what you "
-    "changed. Unnamed, it is the same as not taking it: the run reports the "
-    "third pass as UNJUSTIFIED and the edit is judged without it.\n\n"
-    "WHY THE BATCHES. Each pass is a model turn with the whole context behind "
-    "it. Placing one item at a time to watch it land spends a turn per item "
-    "and tells you nothing a batch would not — `edit_item` commits a batch "
-    "atomically and rolls the whole batch back on one failure, so a batch that "
-    "fails tells you something a half-built timeline never can.\n\n")
+    # THE THREE-TURN CONTRACT (Zac, 2026-09-17, rulings 2-4). Rewritten 2026-09-18:
+    # the previous text still asked for /work/DONE and /work/DONE2 marks and
+    # invited scrubbing with preview_timeline — the marks were retired with the
+    # turn machine, the rewatch forbids discovery calls, and h-th-think0's
+    # agent spent its turns "never following up" on a contract that no longer
+    # existed.
+    "THE LOOP IS THREE TURNS, EACH ONE CALL. The harness watches the render "
+    "between them and sends you the composed frames; you never fetch, "
+    "inspect or preview anything yourself.\n\n"
+    "  TURN 1 — PLACE. Everything you need is in this message: the inventory "
+    "as pictures, the source as frames with the words against them, and the "
+    "brief. Decide every placement and send ONE edit_item call carrying all "
+    "of them, each op with its own why inside it.\n\n"
+    "  TURN 2 — REVIEW. The next message carries frames of your timeline "
+    "with everything on it, the timeline read back, and any fault the "
+    "harness found. Judge the COMPOSED PICTURE and fix what is wrong in ONE "
+    "edit_item call: a graphic colliding with another or with the captions, "
+    "something illegible or off-frame, something on the speaker's face, a "
+    "title on the wrong moment, wrong size, drift.\n\n"
+    "  TURN 3 — CONFIRM. Frames again. If it is right, your whole reply is the "
+    "single word: export. If one thing is still wrong, one more edit_item "
+    "call; a fourth call exists only for something that fix broke, and there "
+    "is no fifth.\n\n"
+    "YOU DO NOT EXPORT and you write no files. The harness reads the timeline "
+    "back, checks it, and exports.\n\n")
+# TWO_TURN_LOOP_DECIDE WAS HERE AND IS GONE. 3,578 characters of procedure
+# that the one-paragraph preamble now says in three sentences. It was already
+# unreferenced when this was written — `ast` found zero Load sites — and TWO
+# SMOKES WERE STILL CHECKING IT, which is how a dead constant keeps looking
+# alive. The plan path keeps TWO_TURN_LOOP; that one is still loaded.
 
 
 def _mcp_call(tok, name, args, expect=None):
@@ -1146,6 +1412,12 @@ def _mcp_call(tok, name, args, expect=None):
     that says what DID come back instead of a zero that reads like a finding.
     Content blocks may also arrive as `resource`/`json` rather than `text`.
     """
+    # THE FOURTH ARGUMENT IS THE JSON-RPC MESSAGE ID, NOT A TIMEOUT. Kept as
+    # the correction (2026-09-17): a pass "bounding" this call changed 900 to
+    # 120 here and wrote a note claiming a 120s bound — the bound was already
+    # `urlopen(req, timeout=120)` inside mcp_rpc, and this number never
+    # touched it. The sweep's own leg then tested the id. Read mcp_rpc for the
+    # bound; this is an id.
     r = mcp_rpc(tok, "tools/call", {"name": name, "arguments": args}, 900)
     if r.get("error"):
         raise RuntimeError("%s failed: %s" % (name, r["error"]))
@@ -1169,8 +1441,18 @@ def _mcp_call(tok, name, args, expect=None):
             parsed = c["json"]
             break
         if t and t.strip().startswith("{"):
+            # THE JSON, THEN PROSE. Measured 2026-09-17 on a track-creating
+            # add: `{"adds":[...]}`, two newlines, then "Motion-graphic item(s)
+            # eebe1acc68 now span frames 560–589. Inspect timeline frames..."
+            # json.loads raised "Extra data" at char 188, this reader fell
+            # through, and FOUR LANDED placements were recorded as
+            # "no 'adds'". raw_decode takes the leading object; the sentence
+            # stays in `_text` beside it.
             try:
-                parsed = json.loads(t)
+                parsed, _endpos = json.JSONDecoder().raw_decode(t.strip())
+                if not isinstance(parsed, (dict, list)):
+                    parsed = None
+                    continue
                 break
             except Exception:                                     # noqa: BLE001
                 continue
@@ -1203,11 +1485,16 @@ def _mcp_call(tok, name, args, expect=None):
     if parsed is None or (expect is not None and expect not in parsed):
         raise RuntimeError(
             "%s returned nothing this reader could use%s. Keys seen: %s. "
-            "First 240 chars: %r"
+            # 900, NOT 240. The validation error naming the bad argument was
+            # CUT OFF at 240 characters — "Invalid arguments for to" — so the
+            # failure reported itself and withheld the one word that mattered.
+            # A failure must carry its evidence; truncating the evidence to a
+            # tidy length is the same defect as not printing it.
+            "First 900 chars: %r"
             % (name, (" (no %r)" % expect) if expect else "",
                sorted(parsed or out)[:12] if isinstance(parsed or out, dict)
                else type(parsed or out).__name__,
-               json.dumps(parsed if parsed is not None else out)[:240]))
+               json.dumps(parsed if parsed is not None else out)[:900]))
     return parsed
 
 
@@ -1232,7 +1519,27 @@ def verify_hops_3_and_4(tok, stage, plan):
     res = {"hop3": {"state": "ABSENT", "why": "not attempted"},
            "hop4": {"state": "ABSENT", "why": "not attempted"}, "detail": []}
     if not (plan and stage):
-        res["hop3"]["why"] = res["hop4"]["why"] = "no plan or no prestage"
+        # NAME WHERE THE QUESTION WENT. On the single-agent path there is no
+        # plan, so these two cannot run — and "no plan or no prestage" reads
+        # as a broken harness rather than as a check that moved. It moved:
+        #   hop 3 (every add became an item)  -> chatcut_gate
+        #                                        .check_every_ruling_landed,
+        #                                        asked of the RULINGS against
+        #                                        the timeline instead of of
+        #                                        the plan against the timeline
+        #   hop 4 (the item carries what was
+        #          named)                     -> chatcut_gate
+        #                                        .check_card_props_resolve,
+        #                                        for cards. THE OTHER FAMILIES
+        #                                        ARE NOT COVERED, and that is
+        #                                        a gap, not a delegation.
+        res["hop3"]["why"] = (
+            "no plan — superseded by GATE B check_every_ruling_landed, which "
+            "asks the same question of the rulings against the timeline")
+        res["hop4"]["why"] = (
+            "no plan — GATE B check_card_props_resolve covers CARDS only; "
+            "whether a text/sfx/zoom item carries what its ruling named is "
+            "UNCHECKED on this path")
         return res
     man = vc.plan_manifest(plan)
     pid = stage["projectId"]
@@ -1434,9 +1741,9 @@ def verify_hops_3_and_4(tok, stage, plan):
                     "why": "could not read the overrides off the item at frame "
                            "%s — inspect_item gave neither a JSON node, a "
                            "`propertyOverrides:` line, nor any `(override)` "
-                           "marker. UNCHECKED. First 240 chars of what it did "
+                           "marker. UNCHECKED. First 900 chars of what it did "
                            "return: %r"
-                           % (r["from"], str((det or {}).get("_text") or "")[:240])}
+                           % (r["from"], str((det or {}).get("_text") or "")[:900])}
                 return res
             by_from[_key] = dict(by_from[_key], propertyOverrides=_po)
         except Exception as e:                                    # noqa: BLE001
@@ -1504,6 +1811,412 @@ def _chain_items(tok, stage):
         return None
 
 
+# ── GATE B: THE HARNESS READS CHATCUT BACK, AND THE AGENT DOES NOT EXPORT ────
+# Ruled by Zac 2026-09-16 with the single agent: the cross-checks are harness
+# checks between the placement call and the export, not things the agent asks
+# itself.
+
+RECORD_SPEC = "/work/spec.json"
+RECORD_RULINGS = "/work/rulings.json"
+RECORD_PATH = "/work/record.json"     # honoured if written; no longer asked for
+DEFAULT_THINK_TOKENS = 3000          # per call; the record Write thought for 546s
+TURN_CAP = 4                         # three strategic turns + one contingency; the fifth is terminal
+TURN_LAW_S = 120                     # a TURN over this is LOGGED (law miss); only the RUN bound kills (ruling 3).
+                                     # Was TURN_TIMEOUT_S=120 and terminal: h-th-think0's placement turn was
+                                     # killed mid-stream at 120s while the model was still generating — a
+                                     # bound of my own, not a ruling, turned a slow turn into a dead run.
+RUN_TIMEOUT_S = 300                  # was 1,500 (Zac, 2026-09-17); terminal, never a retry
+CACHE_FRACTION = 0.95                # every call after the first reads >= this x the prefix
+LAW_WALL_S = 120                     # a run over this is logged as a law miss with its stage line
+# The agent's "I have finished placing" signal. A Write, because
+# the agent already has Write and a new tool would be a new
+# schema entry — and a capability in the schema will be used.
+ABSENT_S = "ABSENT"
+# DONE_MARK / DONE2_MARK retired 2026-09-18 with the withhold they signalled.
+# HOW LONG THE HARNESS WAITS FOR /work/DONE2 BEFORE REWATCHING ANYWAY. Chosen
+# against the measured shape of turn 2: the fix batch is one round of
+# edit_item calls, and the slowest observed review turn was 125.8s. 420s is
+# well past a fix batch and well short of the 1500s run timeout, so a stalled
+# turn 2 costs a bounded wait instead of the whole run.
+REWATCH2_WAIT_S = 420
+# THE STREAM GOING QUIET IS ITSELF A FAILURE, AND IT HAD NO BOUND.
+#
+# Measured on the blue-shirt run: the agent produced events for 293s and then
+# NOTHING for 1,207s — 80.6% of the wall at 0.03 cores — until the 1,500s
+# watchdog. It had ended a turn without writing /work/DONE (it had nothing to
+# place); the harness waits for /work/DONE before sending anything; the CLI
+# waits on stdin. Both sides waiting, neither bounded.
+#
+# I had built a bound for the SECOND mark and never asked whether the first had
+# the same hole. It did. The rule is the one that keeps recurring here: fixing
+# an instance is not fixing the class. Every wait in this harness now carries a
+# bound — the MCP transport at 120s, the export poll at ~236s, the detector
+# join at 25s, the run at 1,500s, and this.
+#
+# 240s is generous against the longest turn ever measured here (97.6s) and far
+# short of the run timeout, so a deadlock costs a bounded wait instead of the
+# whole budget.
+STREAM_IDLE_S = 240
+
+# THE TOOLS THAT CHANGE THE TIMELINE. A "batch" is an assistant turn carrying
+# at least one of these; everything else (looking, reading, ToolSearch) is
+# free and does not advance the turn machine.
+MUTATING_TOOLS = ("edit_item", "edit_captions", "edit_asset", "split_item",
+                  "detach_audio", "smooth_audio", "apply_script")
+
+# THE SPEND CEILING, IN CUMULATIVE CACHE-READ TOKENS.
+#
+# Run 4 read 33,848,937 tokens across 96 assistant turns — $10.15 of read
+# inside a $25.97 run that was supposed to take three turns. The ceiling is
+# what makes "three turns" survivable when the shape fails anyway.
+#
+# THE ARITHMETIC, STATED BECAUSE IT DISAGREES WITH THE ESTIMATE. Run 4's mean
+# read was 352,593 tokens per assistant turn (33,848,937 / 96), and an
+# assistant turn is not a "turn" in the loop's sense: each tool call costs TWO
+# — one to emit it, one to read its result. So three LOOP turns with their
+# tool results is ~7 assistant turns, ~2.5M read, not the ~670k that three API
+# calls would cost. A 670k ceiling would kill every legitimate run inside
+# turn 2. This is set to permit the intended shape with headroom and to kill
+# anything on run 4's trajectory an order of magnitude early.
+READ_TOKEN_CEILING = 2_500_000
+# HOW THE HARNESS WAITS ON A CLOUD RENDER. Sums to ~240s, the same budget the
+# fixed `sleep(6) x 40` loop had, but front-loaded: a render that finishes
+# quickly is picked up in ~1s instead of ~6s. Measured locally, everything
+# AFTER the download costs 1.6s per rewatch (0.2s motion decode, 0.6s for 18
+# frame seeks, 0.8s scan) — so poll granularity, not our own processing, was
+# the harness-side latency worth removing.
+EXPORT_POLL_SCHEDULE = ([1] * 6 + [2] * 6 + [3] * 6 + [4] * 5 + [6] * 30)
+
+
+def derive_record(items, beats, base_item_id=None, why_text=""):
+    """The record, READ OFF THE TIMELINE. -> {spec, rulings}
+
+    THE RECORD WRITE IS GONE (Zac, 2026-09-17). The agent's one Write of
+    rulings-and-spec was the 546s turn — a plan before the placement, in the
+    record's clothes. What a read-back cannot carry is only the WHY, and that
+    is one line per item after placing, taken from the reply text.
+    A ruling per beat: the families that landed inside the beat's window
+    (item start in source seconds via an untrimmed base), `nothing` where
+    none did. Families come from what the item IS: a non-base video item is a
+    cut; a motion-graphic whose asset name starts `caption:` is a caption, any
+    other is a card; an effect is a zoom; audio is sfx; a transition is a
+    transition.
+    """
+    _fam = []
+    for i in (items or []):
+        kind = str(i.get("itemType") or "")
+        if str(i.get("id") or "").replace("-", "")[:10] == str(base_item_id or "").replace("-", "")[:10]:
+            continue
+        _as = i.get("asset") if isinstance(i.get("asset"), dict) else {}
+        name = str(_as.get("name") or "")
+        fam = ("cut" if kind == "video" else
+               ("caption" if name.startswith("caption:") else "card") if kind == "motion-graphic" else
+               "zoom" if kind == "effect" else "sfx" if kind == "audio" else
+               "transition" if kind == "transition" else None)
+        if not fam:
+            continue
+        tr = i.get("timelineRange") or {}
+        try:
+            t0 = int(tr.get("fromFrame")) / 30.0
+        except (TypeError, ValueError):
+            continue
+        _fam.append((t0, fam, str(i.get("id") or "")[:8], name))
+    rulings = []
+    for b in (beats or []):
+        a, z = float(b.get("t_start", 0)), float(b.get("t_end", 0))
+        landed = [(f, iid, nm) for t0, f, iid, nm in _fam if a <= t0 < z]
+        rulings.append({"beat": int(b.get("i", len(rulings))),
+                        "treatment": sorted({f for f, _, _ in landed}) or ["nothing"],
+                        "items": [iid for _, iid, _ in landed],
+                        "derived": True})
+    spec = {"mode": "derived", "why": (why_text or "").strip()[:4000] or None,
+            "derived_from": "%d item(s), %d beat(s)" % (len(items or []), len(beats or []))}
+    return {"spec": spec, "rulings": rulings}
+
+
+def read_record(spec_path=RECORD_SPEC, rulings_path=RECORD_RULINGS,
+                record_path=RECORD_PATH):
+    """({spec, rulings}, why) — THE DURABLE ARTEFACT, read off disk.
+
+    Zac, 2026-09-16: "And the durable artefact stays. Write the rulings and the
+    ledger the same way — that's how the 43% was found, and losing it means
+    losing the ability to diagnose anything."
+
+    The single agent writes both with the Write tool; the harness reads them
+    here and the gate refuses a run that recorded neither. It is deliberately
+    NOT inferred from the timeline: what is on the timeline is what the agent
+    DID, and the spec is what it MEANT — the 43% was diagnosed by comparing the
+    two, and a record reconstructed from the placements can only ever agree
+    with them.
+
+    EVERY FAILURE IS NAMED RATHER THAN EMPTY. A missing file, a malformed file
+    and an agent that ruled nothing are three different facts, and `{}` for all
+    three is how "the agent recorded nothing" becomes indistinguishable from
+    "the harness could not read it".
+    """
+    out, why = {"spec": None, "rulings": None}, []
+    # ONE FILE FIRST. Two Writes were two API calls (final-arch-1); the
+    # paragraph now asks for one record carrying both keys. The two-file
+    # shape stays readable so an older run's record still parses.
+    _one = None
+    if record_path and os.path.exists(record_path):
+        try:
+            with open(record_path, encoding="utf-8") as fh:
+                _one = json.load(fh)
+            if not isinstance(_one, dict):
+                why.append("record.json FAILED: expected an object, got %s"
+                           % type(_one).__name__)
+                _one = None
+            else:
+                why.append("record.json MEASURED (one file)")
+        except Exception as e:                                    # noqa: BLE001
+            why.append("record.json FAILED to parse: %s" % str(e)[:120])
+            _one = None
+    for key, path in (("spec", spec_path), ("rulings", rulings_path)):
+        if isinstance(_one, dict) and key in _one:
+            val = _one[key]
+        elif not os.path.exists(path):
+            why.append("%s ABSENT (%s was never written)" % (key, path))
+            continue
+        else:
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    val = json.load(fh)
+            except Exception as e:                                # noqa: BLE001
+                why.append("%s FAILED to parse: %s" % (key, str(e)[:120]))
+                continue
+        # THE SHAPE IS CHECKED HERE, where the file is still in hand. A dict
+        # iterated as a list yields its KEYS — strings — and this lane has
+        # already lost a run to `'str' object has no attribute 'get'` after
+        # printing a plausible count on the way to the crash.
+        if key == "rulings" and not isinstance(val, list):
+            if isinstance(val, dict) and isinstance(val.get("rulings"), list):
+                val = val["rulings"]
+            else:
+                why.append("rulings FAILED: expected a list, got %s"
+                           % type(val).__name__)
+                continue
+        if key == "spec" and not isinstance(val, dict):
+            why.append("spec FAILED: expected an object, got %s"
+                       % type(val).__name__)
+            continue
+        out[key] = val
+        why.append("%s MEASURED (%s)"
+                   % (key, "%d ruling(s)" % len(val) if key == "rulings"
+                      else "mode=%r" % val.get("mode")))
+    return out, "; ".join(why)
+
+
+def read_back(tok, stage):
+    """Every item on the timeline, plus the catalogues. THE HARNESS'S OWN READ.
+
+    TWO PROPERTIES, AND THEY ARE THE WHOLE POINT OF THE FUNCTION.
+
+    NO WINDOW. `preview_timeline` takes `tracks`, `fromFrame` and `toFrame`.
+    An agent that chooses the window chooses what the gate sees, so this passes
+    none of them — every track, every frame. Reading the agent's own preview
+    call would have been cheaper and would have handed the agent the gate.
+
+    AND IT PAGES. The existing `_chain_items` asks for `limit: 100` and takes
+    what comes. A timeline with more entries than that reads SHORT, and a short
+    read makes the reconciliation report placements that landed as never having
+    landed — a truncated list presented as a total, which is a standing rule
+    here and would have fired as a false WITHHOLD on exactly the busy edits
+    this lane is trying to produce. `nextOffset` is followed to exhaustion and
+    a page cap that is hit is FAILED, never a quiet stop.
+    """
+    out = {"items": None, "fps": None, "library_ids": None,
+           "component_props": None, "read_why": ""}
+    ents, off, pages = [], 0, 0
+    try:
+        while True:
+            pages += 1
+            if pages > 40:
+                out["read_why"] = ("timeline paging did not terminate after "
+                                   "40 pages (%d entries so far) — FAILED "
+                                   "rather than truncated" % len(ents))
+                return out
+            tl = _mcp_call(tok, "preview_timeline",
+                           {"projectId": stage["projectId"],
+                            # 100, NOT 200. The only other preview_timeline
+                            # call in this file sends 100 and works; this one
+                            # sent 200 and came back `MCP error -32602: Input
+                            # validation error: Invalid arguments`, so the
+                            # harness could not read its own timeline back and
+                            # the review had no window to render — on a run
+                            # where the agent had successfully placed 8 items.
+                            # Two call sites, two limits, one schema.
+                            "views": ["timeline"], "limit": 100,
+                            **({"offset": off} if off else {})},
+                           expect="timeline")
+            blk = (tl.get("timeline") or {})
+            ents += [e for e in (blk.get("entries") or [])
+                     if e.get("kind") == "item"]
+            nxt = blk.get("nextOffset")
+            if not nxt or nxt == off:
+                break
+            off = nxt
+        out["items"] = ents
+        # FROM THE CANVAS, THEN THE STAGE, THEN NAMED. My first line here read
+        # `FPS_DEFAULT`, which lives in plan_for_chatcut.py and does not exist
+        # in this module — a NameError on every gate run, caught by pyflakes
+        # before it shipped rather than by a dead run.
+        out["fps"] = ((tl.get("canvas") or {}).get("fps")
+                      or (blk.get("canvas") or {}).get("fps")
+                      or stage.get("fps") or 30)
+        out["read_why"] = "%d item(s) over %d page(s)" % (len(ents), pages)
+    except Exception as e:                                        # noqa: BLE001
+        out["read_why"] = "preview_timeline FAILED: %s" % (str(e)[:200],)
+        return out
+    # THE SOUND LIBRARY, LIVE. The agent is given the cached catalogue in its
+    # prefix so it never spends a turn searching; the GATE reads the live one,
+    # because a cached catalogue and a live one are indistinguishable right up
+    # until they are not.
+    try:
+        lib = _mcp_call(tok, "browse_library",
+                        # 30 IS THE SCHEMA MAX, read from the live tool
+                        # definition on 2026-09-17, not from memory. This sent
+                        # 200 — the same defect as preview_timeline's limit,
+                        # in a call nobody had exercised, and it would have
+                        # failed -32602 the first time the sound library was
+                        # read.
+                        {"category": "sound-effects", "limit": 30},
+                        expect="items")
+        out["library_ids"] = [str(x.get("id") or "").split(":")[-1]
+                              for x in (lib.get("items") or [])]
+    except Exception as e:                                        # noqa: BLE001
+        out["read_why"] += "; browse_library FAILED: %s" % (str(e)[:120],)
+    return out
+
+
+def caption_band(tok, stage):
+    """(band, why) — where ChatCut's caption layer sits, as y fractions.
+
+    THE THIRD OCCUPANT, AND NOTHING READ IT. hop 6 checks a graphic against the
+    face and the source's own burned-in text; hop 5 checks it against other
+    TRACK ITEMS. ChatCut's captions are neither — `edit_captions` is a separate
+    surface with no item — so a card landing on the captions passed both.
+
+    THE SHAPE IS NOT VERIFIED and this says so rather than guessing. Our own
+    component's measured caption band is a fact about a DIFFERENT renderer, so
+    using it here would be a guess about ChatCut wearing a measurement's
+    clothes. Several plausible keys are tried; when none parse, the result is
+    ABSENT WITH THE KEYS THAT DID COME BACK, which is what makes the first real
+    run able to settle it instead of another reading of the docs.
+    """
+    try:
+        r = _mcp_call(tok, "read_captions", {"projectId": stage["projectId"]})
+    except Exception as e:                                        # noqa: BLE001
+        return None, "read_captions FAILED: %s" % (str(e)[:160],)
+    if not isinstance(r, dict):
+        return None, "read_captions returned %s" % type(r).__name__
+    cards = (r.get("cards") or r.get("captions") or r.get("items") or [])
+    if not cards:
+        return None, ("read_captions returned no cards (keys: %s) — either "
+                      "captions are off or the reader is looking in the wrong "
+                      "place" % sorted(r)[:8])
+    for c in cards:
+        if not isinstance(c, dict):
+            continue
+        lay = c.get("layout") or c.get("position") or c
+        for k0, k1 in (("y0", "y1"), ("top", "bottom"),
+                       ("yStart", "yEnd"), ("y", "height")):
+            a, b = lay.get(k0), lay.get(k1)
+            if a is None or b is None:
+                continue
+            try:
+                a, b = float(a), float(b)
+            except (TypeError, ValueError):
+                continue
+            if k1 == "height":
+                b = a + b
+            # normalise pixels to fractions if they look like pixels
+            if b > 1.5:
+                b, a = b / 1920.0, a / 1920.0
+            if 0.0 <= a < b <= 1.0:
+                return (a, b), ("MEASURED from read_captions %r/%r on %d card(s)"
+                                % (k0, k1, len(cards)))
+    return None, ("%d caption card(s) and none carried a readable band — keys "
+                  "seen: %s" % (len(cards),
+                                sorted(cards[0])[:10]
+                                if isinstance(cards[0], dict) else "?"))
+
+
+def gate_b(tok, stage, rulings, spec, source_duration_s=None,
+           prefetched=None, bands=None, beats=None):
+    """Read ChatCut back and check the placements against it. -> report.
+
+    `source_duration_s` is None when the probe did not read one — NOT 0.0. A
+    duration nobody measured and a zero-length clip are different facts, and
+    the cutaway address check treats the first as ABSENT rather than failing
+    every cutaway for being past the end of a zero-second source.
+    """
+    import sys as _sys
+    _sys.path.insert(0, "/root")
+    import chatcut_gate as _g
+    # ONE READ FOR THE WHOLE POST-STREAM PHASE. The pixel hops run first and
+    # need the same item list; two readers disagreeing about what is on the
+    # timeline is how a placement reads as missing to one check and present to
+    # another. `prefetched` is that read, never the agent's.
+    st = prefetched if prefetched is not None else read_back(tok, stage)
+    st["spec"] = spec
+    st["bands"] = bands
+    st["beats"] = beats          # a ruling's anchor by beat index (gate, 2026-09-17)
+    st["source_duration_s"] = source_duration_s
+    rep = _g.gate(rulings, st)
+    rep["read_why"] = st.get("read_why")
+    # THE ITEMS THE GATE ACTUALLY REASONED ABOUT, for hops 5 and 6 to share.
+    # Private (leading underscore) and stripped before the record is written —
+    # a full item list in the persisted JSON is bulk nobody reads.
+    rep["_items"] = st.get("items")
+    # PRINTED IN FULL, WITH THE EVIDENCE. `report_lines` was written to be shown
+    # to the AGENT and had no caller at all — the gate runs after the stream
+    # ends, so there is nobody left in the conversation to show it to. A
+    # producer with no consumer, in the module built this afternoon.
+    #
+    # It goes to the run log instead, which is where it is actually read, and
+    # it carries each finding's `read:` line — a check that cannot say what it
+    # READ makes the next run the debugger. The previous version truncated the
+    # why at 150 chars and dropped the evidence entirely.
+    print("  GATE B          : %s  (%s)" % (rep["verdict"], st.get("read_why")),
+          flush=True)
+    for _l in _g.report_lines(rep):
+        print("     " + _l, flush=True)
+    return rep
+
+
+def harness_export(tok, stage):
+    """THE EXPORT THE AGENT NO LONGER HAS.
+
+    `submit_export` is out of the allowlist, so this is the only path to a
+    deliverable and it runs AFTER the gate. Instructing the agent not to export
+    until the gate passes would have been a preference; removing the tool makes
+    it a property. Same law that made "do not go looking" true by withholding
+    browse_library rather than by asking.
+    """
+    try:
+        # THE ID COMES BACK IN THE TEXT, NOT IN A KEY. Measured 2026-09-16: the
+        # export SUBMITTED — "Submitted export.\n  renderId: c93543eec1\n
+        # status: rendering" — and this reader reported FAILED because it
+        # demanded a JSON `renderId` and the server answers in `_text`. A
+        # SUCCESSFUL call read as a failure, which is the family this repo is
+        # built against running in the other direction: the run reported no
+        # export while ChatCut was rendering one.
+        # `_edit_frames` already regexes the blob; this does the same, and
+        # NAMES the absence rather than returning a None that reads as an id.
+        ex = _mcp_call(tok, "submit_export",
+                       {"projectId": stage["projectId"]}, expect=None)
+        _blob = json.dumps(ex) + str(ex.get("_text") or "")
+        _m = re.search(r"renderId[\"':\s]+([0-9a-f-]{8,})", _blob)
+        if not _m:
+            return {"state": "FAILED",
+                    "why": "submit_export named no renderId anywhere in its "
+                           "response: %s" % _blob[:400]}
+        return {"state": "MEASURED", "renderId": _m.group(1)}
+    except Exception as e:                                        # noqa: BLE001
+        return {"state": "FAILED", "why": str(e)[:200]}
+
+
 def verify_hop5_composition(tok, stage, plan, items):
     """HOP 5 — no frame ships with two placements' pixels on top of each other.
 
@@ -1527,11 +2240,17 @@ def verify_hop5_composition(tok, stage, plan, items):
     _sys.path.insert(0, "/root")
     import verify_chain as vc
     out = {"state": "ABSENT", "why": "not attempted", "detail": []}
-    if not (plan and stage and items):
-        out["why"] = "no plan, prestage or items"
+    # THE PLAN WAS NEVER USED HERE. `man = vc.plan_manifest(plan)` was assigned
+    # and never read — pyflakes said so all day and I read the warning four
+    # times as pre-existing noise. The mechanism is per-track renders off
+    # `items`, which is timeline state, so guarding on a plan turned the ONE
+    # check that can see two placements over each other OFF for the entire
+    # single-agent path. Four of seven hops went ABSENT when the plan was
+    # removed; this is the one that did not have to.
+    if not (stage and items):
+        out["why"] = "no prestage or no items"
         return out
     pid = stage["projectId"]
-    man = vc.plan_manifest(plan)
 
     # the frames worth checking: where two or more overlay items coincide
     ov = [it for it in items
@@ -1647,7 +2366,8 @@ def verify_hop5_composition(tok, stage, plan, items):
     return out
 
 
-def verify_hop6_clear(plan, source="/work/source.mp4"):
+def verify_hop6_clear(plan, source="/work/source.mp4", items=None,
+                      caption_band=None):
     """HOP 6 — nothing sits on the speaker's face or on the source's own text.
 
     REAL DETECTORS, NOT INVENTED ZONES. The sweep's first attempt at these two
@@ -1670,11 +2390,24 @@ def verify_hop6_clear(plan, source="/work/source.mp4"):
     import sys as _sys
     _sys.path.insert(0, "/root")
     import verify_chain as vc
-    out = {"state": "ABSENT", "why": "not attempted", "detail": []}
-    if not (plan and os.path.exists(source)):
-        out["why"] = "no plan or no source on disk"
+    out = {"state": "ABSENT", "why": "not attempted", "detail": [],
+           # THE MEASURED BAND PER PLACEMENT, EXPORTED. It was computed here
+           # and thrown away, so "does the placement sit where the ruling said"
+           # had no source of truth — a derived signal that is not published
+           # cannot be verified by anything downstream.
+           "bands": {}}
+    # FROM THE PLAN WHEN THERE IS ONE, FROM THE TIMELINE WHEN THERE IS NOT.
+    # This guarded on `plan`, so "nothing sits on the speaker's face or on the
+    # source's own burned-in text" was OFF for every single-agent run —
+    # silently, as one ABSENT hop among six others.
+    if not ((plan or items) and os.path.exists(source)):
+        out["why"] = "no plan, no items, or no source on disk"
         return out
-    man = vc.plan_manifest(plan)
+    if plan:
+        man = vc.plan_manifest(plan)
+    else:
+        import chatcut_gate as _cg6
+        man = _cg6.manifest_from_items(items)
     meas = vc.measured_bands()
     vis = [r for r in man if r["type"] == "motion-graphic" and r["from"] is not None]
     if not vis:
@@ -1711,12 +2444,32 @@ def verify_hop6_clear(plan, source="/work/source.mp4"):
     # found no input, which is the most expensive result to trust.
     bbands = set(burned.get("source_text_regions") or ())
 
+    # THE CAPTION BAND, MEASURED OR NAMED ABSENT — never assumed. It is passed
+    # in from `read_captions`, because ChatCut's caption layer is ChatCut's and
+    # our own component's measured band is a fact about a DIFFERENT renderer.
+    _cap_bands = set()
+    if caption_band:
+        try:
+            _cap_bands = set(vc.bands_touched(
+                (float(caption_band[0]), float(caption_band[1])),
+                fb.band_to_fraction))
+        except Exception:                                         # noqa: BLE001
+            _cap_bands = set()
+    out["caption_band"] = (
+        {"band": list(caption_band), "names": sorted(_cap_bands)}
+        if _cap_bands else
+        {"state": "ABSENT",
+         "why": "no caption band was read, so whether a graphic sits on the "
+                "captions is UNCHECKED — not clear"})
     bad = []
     for r in vis:
         t0 = r["from"] / 30.0
         t1 = (r["from"] + (r["dur"] or 0)) / 30.0
         occ = fb.face_occupied_bands(traj, t0, t1)
         b = vc.band_of(r, meas)
+        out["bands"][str(r["slot"])] = {
+            "band": [round(b[0], 4), round(b[1], 4)],
+            "names": sorted(vc.bands_touched(b, fb.band_to_fraction))}
         # THE CAPTION TRACK IS AN OCCUPANT, NOT A PLACEE. production's
         # `_caption_occupied_bands` exists so OTHER graphics avoid where our
         # captions land — the caption track itself goes where its style puts
@@ -1734,9 +2487,17 @@ def verify_hop6_clear(plan, source="/work/source.mp4"):
         # occupies is one the face or the source's text also owns — not when
         # its edge touches the seam between two bands.
         mine = vc.bands_touched(b, fb.band_to_fraction)
-        for name in sorted(mine & (occ | bbands)):
+        # THE CAPTION LAYER IS THE THIRD OCCUPANT, and it was counted by
+        # nothing. The comment above defers card-vs-caption to hop 5, which is
+        # true only while the captions are a TRACK ITEM hop 5 can hide and
+        # re-render. On the single-agent path they are `edit_captions` — a
+        # separate surface with no item — so hop 5 cannot see them and this
+        # skipped them. A card landing on the captions passed both checks.
+        _capnames = set(_cap_bands or ())
+        for name in sorted(mine & (occ | bbands | _capnames)):
             bad.append((r["slot"], name,
-                        "face" if name in occ else "source text",
+                        "face" if name in occ else
+                        ("source text" if name in bbands else "the captions"),
                         1.0))
         out["detail"].append(
             "slot%-3s band %.3f-%.3f occupies %s | face %s | source text %s"
@@ -1755,16 +2516,17 @@ def verify_hop6_clear(plan, source="/work/source.mp4"):
     return out
 
 
-def _audio_lag_ms(a_path, b_path, at=11.0, dur=3.0):
+def _audio_lag_ms(a_path, b_path, at=11.0, dur=3.0, b_at=None):
     """How late a_path's audio is against b_path's, in ms. None if unmeasurable.
 
     Envelope cross-correlation at 2ms resolution. A source-against-itself
     control reads exactly 0 at r=1.000, so the instrument has no bias of its
     own — which is the only reason a 42ms reading can be believed.
     """
-    def env(f):
+    def env(f, _at=None):
         p = subprocess.run(
-            ["ffmpeg", "-v", "error", "-ss", "%.3f" % at, "-t", "%.3f" % dur,
+            ["ffmpeg", "-v", "error", "-ss",
+             "%.3f" % (at if _at is None else _at), "-t", "%.3f" % dur,
              "-i", f, "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le", "-"],
             capture_output=True, timeout=300)
         if p.returncode != 0 or not p.stdout:
@@ -1775,7 +2537,14 @@ def _audio_lag_ms(a_path, b_path, at=11.0, dur=3.0):
         w = 32                                   # 2ms at 16kHz
         return [math.sqrt(sum(x * x for x in v[i:i + w]) / w)
                 for i in range(0, n - w, w)]
-    A, B = env(a_path), env(b_path)
+    # SEPARATE OFFSETS, BECAUSE AN EDIT IS NOT ITS SOURCE. Correlating both
+    # files at the same second is right for the DELIVERED file against the
+    # source it was cut from only when nothing was removed. On an edit with
+    # cuts, timeline 11.0s is some OTHER source second, and correlating them
+    # measures the cut, not the sync — it would report a large "lag" on a
+    # perfectly synced edit. The caller maps a timeline moment back through
+    # the kept spans and passes the source second as b_at.
+    A, B = env(a_path), env(b_path, b_at if b_at is not None else at)
     if not A or not B:
         return None
     n, best = min(len(A), len(B)), (-2.0, 0)
@@ -1868,34 +2637,170 @@ SOURCE_FRAMES_N = 14
 EDIT_FRAMES_N = 25                   # preview_timeline's cap, re-read 2026-09-16
 
 
-def _frames_of(video, n, out_dir, width=480):
-    """N evenly-spaced frames of a video, as individual readable images."""
+SHEET_PER = 8            # review default; watch_asset tiles 20 (source and edit)
+SHEET_COLS = 4
+SHEET_CELL_W = 280       # 1120 x ~995 px -> ~1.5k tokens a sheet; three under 5k (Zac, 2026-09-17)
+
+
+def _deep_find(o, key):
+    """First value under `key` anywhere in a nested envelope, or None."""
+    if isinstance(o, dict):
+        if key in o and o[key] not in (None, ""):
+            return o[key]
+        for v in o.values():
+            r = _deep_find(v, key)
+            if r is not None:
+                return r
+    elif isinstance(o, list):
+        for v in o:
+            r = _deep_find(v, key)
+            if r is not None:
+                return r
+    return None
+
+
+def tile_sheets(entries, out_dir, per_sheet=SHEET_PER, cols=SHEET_COLS,
+                cell_w=SHEET_CELL_W):
+    """Frames -> a few contact sheets with the label burned in. -> [png paths]
+
+    UNDER 20 BLOCKS PER MESSAGE. The API's cache lookup walks back ~20 content
+    blocks from a breakpoint; a user message of 14 or 24 image blocks pushes
+    the previous breakpoint out of reach and the NEXT call rewrites the whole
+    prefix (final-arch-2: calls 2, 4 and 5 read 0 / 120k / 120k and wrote ~300k
+    each, ~$5.8 of the run's write). Eight frames per sheet turns 24 frames
+    into three blocks. Cells keep the frame's aspect; the label (a timestamp or
+    a frame number) is burned top-left so the agent can still name a moment.
+    `entries` are [(label, path)]; an unreadable frame leaves an empty cell
+    with its label, never a silently shorter sheet.
+    """
+    from PIL import Image, ImageDraw
     os.makedirs(out_dir, exist_ok=True)
-    dur = 0.0
-    try:
-        dur = float(subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-             "-of", "csv=p=0", video],
-            capture_output=True, text=True, timeout=120).stdout.strip() or 0.0)
-    except Exception:                                             # noqa: BLE001
-        return []
-    if dur <= 0:
-        return []
     out = []
-    for i in range(n):
-        t = dur * (i + 0.5) / n
-        fp = os.path.join(out_dir, "f%02d.jpg" % i)
-        r = subprocess.run(
-            ["ffmpeg", "-v", "error", "-y", "-ss", "%.3f" % t, "-i", video,
-             "-vf", "scale=%d:-2" % width, "-frames:v", "1", "-q:v", "4", fp],
-            capture_output=True, timeout=300)
-        if r.returncode == 0 and os.path.exists(fp) and \
-                os.path.getsize(fp) > 2000:
-            out.append((round(t, 2), fp))
+    entries = list(entries or [])
+    for si in range(0, len(entries), max(1, per_sheet)):
+        chunk = entries[si:si + per_sheet]
+        ims = []
+        for lbl, pth in chunk:
+            try:
+                im = Image.open(pth).convert("RGB")
+            except Exception:                                     # noqa: BLE001
+                im = None
+            ims.append((lbl, im))
+        cell_h = max((int(cell_w * im.height / max(1, im.width)) for _, im in ims if im is not None),
+                     default=int(cell_w * 16 / 9))
+        rows = (len(chunk) + cols - 1) // cols
+        sheet = Image.new("RGB", (cols * cell_w, rows * cell_h), (16, 16, 16))
+        draw = ImageDraw.Draw(sheet)
+        for k, (lbl, im) in enumerate(ims):
+            x, y = (k % cols) * cell_w, (k // cols) * cell_h
+            if im is not None:
+                sheet.paste(im.resize((cell_w, cell_h)), (x, y))
+            draw.rectangle([x, y, x + 8 + 9 * len(str(lbl)), y + 22], fill=(0, 0, 0))
+            draw.text((x + 4, y + 4), str(lbl), fill=(255, 255, 0))
+        fp = os.path.join(out_dir, "sheet_%02d.jpg" % (len(out) + 1))
+        sheet.convert("RGB").save(fp, "JPEG", quality=85, optimize=True)
+        out.append(fp)
     return out
 
 
-def _img_block(path, media="image/jpeg"):
+def watch_asset(tok, asset_id, dur_s, out_dir, fps=2.0, per_sheet=20, cols=5,
+                cell_w=180, rpc=None):
+    """Watch an asset THROUGH ChatCut: inspect_asset, dense, native, aligned.
+
+    ONE INSTRUMENT FOR SEEING (Zac, 2026-09-17): the references were watched
+    this way, the source is watched this way before placing, and the composed
+    edit is watched this way at each rewatch. No ffmpeg stills, no second
+    pipeline. Exact `sourceTimesMs` at `fps` (25 per call, the schema's cap),
+    the editor's own timecode strip under every frame, and transcript rows for
+    up to six ranges covering the clip, so the words sit beside the frames
+    they were said over. Tiled 20 to a sheet for cost: 40 frames of a 20s
+    source are two sheets.
+    -> {"sheets": [png], "frames": n, "times": [s], "transcript": str,
+        "state": MEASURED|ABSENT|FAILED, "why": str}
+    `rpc` is injectable so a check can drive this without ChatCut.
+    """
+    import chatcut_reference as _cr
+    rpc = rpc or (lambda args, mid: mcp_rpc(tok, "tools/call",
+                                            {"name": "inspect_asset", "arguments": args}, mid))
+    out = {"sheets": [], "frames": 0, "times": [], "transcript": "",
+           "state": "ABSENT", "why": "not attempted"}
+    if not asset_id or not dur_s or dur_s <= 0:
+        out["why"] = "no asset id or duration (%r, %r)" % (asset_id, dur_s)
+        return out
+    step = 1.0 / float(fps)
+    times = [round(t, 3) for t in
+             [i * step for i in range(int(dur_s / step) + 1)] if t <= dur_s - 0.5]
+    ranges, nr = [], min(6, max(1, int(round(dur_s / 4.0))))
+    for k in range(nr):
+        ranges.append({"startMs": int(k * dur_s * 1000 / nr),
+                       "endMs": int((k + 1) * dur_s * 1000 / nr)})
+    urls, tx = [], []
+    for ci in range(0, len(times), 25):
+        chunk = times[ci:ci + 25]
+        args = {"assetId": asset_id, "sourceTimesMs": [int(round(t * 1000)) for t in chunk],
+                "includeTimecode": True}
+        if ci == 0:
+            args["transcriptRangesMs"] = ranges
+        try:
+            r = rpc(args, 700 + ci)
+        except Exception as e:                                    # noqa: BLE001
+            out["state"], out["why"] = "FAILED", "inspect_asset: %s: %s" % (type(e).__name__, str(e)[:160])
+            return out
+        if r.get("error"):
+            out["state"], out["why"] = "FAILED", "inspect_asset error: %s" % str(r["error"])[:200]
+            return out
+        urls += _cr.frame_urls(r)
+        if ci == 0:
+            tx.append(_cr.transcript_lines(_cr.structured(r)))
+    got, fst = _cr.fetch(urls, out_dir, cap=len(times) + 5)
+    if not got:
+        out["state"], out["why"] = "ABSENT", "inspect_asset returned %d frame url(s); %s" % (len(urls), fst)
+        return out
+    entries = [("%.1fs" % times[i] if i < len(times) else "?", pth) for i, (_u, pth) in enumerate(got)]
+    out["sheets"] = tile_sheets(entries, os.path.join(out_dir, "sheets"), per_sheet=per_sheet,
+                                cols=cols, cell_w=cell_w)
+    out["frames"] = len(got)
+    out["times"] = times[:len(got)]
+    # THE RANGE LINES ONLY: the per-word timings repeat what the beats block
+    # already carries, at ~1k tokens (measured 2026-09-17).
+    out["transcript"] = "\n".join(ln for ln in "\n".join(tx).splitlines()
+                                  if not ln.strip().startswith("word timings"))
+    out["state"] = "MEASURED"
+    out["why"] = "%d frame(s) at %.1ffps over %.1fs -> %d sheet(s); %s" % (len(got), fps, dur_s, len(out["sheets"]), fst)
+    return out
+
+
+def upload_asset(tok, pid, path):
+    """The rendered edit into the project's media pool. -> assetId or None.
+
+    The same import path prestage uses for the source (import_media session +
+    the plugin's upload helper), so a rewatch can be served through
+    inspect_asset like everything else the agent sees.
+    """
+    sess = mcp_rpc(tok, "tools/call", {"name": "import_media",
+                                       "arguments": {"action": "create_session", "projectId": pid}}, 40)
+    _tok = _deep_find(sess, "token")
+    _ep = _deep_find(sess, "endpoint")
+    if not (_tok and _ep):
+        raise RuntimeError("import session returned no token/endpoint: %s" % str(sess)[:200])
+    helper = ("/root/.claude/plugins/cache/chatcut-inc/chatcut/1.10.12"
+              "/skills/asset-import/scripts/upload-media.mjs")
+    _out = path + ".import.json"
+    r = subprocess.run(["node", helper, "--token", _tok, "--endpoint", _ep,
+                        "--input", path, "--json-out", _out],
+                       capture_output=True, text=True, timeout=600)
+    if r.returncode != 0:
+        raise RuntimeError("upload helper exited %d: %s" % (r.returncode, (r.stderr or "")[-300:]))
+    return _deep_find(json.load(open(_out, encoding="utf-8")), "assetId")
+
+
+def _img_block(path, media=None):
+    """An image block; the media type follows the file's extension unless
+    given. Sheets became JPEG on 2026-09-17: PNG sheets at ~1.5 MB each put
+    call 4 of h-th-think0 over the API's 32 MB request limit and the CLI
+    pruned the watch's first-message images — 66,764 tokens rewritten."""
+    if media is None:
+        media = "image/png" if path.lower().endswith(".png") else "image/jpeg"
     with open(path, "rb") as fh:
         return {"type": "image",
                 "source": {"type": "base64", "media_type": media,
@@ -1908,7 +2813,141 @@ def _message(blocks_and_text):
                                         "content": blocks_and_text}}
 
 
-def pass1_message(plan, beats, inventory_png, source_video):
+def source_beats(tok, stage, dur_s, wait_s=90):
+    """The SPOKEN WORDS against source time. -> ([beat], state, why).
+
+    THE CONSUMER WAS ALREADY WRITTEN AND NOTHING EVER FED IT. `pass1_message`
+    has carried a "THE TRANSCRIPT, against those frames" block the whole time,
+    keyed on `t_start`/`t_end`/`text`, and on this path `beats` came only from
+    a `transcript` argument nobody passes. So the agent was handed 14 stills of
+    a 20.4s NARRATION clip and asked to derive every moment from pictures —
+    with no words, no dead air and no cut points, because nothing in this file
+    computes any of them.
+
+    Measured on runs 6 and 7: one turn of 206s and one of 277s, no tool call,
+    the largest single cost in each run. Handing over the words it is deriving
+    is SUBTRACTION, not a new capability.
+
+    THE WORDS ARE ALREADY IN CHATCUT. `prestage` imports the source, so the
+    asset exists; `trigger_transcript` is idempotent and returns unchanged for
+    complete/transcribing states; `inspect_asset` with `transcriptRangesMs` is
+    the ONLY input that returns transcript rows, at most 6 ranges covering at
+    most 120 seconds, each row carrying its own timestamps. All three read from
+    the live tool definitions, not from memory.
+
+    ABSENT IS NAMED, NEVER EMPTY. A clip with no speech and a transcript that
+    did not finish are different facts and the agent is told which — a silent
+    `[]` would put it straight back to deriving, with nothing saying why.
+    """
+    _aid = (stage or {}).get("sourceAssetId")
+    if not _aid:
+        return [], ABSENT_S, "no source asset to transcribe"
+    try:
+        _mcp_call(tok, "trigger_transcript",
+                  {"asset": _aid, "projectId": stage["projectId"]})
+    except Exception as e:                                        # noqa: BLE001
+        return [], "FAILED", "trigger_transcript: %s" % str(e)[:160]
+    # RANGES ARE CAPPED BY THE SCHEMA: 6 ranges, 120s total. A 20s clip is one
+    # range; anything longer is chunked rather than silently truncated.
+    _ms = int(max(1.0, float(dur_s or 0)) * 1000)
+    _ranges, _a = [], 0
+    while _a < _ms and len(_ranges) < 6:
+        _b = min(_a + 120000 // 6, _ms)
+        _ranges.append({"startMs": _a, "endMs": _b})
+        _a = _b
+    _deadline = time.time() + wait_s
+    _last = "never polled"
+    while time.time() < _deadline:
+        try:
+            r = _mcp_call(tok, "inspect_asset",
+                          {"assetId": _aid, "projectId": stage["projectId"],
+                           "transcriptRangesMs": _ranges})
+        except Exception as e:                                    # noqa: BLE001
+            _last = "inspect_asset: %s" % str(e)[:140]
+            time.sleep(3)
+            continue
+        _rows = _transcript_rows(r, dur_s)
+        if _rows:
+            # WORDS BECOME BEATS HERE. 86 rows with timestamps are not
+            # editorial units; the planner path segmented them and ruled
+            # seven beats in 11-19s. Same segmenter, ported.
+            _words = [{"w": x["text"], "s": x["t_start"], "e": x["t_end"]}
+                      for x in _rows]
+            _beats = segment_beats(_words)
+            for _b in _beats:
+                _b["words"] = sum(1 for x in _rows
+                                  if _b["t_start"] <= x["t_start"] <= _b["t_end"])
+            return _beats, "MEASURED", ("%d word(s) -> %d beat(s) over %.1fs, "
+                                        "stamps read as %s"
+                                        % (len(_rows), len(_beats), dur_s or 0,
+                                           getattr(_transcript_rows, "unit",
+                                                   "?")))
+        _blob = (json.dumps(r) + str(r.get("_text") or "")).lower()
+        if "no_audio" in _blob or "no audio" in _blob:
+            return [], ABSENT_S, "the source has no audio to transcribe"
+        _last = "transcript not ready (keys: %s)" % sorted(r)[:8]
+        time.sleep(3)
+    return [], ABSENT_S, "%s after %ds" % (_last, wait_s)
+
+
+def _transcript_rows(r, dur_s=None):
+    """Transcript rows out of an inspect_asset envelope, shape-tolerantly.
+
+    THE UNIT IS DECIDED BY THE SOURCE'S KNOWN DURATION, NOT BY A MAGIC 300.
+    The first version divided any stamp above 300 by 1000 — a word at 301s of
+    a five-minute source would have been read as 0.3s. Now: `startMs/endMs`
+    are milliseconds by name; bare `start/end` are compared against dur_s
+    (seconds if the largest stamp fits it, else ms, else µs) and the choice is
+    reported in `_transcript_rows.unit` for the BEATS line to print.
+
+    THE SHAPE IS NOT ASSUMED. Twice this week a reader demanded one spelling
+    and called a good response empty, so this tries the plausible containers
+    AND falls back to parsing the text envelope, and the caller reports ABSENT
+    with the keys it saw rather than an empty list.
+    """
+    out, raw = [], []
+    def _walk(o):
+        if isinstance(o, dict):
+            _ms = "startMs" in o
+            _s = o.get("startMs", o.get("start", o.get("t_start")))
+            _e = o.get("endMs", o.get("end", o.get("t_end")))
+            _t = o.get("text", o.get("content"))
+            if _t and _s is not None and _e is not None:
+                raw.append((float(_s), float(_e), str(_t), _ms))
+                return
+            for v in o.values():
+                _walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                _walk(v)
+    _walk(r)
+    _transcript_rows.unit = "none"
+    if raw:
+        _mx = max(e for _, e, _, _ in raw)
+        if all(ms for *_, ms in raw):
+            _div, _transcript_rows.unit = 1000.0, "ms (startMs/endMs)"
+        elif dur_s and _mx <= float(dur_s) * 1.5:
+            _div, _transcript_rows.unit = 1.0, "s (fits the %.1fs source)" % dur_s
+        elif dur_s and _mx <= float(dur_s) * 1500.0:
+            _div, _transcript_rows.unit = 1000.0, "ms (%.0f vs %.1fs source)" % (_mx, dur_s)
+        elif dur_s:
+            _div, _transcript_rows.unit = 1e6, "us (%.0f vs %.1fs source)" % (_mx, dur_s)
+        else:
+            _div, _transcript_rows.unit = (1000.0 if _mx > 300 else 1.0), "GUESSED (no duration given)"
+        out = [{"t_start": a / _div, "t_end": b / _div, "text": t}
+               for a, b, t, _ in raw]
+    # AND THE TEXT ENVELOPE, when the rows only exist as prose.
+    if not out:
+        for m in re.finditer(r"(\d+):(\d{2})[.,](\d{1,3})\s*[-\u2192>]+\s*"
+                             r"(\d+):(\d{2})[.,](\d{1,3})\s*(.+)",
+                             str(r.get("_text") or "")):
+            a = int(m.group(1)) * 60 + int(m.group(2)) + int(m.group(3)) / 1000.0
+            b = int(m.group(4)) * 60 + int(m.group(5)) + int(m.group(6)) / 1000.0
+            out.append({"t_start": a, "t_end": b, "text": m.group(7).strip()})
+    return sorted(out, key=lambda b: b["t_start"])
+
+def pass1_message(plan, beats, inventory_png, source_watch=None,
+                  deciding=False):
     """WHAT THE AGENT IS SERVED BEFORE IT DECIDES ANYTHING.
 
     In order, in one message:
@@ -1932,25 +2971,60 @@ def pass1_message(plan, beats, inventory_png, source_video):
                        "everything you can place. You never author component "
                        "code and you never look anything up."})
         blocks.append(_img_block(inventory_png, "image/png"))
-    frames = _frames_of(source_video, SOURCE_FRAMES_N, "/work/src_frames")
-    if frames:
+    # ── THE REFERENCES: WHAT I LEARNED FROM WATCHING THEM ──────────────────
+    # Zac's ruling, 2026-09-16: "Claude watches all ten itself, through
+    # ChatCut... It analyses them itself and writes what it learned. Not a
+    # summary handed to it — its own reading of what it watched."
+    #
+    # WHAT CAME OUT, and why the replacement is TEXT. The previous artefact was
+    # Gemini's 38 gated moments plus sixteen contact sheets — 45,871 image
+    # tokens and 6,487 of prose, 52,358 in total, for 38 samples across 426
+    # seconds. Those sheets are gone. What replaces them is one document
+    # written from watching all ten at 2fps through inspect_asset — 852 samples
+    # of the same 426 seconds, twenty-two times the coverage — and the reading
+    # is worth more in the prefix than the pictures were, because the agent can
+    # open any reference itself with inspect_asset when it wants to look.
+    # TWO PATHS, like every other artefact this lane mounts: the container's
+    # copy first, then the one beside the module. Without the second, this
+    # branch is UNTESTABLE on a developer machine — it always takes the ABSENT
+    # path — and an artefact nobody can exercise locally is one whose failure
+    # is only ever discovered in a run.
+    # THE REFERENCE STANDARD IS THE WATCH. Its 13,810-character summary no
+    # longer rides in the first message (Zac's table, 2026-09-17: "it's in
+    # the watch"); the resumed session holds the ten readings themselves.
+    # THE SOURCE, WATCHED THROUGH CHATCUT (watch_asset): dense frames with the
+    # editor's timecode strip, tiled, and the transcript rows aligned to them.
+    _sw = source_watch or {}
+    if _sw.get("sheets"):
         blocks.append({"type": "text", "text":
-                       "THE SOURCE — %d frames across the whole clip, in order, "
-                       "at %s. Look at the footage before you decide anything: "
-                       "the plan is derived from the transcript and CANNOT SEE "
-                       "the picture, so it does not know what is already burned "
-                       "into the frame, where the speaker is, or what the shot "
-                       "already shows."
-                       % (len(frames),
-                          ", ".join("%.1fs" % t for t, _ in frames))})
-        for _t, fp in frames:
+                       "THE SOURCE — %d frames at 2fps across the whole clip, "
+                       "on %d sheet(s), each cell stamped with its source time. "
+                       "Look at the footage before you decide anything: the "
+                       "beats are derived from the transcript and cannot see "
+                       "what is already in the frame, where the speaker is, or "
+                       "what the shot already shows.%s"
+                       % (_sw.get("frames", 0), len(_sw["sheets"]),
+                          ("\n\nTHE WORDS, against those frames:\n" + _sw["transcript"])
+                          if _sw.get("transcript") else "")})
+        for fp in _sw["sheets"]:
             blocks.append(_img_block(fp))
-    if beats:
+    else:
         blocks.append({"type": "text", "text":
-                       "THE TRANSCRIPT, against those frames:\n"
+                       "THE SOURCE FRAMES: %s — %s. You are placing without "
+                       "having seen the footage; say so in your reply."
+                       % (_sw.get("state", "ABSENT"), _sw.get("why", "not watched"))})
+    if beats:
+        # THE BEATS, NOT THE WORDS. Each line is one editorial unit the agent
+        # rules on; hook and close are marked because that is where the
+        # corpus puts 64% of its sound.
+        blocks.append({"type": "text", "text":
+                       "THE BEATS — %d editorial unit(s), against those "
+                       "frames. Rule each one:\n" % len(beats)
                        + "\n".join(
-                           "  %6.2f-%6.2fs  %s"
-                           % (b.get("t_start", 0), b.get("t_end", 0),
+                           "  beat %-2s %6.2f-%6.2fs %-6s %s"
+                           % (b.get("i", "?"), b.get("t_start", 0),
+                              b.get("t_end", 0),
+                              ("[%s]" % b["role"]) if b.get("role") else "",
                               str(b.get("text") or "").split(" \u00b7 ")[0])
                            for b in beats)})
     # ── WHAT GOOD LOOKS LIKE, IN THE EXECUTING HALF TOO ────────────────
@@ -1961,73 +3035,22 @@ def pass1_message(plan, beats, inventory_png, source_video):
     # says what the edit as a whole is being held to. No rates — the density
     # rates GRADE and never instruct, and that law does not bend for being in
     # a different file.
-    blocks.append({"type": "text", "text":
-                   "WHAT THIS EDIT IS HELD TO. The pipeline that wrote your "
-                   "plan is graded against ten finished videos the owner of "
-                   "this product chose as the standard — not as inspiration, "
-                   "as the LEVEL. Those videos are not quiet: something "
-                   "arrives on screen often, it sits clear of the speaker's "
-                   "face and clear of the words already burned into the "
-                   "frame, and the moments they leave bare are left bare ON "
-                   "PURPOSE.\n"
-                   "You are not being asked to add to the plan — every "
-                   "editorial decision in it is already made, and inventing "
-                   "more is the failure. You ARE being asked to make the plan "
-                   "land: every placement it names, where it says, legible "
-                   "and clear at the frames it names. A placement that is "
-                   "present but illegible, or covered, or on a face, has not "
-                   "landed, and reporting it as placed is the one thing that "
-                   "cannot be recovered downstream."})
+    # THE SECOND HALF OF THIS DEPENDS ON WHOSE DECISION IT IS, and getting it
+    # wrong is not cosmetic. Written for an executor, it says "every editorial
+    # decision is already made, and inventing more is the failure" — handed to
+    # the SINGLE AGENT, which is the thing making those decisions, that is an
+    # instruction to place nothing. When a thing is promoted to a new role,
+    # every rule that constrains it was written for the old one and none of
+    # them announce that.
+    # THE "HELD TO" PREAMBLE IS GONE (2026-09-17): it pointed at reference
+    # sheets that no longer ride in this message — the watch holds them — and
+    # its second half restated the paragraph. The paragraph's own sentence,
+    # "you have watched the ten reference edits; they are the standard", is
+    # the whole of it.
     blocks.append({"type": "text", "text": plan})
     return _message(blocks)
 
 
-def pass2_message(frames, plan_frames):
-    """WHAT THE AGENT IS SERVED BEFORE IT FIXES ANYTHING — the edit itself.
-
-    The composed timeline with everything on it, as a sequence of frames
-    across the whole edit. Fetched, downloaded and handed over by the harness:
-    the agent spends no turn getting them.
-    """
-    blocks = [{"type": "text", "text":
-               "THE EDIT — your timeline, RENDERED, and sampled at %d "
-               "frames: evenly across the whole thing so nothing is unwatched, "
-               "and concentrated where the picture CHANGES most, which is "
-               "where entrances, exits and collisions happen. Timeline frames "
-               "%s. This is what the viewer sees.\n\n"
-               "THESE ARE A STARTING POINT. `preview_timeline` is yours — ask "
-               "for any moment, as often as you need. If something looks "
-               "wrong, look at the frames either side of it; if an entrance "
-               "looks late, look at the frames it enters over; if you cannot "
-               "tell whether two things collide, ask for that exact frame. "
-               "Nobody is counting your looks.\n\n"
-               "Then fix what is wrong: a graphic colliding with another or "
-               "with the captions, something illegible, something off-frame, "
-               "something sitting on the speaker's face, a title on the wrong "
-               "moment, wrong size, drift. Make EVERY correction in ONE "
-               "edit_item call.\n\n"
-               "FOR THE AUDIO, what you can actually inspect:\n"
-               "  - `preview_timeline` with views:[\"transcript\"] and a frame "
-               "range gives you the words against the TIMELINE, mapped through "
-               "each item's trim, source offset and rate — so you can check a "
-               "title lands on the line it was written for.\n"
-               "  - `read_captions` with atFrame or fromFrame/toFrame gives the "
-               "viewer-facing caption Cards at that moment, with their timing, "
-               "line count and overflow state.\n"
-               "  - `inspect_item` reports an item's fades and audio state.\n"
-               "  - AND THE RENDERED EDIT IS ON DISK at /work/edit.mp4, with "
-               "ffmpeg and ffprobe available. There is no waveform tool and no "
-               "level meter on this surface, so if you need to know whether a "
-               "sound effect actually lands where you put it, measure it: "
-               "`ffmpeg -ss T -t 0.3 -i /work/edit.mp4 -af volumedetect -f "
-               "null -` reads the level in a window.\n\n"
-               "If it is right, submit the export. A further pass is only for "
-               "a defect you can NAME — and if you take one, say which frame "
-               "you saw it in and what you changed."
-               % (len(frames), ", ".join(str(f) for f in plan_frames[:25]))}]
-    for fp in frames:
-        blocks.append(_img_block(fp))
-    return _message(blocks)
 
 
 # ── THE FRAME SERVER: THE AGENT ASKS TO LOOK, THE HARNESS FETCHES ───────────
@@ -2109,7 +3132,67 @@ def _fetch_frames(urls, out_dir, already):
         ("; %d failed: %s" % (len(failed), failed[:2])) if failed else "")
 
 
-def _edit_frames(tok, pid, total_frames, n=EDIT_FRAMES_N, fps=30):
+def _preview_frames(tok, pid, total_frames, fps=30, density_fps=2.0, mark=None, per_call=9, workers=5, out_dir=None):
+    """THE REWATCH INSTRUMENT, PICKED (ruling 5, measured 2026-09-17 on one
+    scratch timeline carrying three planted defects, 40 frames each):
+
+        preview_timeline viewer, 5 calls serial      59.9s   composite shown
+        preview_timeline viewer, 5 calls parallel    47.1s   (calls 33.1s + fetch 14s)
+        export -> download -> upload -> inspect      75.0s   composite shown
+
+    Both show the composite (sheets read by eye: captions, the card over the
+    face, the 3x quote). Picked by wall: the viewer, parallel. The export is
+    paid ONCE, for the final. Density stays 2 fps (ruling 6): n = 2 * seconds.
+    -> (sheets, times_s), the shape `_edit_frames` returned.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    import urllib.request as _ur
+    dur = float(total_frames) / float(fps)
+    n = max(per_call, int(round(density_fps * dur)))
+    frames = [int(total_frames * (i + 0.5) / n) for i in range(n)]
+    chunks = [frames[k:k + per_call] for k in range(0, n, per_call)]
+
+    def _one(fr):
+        r = _mcp_call(tok, "preview_timeline", {"projectId": pid, "views": ["viewer"], "viewerFrames": fr}, expect=None)
+        return _frame_urls(json.dumps(r) + str(r.get("_text") or ""))
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            urls = sum(list(ex.map(_one, chunks)), [])
+    except Exception as e:                                        # noqa: BLE001
+        print("  REWATCH FRAMES  : FAILED preview_timeline %s: %s" % (type(e).__name__, str(e)[:120]), flush=True)
+        return [], []
+    if mark:
+        mark("calls")
+    out_dir = out_dir or ("/work/preview_%d" % int(time.time()))
+    os.makedirs(out_dir, exist_ok=True)
+
+    def _get(iu):
+        i, u = iu
+        pth = os.path.join(out_dir, "f%03d.jpg" % i)
+        try:
+            with _ur.urlopen(u, timeout=60) as rsp:
+                open(pth, "wb").write(rsp.read())
+            return (i, pth)
+        except Exception:                                         # noqa: BLE001
+            return (i, None)
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        got = [g for g in ex.map(_get, list(enumerate(urls))) if g[1]]
+    if mark:
+        mark("fetch")
+    if not got:
+        print("  REWATCH FRAMES  : ABSENT  %d url(s), 0 fetched" % len(urls), flush=True)
+        return [], []
+    times = [round(frames[i] / float(fps), 2) if i < len(frames) else -1 for i, _p in got]
+    entries = [("%.1fs" % t, pth) for t, (_i, pth) in zip(times, got)]
+    sheets = tile_sheets(entries, os.path.join(out_dir, "sheets"), per_sheet=20, cols=5, cell_w=180)
+    if mark:
+        mark("tile")
+    print("  REWATCH FRAMES  : MEASURED  preview_timeline x%d parallel, %d of %d frame(s) at %.1ffps over %.1fs -> %d sheet(s)"
+          % (len(chunks), len(got), n, density_fps, dur, len(sheets)), flush=True)
+    return sheets, times
+
+
+def _edit_frames(tok, pid, total_frames, n=EDIT_FRAMES_N, fps=30, mark=None):
     """Frames of the EDIT for pass 2 — from a real render, not the 9-frame cap.
 
     READ OFF THEIR SCHEMAS RATHER THAN INFERRED. `preview_timeline`'s viewer is
@@ -2140,8 +3223,17 @@ def _edit_frames(tok, pid, total_frames, n=EDIT_FRAMES_N, fps=30):
                   flush=True)
             return [], []
         url = None
-        for _ in range(40):
-            time.sleep(6)
+        # ADAPTIVE POLL, NOT A FIXED 6s. The old loop slept SIX SECONDS BEFORE
+        # ITS FIRST CHECK, so a render that finished in two cost six — and the
+        # loop now runs TWICE per job, once per rewatch, so that floor was up
+        # to 12s of the 90-second budget spent waiting for a file that was
+        # already there. Discovery lag is not render time.
+        #
+        # Short early, backing off: the same ~240s total budget, but a fast
+        # render is noticed in about a second. Nothing here makes the render
+        # faster; it stops the harness adding latency on top of it.
+        for _iv in EXPORT_POLL_SCHEDULE:
+            time.sleep(_iv)
             st = _mcp_call(tok, "track_export",
                            {"projectId": pid, "action": "status",
                             "renderIds": rid.group(1)})
@@ -2158,141 +3250,338 @@ def _edit_frames(tok, pid, total_frames, n=EDIT_FRAMES_N, fps=30):
             print("  EDIT RENDER     : ABSENT  the render did not finish in "
                   "time", flush=True)
             return [], []
+        (mark or (lambda k: None))("export")
         import urllib.request as _u
-        os.makedirs("/work/edit_frames", exist_ok=True)
         with _u.urlopen(url, timeout=900) as r, open("/work/edit.mp4", "wb") as fh:
             fh.write(r.read())
-        # where the motion is
-        pr = subprocess.run(
-            ["ffmpeg", "-v", "error", "-i", "/work/edit.mp4", "-vf",
-             "scale=64:114,format=gray", "-r", str(fps), "-f", "rawvideo", "-"],
-            capture_output=True, timeout=600)
-        want = []
-        if pr.returncode == 0 and pr.stdout:
-            sz = 64 * 114
-            fr = [pr.stdout[k * sz:(k + 1) * sz]
-                  for k in range(len(pr.stdout) // sz)]
-            diffs = [(sum(abs(a - b) for a, b in zip(fr[k], fr[k - 1])) / sz, k)
-                     for k in range(1, len(fr))]
-            diffs.sort(reverse=True)
-            hot, seen = [], set()
-            for _d, k in diffs:
-                if any(abs(k - h) < max(4, len(fr) // (n * 3)) for h in seen):
-                    continue
-                hot.append(k)
-                seen.add(k)
-                if len(hot) >= n // 2:
-                    break
-            even = [int(len(fr) * (i + 0.5) / (n - len(hot)))
-                    for i in range(n - len(hot))]
-            want = sorted(set(hot + even))
-        if not want:
-            want = [int(total_frames * (i + 0.5) / n) for i in range(n)]
-        got = []
-        for k in want:
-            fp = "/work/edit_frames/e%04d.jpg" % k
-            r2 = subprocess.run(
-                ["ffmpeg", "-v", "error", "-y", "-ss", "%.3f" % (k / float(fps)),
-                 "-i", "/work/edit.mp4", "-vf", "scale=480:-2", "-frames:v", "1",
-                 "-q:v", "4", fp], capture_output=True, timeout=300)
-            if r2.returncode == 0 and os.path.exists(fp) \
-                    and os.path.getsize(fp) > 2000:
-                got.append(fp)
-        print("  EDIT RENDER     : %s  rendered once, %d frame(s) sampled "
-              "(%d on motion) at %s"
-              % ("MEASURED" if got else "FAILED", len(got), n // 2,
-                 ", ".join(str(k) for k in want[:12])), flush=True)
-        return got, want
+        (mark or (lambda k: None))("download")
+        # THE COMPOSED EDIT, WATCHED THE SAME WAY AS THE SOURCE: into the media
+        # pool, then inspect_asset at 2fps, tiled. The ffmpeg still-sampler
+        # that used to live here was a second pipeline for seeing.
+        try:
+            _aid = upload_asset(tok, pid, "/work/edit.mp4")
+        except Exception as _ue:                                  # noqa: BLE001
+            print("  EDIT RENDER     : FAILED  the render could not be imported "
+                  "for watching (%s)" % str(_ue)[:160], flush=True)
+            return [], []
+        (mark or (lambda k: None))("upload")
+        _dur = total_frames / float(fps or 30)
+        _w = watch_asset(tok, _aid, _dur, "/work/edit_watch_%d" % int(time.time()))
+        (mark or (lambda k: None))("inspect+tile")
+        print("  EDIT RENDER     : %s  rendered once, imported as %s, %s"
+              % (_w["state"], str(_aid)[:8], _w["why"]), flush=True)
+        return _w.get("sheets") or [], _w.get("times") or []
     except Exception as e:                                        # noqa: BLE001
         print("  EDIT RENDER     : FAILED  %s: %s" % (type(e).__name__, e),
               flush=True)
         return [], []
 
 
-def _sheet_message(text, image_path=None, media="image/jpeg"):
-    """A stream-json user message carrying TEXT and, when given, PIXELS.
 
-    PROVEN BEFORE IT WAS BUILT ON: an image passed this way is read by the
-    model with ZERO tool calls and the whole exchange is one turn. The old
-    shape — write the sheet to /work and tell the agent to Read it — spent a
-    turn getting pixels the harness already had in memory.
+def rendered_defects(edit_path, spans=None, source_path=None, fps=30.0,
+                     expect_end_frames=None):
+    """WHAT STILLS CANNOT SHOW, off the rendered file. -> (lines, summary).
+
+    THE SECOND REWATCH IS A SCAN, NOT A SECOND OPINION. Composed frames answer
+    "does this look right"; they cannot answer whether the audio drifted, a
+    gap went black between two placements, a stretch froze, or the fixes
+    truncated the edit. Those are the failures a fix batch INTRODUCES — you
+    move an item to clear a collision and open a hole behind it — and they are
+    exactly the ones an eye on nine stills will not catch.
+
+    EVERY CHECK CARRIES ITS OWN STATE. A scan that could not run must never
+    render as a clean scan: ffmpeg exiting non-zero, a missing audio stream, a
+    source that is not there — each says FAILED or ABSENT and says why. This
+    is the whole family this repo is built against: a failed measurement and a
+    clean result are indistinguishable once you are only reading verdicts.
+    SO THE SUMMARY REPORTS `scanned` AND `clean` SEPARATELY, and a rewatch
+    where nothing could be scanned says so instead of saying nothing is wrong.
     """
-    content = []
-    if image_path and os.path.exists(image_path):
-        with open(image_path, "rb") as fh:
-            content.append({"type": "image",
-                            "source": {"type": "base64", "media_type": media,
-                                       "data": base64.b64encode(
-                                           fh.read()).decode()}})
-    content.append({"type": "text", "text": text})
-    return {"type": "user", "message": {"role": "user", "content": content}}
+    lines, states, findings = [], {}, 0
 
+    def _run(args, timeout=600):
+        try:
+            r = subprocess.run(args, capture_output=True, text=True,
+                               timeout=timeout)
+            return r.returncode, (r.stderr or "") + (r.stdout or "")
+        except Exception as e:                                    # noqa: BLE001
+            return None, "%s: %s" % (type(e).__name__, str(e)[:120])
 
-def _review_sheet(tok, pid, frames, out="/work/review.jpg"):
-    """Fetch the composed frames the plan named and tile them into ONE image.
+    if not (edit_path and os.path.exists(edit_path)
+            and os.path.getsize(edit_path) > 10000):
+        return (["  THE RENDERED FILE IS NOT THERE — none of the checks that "
+                 "need it (sync, black, freeze, silence, length) ran. Nothing "
+                 "below is a clean result; judge the frames by eye and say "
+                 "the scan did not run."],
+                {"scanned": 0, "clean": 0, "findings": 0,
+                 "state": "ABSENT — no rendered file at %s" % edit_path})
 
-    THE HARNESS DOES WHAT COST FOUR AGENT TURNS. preview_timeline, a curl per
-    frame, an ffmpeg tile and a Read was four turns to look once; none of it is
-    a decision, and the model was only ever needed for the LOOKING. Returns the
-    path, or None with the reason printed — a review that could not be built
-    must not read as a review that found nothing.
-    """
-    try:
-        pv = _mcp_call(tok, "preview_timeline",
-                       {"projectId": pid, "views": ["viewer"],
-                        # 25, re-read from tools/list 2026-09-16. This was the
-                        # live one: a [:9] on the frames handed to
-                        # preview_timeline, against a cap that is now 25.
-                        "viewerFrames": list(frames)[:25]})
-        uris = list(pv.get("_links") or [])
-        if not uris:
-            print("  REVIEW SHEET    : ABSENT  the viewer returned no frame "
-                  "links (keys %s)" % sorted(pv)[:8], flush=True)
-            return None
-        import urllib.request as _u
-        os.makedirs("/work/rev", exist_ok=True)
-        got = []
-        for i, u in enumerate(uris):
-            fp = "/work/rev/f%02d.jpg" % i
-            try:
-                with _u.urlopen(u, timeout=180) as r, open(fp, "wb") as fh:
-                    fh.write(r.read())
-                if os.path.getsize(fp) > 2000:
-                    got.append(fp)
-            except Exception:                                     # noqa: BLE001
-                continue
-        if not got:
-            print("  REVIEW SHEET    : ABSENT  no frame downloaded", flush=True)
-            return None
-        args = ["ffmpeg", "-v", "error", "-y"]
-        for fp in got:
-            args += ["-i", fp]
-        n = len(got)
-        # BUILT EXPLICITLY. `A + B + C if n > 1 else D` binds the ternary to
-        # the WHOLE concatenation, so the one-frame case silently dropped the
-        # scale — a precedence trap that would have produced a full-size single
-        # tile and looked fine until a plan named one review frame.
-        _scale = "".join("[%d]scale=360:-1[s%d];" % (i, i) for i in range(n))
-        if n > 1:
-            _fc = _scale + "".join("[s%d]" % i for i in range(n)) \
-                + "hstack=inputs=%d" % n
+    def _f(sec):
+        return int(round(float(sec) * float(fps or 30)))
+
+    # --- BLACK: a hole between two placements, or a gap the fixes opened ---
+    rc, out = _run(["ffmpeg", "-v", "info", "-i", edit_path, "-vf",
+                    "blackdetect=d=0.15:pix_th=0.10", "-an", "-f", "null", "-"])
+    if rc is None:
+        states["black"] = "FAILED"
+        lines.append("  black frames : FAILED — the detector did not run (%s)"
+                     % out[:80])
+    else:
+        states["black"] = "MEASURED"
+        hits = re.findall(r"black_start:([\d.]+)\s+black_end:([\d.]+)", out)
+        if hits:
+            findings += len(hits)
+            for a, b in hits[:6]:
+                lines.append("  black frames : FRAME %d-%d — the picture is "
+                             "BLACK for %.2fs (timeline %.2f-%.2fs). Nothing "
+                             "is on screen there."
+                             % (_f(a), _f(b), float(b) - float(a),
+                                float(a), float(b)))
         else:
-            _fc = _scale + "[s0]null"
-        args += ["-filter_complex", _fc, "-frames:v", "1", out]
-        if subprocess.run(args, capture_output=True,
-                          timeout=300).returncode != 0 or \
-                not os.path.exists(out):
-            print("  REVIEW SHEET    : FAILED  the tile did not build",
-                  flush=True)
-            return None
-        print("  REVIEW SHEET    : MEASURED  %d frame(s) tiled into %s (%d KB)"
-              % (n, out, os.path.getsize(out) // 1024), flush=True)
-        return out
-    except Exception as e:                                        # noqa: BLE001
-        print("  REVIEW SHEET    : FAILED  %s: %s" % (type(e).__name__, e),
-              flush=True)
-        return None
+            lines.append("  black frames : none — scanned end to end")
 
+    # --- FREEZE: a held frame the eye reads as a still ---
+    rc, out = _run(["ffmpeg", "-v", "info", "-i", edit_path, "-vf",
+                    "freezedetect=n=-60dB:d=0.7", "-an", "-f", "null", "-"])
+    if rc is None:
+        states["freeze"] = "FAILED"
+        lines.append("  frozen video : FAILED — the detector did not run (%s)"
+                     % out[:80])
+    else:
+        states["freeze"] = "MEASURED"
+        hits = re.findall(r"freeze_start:\s*([\d.]+)", out)
+        if hits:
+            findings += len(hits)
+            for a in hits[:6]:
+                lines.append("  frozen video : FRAME %d — the picture stops "
+                             "moving at timeline %.2fs" % (_f(a), float(a)))
+        else:
+            lines.append("  frozen video : none — scanned end to end")
+
+    # --- SILENCE: audio that vanished under an edit ---
+    rc, out = _run(["ffmpeg", "-v", "info", "-i", edit_path, "-af",
+                    "silencedetect=n=-50dB:d=0.7", "-vn", "-f", "null", "-"])
+    if rc is None:
+        states["silence"] = "FAILED"
+        lines.append("  silence      : FAILED — the detector did not run (%s)"
+                     % out[:80])
+    elif "Output file does not contain any stream" in out or rc != 0:
+        states["silence"] = "ABSENT"
+        lines.append("  silence      : ABSENT — the render has no audio "
+                     "stream to scan, which is itself worth knowing")
+    else:
+        states["silence"] = "MEASURED"
+        hits = re.findall(r"silence_start:\s*(-?[\d.]+)", out)
+        if hits:
+            findings += len(hits)
+            for a in hits[:6]:
+                lines.append("  silence      : FRAME %d — the audio goes "
+                             "silent at timeline %.2fs" % (_f(a), float(a)))
+        else:
+            lines.append("  silence      : none — scanned end to end")
+
+    # --- LENGTH: did the fixes truncate or overrun the timeline ---
+    rc, out = _run(["ffprobe", "-v", "error", "-show_entries",
+                    "format=duration", "-of", "csv=p=0", edit_path])
+    _dur = None
+    try:
+        _dur = float((out or "").strip().splitlines()[0])
+    except Exception:                                             # noqa: BLE001
+        _dur = None
+    if _dur is None:
+        states["length"] = "FAILED"
+        lines.append("  length       : FAILED — the duration could not be read")
+    elif expect_end_frames:
+        states["length"] = "MEASURED"
+        _want = float(expect_end_frames) / float(fps or 30)
+        _d = abs(_dur - _want)
+        if _d > 0.5:
+            findings += 1
+            lines.append("  length       : FRAME %d — the render is %.2fs but "
+                         "the timeline ends at %.2fs (%.2fs out). Something "
+                         "was truncated or overran."
+                         % (_f(_dur), _dur, _want, _d))
+        else:
+            lines.append("  length       : %.2fs, and the timeline ends at "
+                         "%.2fs — they agree" % (_dur, _want))
+    else:
+        states["length"] = "ABSENT"
+        lines.append("  length       : %.2fs rendered; the timeline end was "
+                     "not supplied, so nothing compared it" % _dur)
+
+    # --- SYNC: the edit's audio against the SOURCE SECOND it came from ---
+    # MAPPED THROUGH THE KEPT SPANS, not compared at the same second. An edit
+    # with cuts plays some other source second at timeline 11.0s, so a naive
+    # correlation measures the CUT and reports a large lag on a perfectly
+    # synced edit.
+    _best = None
+    for _a, _b, _f0, _f1 in (spans or []):
+        if (_b - _a) >= 4.0 and (_best is None or (_b - _a) > _best[1] - _best[0]):
+            _best = (_a, _b, _f0, _f1)
+    if not source_path or not os.path.exists(source_path):
+        states["sync"] = "ABSENT"
+        lines.append("  a/v sync     : ABSENT — the source is not here to "
+                     "compare against, so sync was NOT checked")
+    elif _best is None:
+        states["sync"] = "ABSENT"
+        lines.append("  a/v sync     : ABSENT — no kept span is long enough "
+                     "(>=4s) to correlate, so sync was NOT checked")
+    else:
+        _a, _b, _f0, _f1 = _best
+        _tl = (_f0 / float(fps or 30)) + 1.0          # 1s into the span
+        _src = _a + 1.0
+        _lag = _audio_lag_ms(edit_path, source_path, at=_tl, dur=3.0,
+                             b_at=_src)
+        if _lag is None:
+            states["sync"] = "FAILED"
+            lines.append("  a/v sync     : FAILED — the envelopes could not "
+                         "be read, so sync is UNKNOWN, not fine")
+        else:
+            states["sync"] = "MEASURED"
+            if abs(_lag) > 60:
+                findings += 1
+                lines.append("  a/v sync     : FRAME %d — the edit's audio is "
+                             "%dms %s the source it was cut from (timeline "
+                             "%.2fs against source %.2fs). Lips will not match."
+                             % (_f(_tl), abs(_lag),
+                                "BEHIND" if _lag > 0 else "AHEAD", _tl, _src))
+            else:
+                lines.append("  a/v sync     : %dms against the source second "
+                             "it was cut from — within tolerance" % _lag)
+
+    _scanned = sum(1 for v in states.values() if v == "MEASURED")
+    summary = {"scanned": _scanned, "checks": len(states),
+               "findings": findings, "states": dict(states),
+               "state": "MEASURED" if _scanned else
+                        "ABSENT — no check completed"}
+    return lines, summary
+
+# _sheet_message WAS HERE AND IS GONE — defined, called by nothing.
+# It was not harmless: it is the only writer of /work/review.jpg, and the
+# visual-pass gate asked `os.path.exists("/work/review.jpg")` to decide whether
+# the harness had delivered frames. A dead producer with a live consumer, so
+# that branch was permanently false and the gate fell back to the agent having
+# called preview_timeline — scoring FAILED for the intended behaviour.
+
+
+# _review_sheet WAS HERE AND IS GONE — defined, called by nothing.
+# It was not harmless: it is the only writer of /work/review.jpg, and the
+# visual-pass gate asked `os.path.exists("/work/review.jpg")` to decide whether
+# the harness had delivered frames. A dead producer with a live consumer, so
+# that branch was permanently false and the gate fell back to the agent having
+# called preview_timeline — scoring FAILED for the intended behaviour.
+
+
+def segment_beats(words, gap_s=0.35, max_beat_s=3.0):
+    """Cut the transcript into BEATS — the unit the agent rules on.
+
+    PORTED from the planner path (agentic_editor_app.py `segment_beats`, one
+    decision per beat, 2026-09-04) on Zac's ruling of 2026-09-17: the old
+    planner got seven segmented beats and ruled them in 11-19 seconds; this
+    agent got 86 words with timestamps and thought for twelve minutes.
+
+    Split on dead air first — a pause is a real boundary. But gaps alone are
+    not enough: a scripted explainer with no gap >= 0.35s collapses to one
+    beat, which is no segmentation at all, so any run longer than max_beat_s
+    is also split, on word boundaries, never mid-word. max_beat_s is 3.0 here
+    (the planner used 6.0) because the 20s talking-head sources this path sees
+    should come out at 7-10 beats, and 6.0 gives four.
+
+    `words` are [{"w", "s", "e"}] in seconds. -> [{i, t_start, t_end, text,
+    role?}] with the first and last marked hook/close, as the corpus places
+    64% of its sound on exactly those two.
+    """
+    if not words:
+        return []
+    beats, cur = [], [words[0]]
+    for prev, w in zip(words, words[1:]):
+        gap = w["s"] - prev["e"]
+        span = w["e"] - cur[0]["s"]
+        if gap >= gap_s or span > max_beat_s:
+            beats.append(cur)
+            cur = [w]
+        else:
+            cur.append(w)
+    if cur:
+        beats.append(cur)
+    out = [{"i": i,
+            "t_start": round(b[0]["s"], 2),
+            "t_end": round(b[-1]["e"], 2),
+            "text": " ".join(str(x["w"]) for x in b)[:180]}
+           for i, b in enumerate(beats)]
+    if out:
+        out[0]["role"] = "hook"
+        out[-1]["role"] = "close"
+    return out
+
+
+
+
+def usage_once(state, ev):
+    """Cache-read tokens this assistant event adds to the ceiling. -> int
+
+    ONE ASSISTANT EVENT PER CONTENT BLOCK, EACH REPEATING THE MESSAGE'S USAGE
+    — measured locally 2026-09-17: a thinking + tool_use call arrived as two
+    events, both carrying the same cache_read/cache_creation. Summing every
+    event over-counted every multi-block call by its block count; final-arch-1
+    hit the 2.5M ceiling at "2,725,573" over 10 events for 6 calls. A message
+    id is counted once. An event with no id is counted (never silently
+    dropped); `state["usage_once_noid"]` says how many there were.
+    """
+    if not isinstance(ev, dict) or ev.get("type") != "assistant":
+        return 0
+    _m = ev.get("message") or {}
+    _u = _m.get("usage") or {}
+    _mid = _m.get("id")
+    _seen = state.setdefault("seen_msg_ids", set())
+    if _mid:
+        if _mid in _seen:
+            return 0
+        _seen.add(_mid)
+    else:
+        state["usage_once_noid"] = state.get("usage_once_noid", 0) + 1
+    return int(_u.get("cache_read_input_tokens") or 0)
+
+
+def install_watch(cwd="/work", sid_p="/craft/watch_session_id.txt",
+                  jsonl_p="/craft/watch_session.jsonl", home=None):
+    """Put the watch session where `claude --resume` will find it. -> sid.
+
+    THE SLUG IS DERIVED FROM CWD, NOT GUESSED. Claude Code resolves a resumed
+    session strictly within the project directory for the cwd it is launched
+    in, and a session file in the wrong slug answers "No conversation found"
+    — measured, not assumed.
+
+    AND THE CWD IS PART OF THE CACHED PREFIX. Measured 2026-09-16: the same
+    session, same uuid, resumed from a cwd it had never run in read 32,318
+    and wrote 37,894 — a full rewrite. So every container must launch from the
+    SAME cwd or each one pays a cold write. /work is that cwd.
+
+    A MISSING WATCH RAISES. It is the entire reference layer; a run that
+    proceeds without it produces an edit graded against nothing, and an
+    unmounted reference layer looks exactly like a mounted one from the log.
+    """
+    # THE PATHS ARE PARAMETERS WITH THE PRODUCTION DEFAULTS, so a smoke can
+    # drive THIS function instead of restating it. A rule a check has to
+    # reimplement is a rule the check does not cover: two mutations to a real
+    # dispatch once passed green in this file because the smoke drove its own
+    # copy.
+    if not (os.path.exists(sid_p) and os.path.exists(jsonl_p)):
+        raise FileNotFoundError(
+            "the watch session is not mounted (%s=%s, %s=%s) — the reference "
+            "layer would be silently absent"
+            % (sid_p, os.path.exists(sid_p), jsonl_p, os.path.exists(jsonl_p)))
+    sid = open(sid_p).read().strip()
+    slug = cwd.replace("/", "-")
+    dest_d = os.path.join(home or os.path.expanduser("~"),
+                          ".claude", "projects", slug)
+    os.makedirs(dest_d, exist_ok=True)
+    dest = os.path.join(dest_d, "%s.jsonl" % sid)
+    shutil.copyfile(jsonl_p, dest)
+    _n = sum(1 for _ in open(dest, encoding="utf-8", errors="replace"))
+    print("  WATCH           : MEASURED  sid=%s  %d lines  %.1f MB  -> %s"
+          % (sid[:8], _n, os.path.getsize(dest) / 1048576.0, dest), flush=True)
+    return sid
 
 def build_system_prompt():
     """The craft, in the session's context instead of on its to-do list."""
@@ -2349,6 +3638,81 @@ def build_system_prompt():
         # library with nothing in it read the same from downstream.
         parts.append("\n\n===== THE COMPONENT LIBRARY : ABSENT (%s) =====\n"
                      "The agent will be choosing from names alone.\n" % _e)
+    # ── THE MODE RULE. THE SINGLE AGENT DECIDES ITS OWN SCOPE ──────────────
+    # It used to be the planner's, and the planner is gone. Without it the
+    # agent answers "does this brief ask for a vibe" by judgement, and that is
+    # the defect that made 3 of 7 runs rule `none` on every beat and deliver a
+    # user their own footage with captions on it, passing every gate.
+    # mode_rule.txt no longer rides in the prefix (Zac's table, 2026-09-17:
+    # "mode_rule 2k -> 0"); the paragraph's brief is the scope.
+    # ── THE PRIMITIVES, AS OBSERVED ON A LIVE TIMELINE ─────────────────────
+    # Ten turns of the 999s run went on parameter spelling — eight failing
+    # `adds` of one video item, then two guesses at a geometry field. This is
+    # the translator's FAMILY_MAP, which is the record of what was actually
+    # read back off a timeline, and it is the single highest-value thing that
+    # path produced. Imported, never restated.
+    try:
+        sys.path.insert(0, "/root")
+        import plan_for_chatcut as _pfc
+        _pl = ["\n\n===== HOW EACH FAMILY IS BUILT IN CHATCUT =====\n",
+               "Every shape below was READ OFF A LIVE TIMELINE in this repo, "
+               "not inferred from a schema. Build them exactly this way; "
+               "guessing a parameter name is what cost ten turns.\n"]
+        for _f, _r in sorted(_pfc.FAMILY_MAP.items()):
+            if not _r.get("verified"):
+                continue
+            _pl.append("\n  %s -> %s\n      %s\n"
+                       % (_f.upper(), _r.get("primitive", "?"),
+                          " ".join(str(_r.get("how", "")).split())))
+        parts.append("".join(_pl))
+    except Exception as _e:                                       # noqa: BLE001
+        parts.append("\n\n===== HOW EACH FAMILY IS BUILT : ABSENT (%s) "
+                     "=====\nThe agent will be guessing parameter names.\n"
+                     % _e)
+    # ── THE SOUND LIBRARY, CACHED. browse_library is NOT in the tool list ──
+    # Five browse_library calls went on one placement when it was reachable.
+    # Cached for the agent, live for the gate.
+    try:
+        _sl = json.load(open("/craft/chatcut_sound_library.json",
+                             encoding="utf-8"))["sounds"]
+        parts.append("\n\n===== THE SOUND LIBRARY (%d) =====\n"
+                     "You cannot search for these and you do not need to — "
+                     "every id is here. Use the id verbatim.\n%s\n"
+                     % (len(_sl), "\n".join("  %-34s %s" % (x.get("id"),
+                                                            x.get("name"))
+                                             for x in _sl)))
+    except Exception as _e:                                       # noqa: BLE001
+        parts.append("\n\n===== THE SOUND LIBRARY : ABSENT (%s) =====\n"
+                     "Rule no sound you cannot name an id for.\n" % _e)
+    # ── WHAT THE HARNESS DOES AFTER YOU ────────────────────────────────────
+    parts.append(
+        # REWRITTEN 2026-09-18: this block asked for /work/spec.json,
+        # /work/rulings.json and a /work/DONE mark — the record is DERIVED from
+        # the read-back now, the why rides inside each op, and the harness
+        # renders between turns without any mark. h-th-think0's agent was
+        # still reading this.
+        "\n\n===== THE RECORD, AND WHO EXPORTS =====\n"
+        "You write no files. The record is read back from the timeline; the "
+        "one thing it cannot read is WHY, so every op you send carries a "
+        "\"why\" field — one line, what that item is for. An op without it "
+        "cannot be diagnosed when the edit delivers nothing.\n\n"
+        "YOU DO NOT EXPORT. You have no submit_export tool. After each call "
+        "the harness renders your timeline and sends you the frames; when "
+        "you say export it reads the timeline back, checks every placement, "
+        "and exports. A placement it cannot verify is REMOVED and named in "
+        "the ledger; the rest still ships.\n")
+    # ── THE CHATCUT PRECONDITION, MET IN ONE LINE ─────────────────────────
+    # The hosted server's instructions mandated a Skill turn before the first
+    # ChatCut call; the shim drops those instructions and the Skill tool is
+    # withheld, so nothing is outstanding. The 36k-character guide used to
+    # sit here whole (Zac's table, 2026-09-17: "the precondition line, ≤200").
+    parts.append(
+        "\n\n===== CHATCUT =====\n"
+        "The ChatCut guide is loaded; nothing about it is outstanding. What "
+        "matters here: every id comes from a tool result; video tracks stack "
+        "and a higher track covers a lower one; items on one track never "
+        "overlap, so layered graphics go on the tracks above; edits leave "
+        "gaps unless you ripple; placement is frame-native.\n")
     parts.append(
         "\n\n===== THE REST IS ON DISK =====\n"
         "/craft/knowledge/ holds the other documents and "
@@ -2357,14 +3721,303 @@ def build_system_prompt():
     return "".join(parts)
 
 
-@app.function(image=IMG, timeout=1800,
+# SIZED TO WHAT IT USES, NOT TO WHAT IT MIGHT. Measured on the blue-shirt run:
+# cpu_mean 0.03 cores, p90 0.08, against 16.125 RESERVED, with zero throttling
+# — the container spends its life idling on the model and on ChatCut's cloud
+# render, and Modal bills the reservation, not the demand. That was $0.92 of
+# cpu on a run that placed nothing.
+#
+# NOT sized to 0.08. The mean is low because the WAIT dominates; the work is
+# bursty and real — ffmpeg builds a 20-frame contact sheet, res10 runs over 82
+# sampled frames, and `_edit_frames` does a full decode plus 18 seeks per
+# rewatch. 4 cores keeps headroom over every burst measured here while cutting
+# the reservation 4x. A judgement with margin, not a fit to 0.03.
+def cache_gate(call1, calln, fraction=CACHE_FRACTION):
+    """Did call n read the prefix call 1 established? -> (ok, why). PURE.
+
+    The prefix is what call 1 read plus what it wrote. A later call that reads
+    less than `fraction` of it has a different prefix — the bytes moved — and
+    that is terminal (Zac, ruling 1, 2026-09-17), not weather.
+    """
+    prefix = int(call1.get("read") or 0) + int(call1.get("write") or 0)
+    if prefix <= 0:
+        return True, "no prefix measured on call 1"
+    r = int(calln.get("read") or 0)
+    return r >= fraction * prefix, "read %d against %.2f x %d" % (r, fraction, prefix)
+
+
+def _edit_ops(tool_calls):
+    return [c for c in (tool_calls or [])
+            if str(c.get("name") or "").endswith(("edit_item", "edit_captions"))]
+
+
+def _says(text, *words):
+    t = (text or "").strip().lower()
+    return any(w in t for w in words)
+
+
+def run_three_turns(invoke, rewatch, first_message, cap=TURN_CAP,
+                    clock=time.time, run_timeout=RUN_TIMEOUT_S):
+    """THE THREE STRATEGIC TURNS, THE HARNESS FETCHING BETWEEN THEM. -> tm
+
+    Zac's rulings of 2026-09-17: each turn is ONE API call that ends at the
+    tool call (the CLI's --max-turns 1, measured locally: the tool executes,
+    no trailing call, the next --resume reads the whole prefix); the harness
+    applies, reads the timeline back, runs the checks and serves the rewatch;
+    the cap is four API calls and the fifth is terminal — kill, ledger, owner
+    page, never a retry. Every call after the first must read the prefix.
+
+    `invoke(n, message)` -> {rc, subtype, tool_calls, text, usage{read,write,
+    in,out}, wall, ttft, killed}; `rewatch(n, final)` -> {message, ...}. Both
+    are injectable so the machine is driven by a check, not a $ run.
+    """
+    t0 = clock()
+    tm = {"turns": [], "terminal": None, "verdict": None, "cap": cap,
+          "cold_write": None, "rewatches": []}
+    call1 = {}
+
+    def _turn(n, message, kind):
+        nonlocal call1
+        if n > cap:
+            tm["terminal"] = {"kind": "TURN CAP", "at": n,
+                              "why": "turn %d requested; the cap is %d — kill, ledger, page" % (n, cap)}
+            return None
+        if clock() - t0 > run_timeout:
+            tm["terminal"] = {"kind": "RUN TIMEOUT", "at": n,
+                              "why": "%.0fs elapsed before turn %d; the run bound is %ds" % (clock() - t0, n, run_timeout)}
+            return None
+        r = dict(invoke(n, message) or {})
+        r["n"], r["kind"] = n, kind
+        u = r.get("usage") or {}
+        if n == 1:
+            call1 = u
+            w, rd = int(u.get("write") or 0), int(u.get("read") or 0)
+            tm["cold_write"] = {"write": w, "read": rd,
+                                "cold": w > 0.5 * max(1, w + rd)}
+        else:
+            ok, why = cache_gate(call1, u)
+            r["cache_gate"] = why
+            if not ok:
+                tm["turns"].append(r)
+                tm["terminal"] = {"kind": "CACHE MISS", "at": n,
+                                  "why": "call %d did not read the prefix call 1 established (%s) — the bytes moved" % (n, why)}
+                return None
+        if r.get("killed") or r.get("subtype") in ("error_during_execution",):
+            tm["turns"].append(r)
+            tm["terminal"] = {"kind": "TURN FAILED", "at": n,
+                              "why": "turn %d: killed=%s subtype=%s" % (n, r.get("killed"), r.get("subtype"))}
+            return None
+        tm["turns"].append(r)
+        return r
+
+    r1 = _turn(1, first_message, "place")
+    if r1 is None:
+        return tm
+    if not _edit_ops(r1.get("tool_calls")):
+        tm["terminal"] = {"kind": "NO PLACEMENT", "at": 1,
+                          "why": "turn 1 ended without an edit op: %s" % (str(r1.get("text") or r1.get("subtype") or "")[:160])}
+        return tm
+    rw1 = rewatch(1, False)
+    tm["rewatches"].append({k: v for k, v in (rw1 or {}).items() if k != "message"})
+    r2 = _turn(2, (rw1 or {}).get("message"), "review")
+    if r2 is None:
+        return tm
+    ops2 = _edit_ops(r2.get("tool_calls"))
+    rw2 = rewatch(2, True)
+    tm["rewatches"].append({k: v for k, v in (rw2 or {}).items() if k != "message"})
+    r3 = _turn(3, (rw2 or {}).get("message"), "confirm")
+    if r3 is None:
+        return tm
+    ops3 = _edit_ops(r3.get("tool_calls"))
+    if not ops3:
+        tm["verdict"] = ("export at turn 3 (%s)" % ("clean at turn 2" if not ops2 else "one fix pass")
+                         if _says(r3.get("text"), "export", "clean", "ship") or not r3.get("tool_calls")
+                         else "turn 3 ended without ops or export: %s" % str(r3.get("text"))[:120])
+        return tm
+    rw3 = rewatch(3, True)
+    tm["rewatches"].append({k: v for k, v in (rw3 or {}).items() if k != "message"})
+    r4 = _turn(4, (rw3 or {}).get("message"), "contingency")
+    if r4 is None:
+        return tm
+    if _edit_ops(r4.get("tool_calls")):
+        tm["terminal"] = {"kind": "TURN CAP", "at": 4,
+                          "why": "fix ops at the contingency turn; a fifth turn would be needed — kill, ledger, page"}
+    else:
+        tm["verdict"] = "export at turn 4 (contingency used)"
+    return tm
+
+
+def timeline_lines(items, props_by_id=None, base_item_id=None):
+    """Every item, every property the harness holds, one line each."""
+    out = []
+    for i in (items or []):
+        iid = str(i.get("id") or "")
+        _as = i.get("asset") if isinstance(i.get("asset"), dict) else {}
+        tr = i.get("timelineRange") or {}
+        sr = i.get("sourceRange") or {}
+        base = iid.replace("-", "")[:10] == str(base_item_id or "").replace("-", "")[:10]
+        pv = (props_by_id or {}).get(iid) or (props_by_id or {}).get(iid[:8])
+        out.append("  %s %-14s %-4s frames %s-%s%s  %s%s%s"
+                   % (iid[:8], i.get("itemType"), i.get("trackAlias"),
+                      tr.get("fromFrame"), tr.get("toFrame"),
+                      (" src %.2f-%.2fs" % (float(sr.get("start") or 0) / 1e6, float(sr.get("end") or 0) / 1e6)) if sr else "",
+                      _as.get("name") or "", " [base]" if base else "",
+                      ("  props=%s" % json.dumps(pv, ensure_ascii=False)[:300]) if pv else ""))
+    return out
+
+
+def rewatch_message(n, watch, tl_lines, faults, scan_lines=None, final=False, calls_note=""):
+    """The rewatch as ONE message: sheets + the whole timeline + the faults."""
+    _w = watch or {}
+    head = ("REWATCH %d — the composed edit as it renders now: %d frames at 2fps on %d "
+            "sheet(s), each cell stamped with its timeline time. %s\n\n"
+            "THE TIMELINE, every item the harness read back (id, type, track, frames, "
+            "source range, asset, properties):\n%s\n\n"
+            "WHAT THE HARNESS FOUND against ChatCut's own state (facts, not opinions):\n%s\n%s"
+            % (n, _w.get("frames", 0), len(_w.get("sheets") or []),
+               ("" if _w.get("sheets") else "THE RENDER COULD NOT BE WATCHED: %s — %s. Judge from the timeline lines." % (_w.get("state"), str(_w.get("why"))[:160])),
+               "\n".join(tl_lines or ["  (no items read back)"]),
+               "\n".join("  - " + f for f in (faults or [])) or "  - none",
+               ("\nTHE RENDER SCAN:\n" + "\n".join(scan_lines)) if scan_lines else ""))
+    tail = (("\n\nReply with the single word export if it ships as is; otherwise ONE edit_item "
+             "call with the fixes, each op carrying its why. This is the last look."
+             if final else
+             "\n\nFix what is wrong in ONE edit_item call, each op carrying its why — or reply "
+             "with the single word clean. Do not inspect or preview: everything the timeline "
+             "holds is above.") + calls_note)
+    blocks = [{"type": "text", "text": head + tail}]
+    for fp in (_w.get("sheets") or []):
+        blocks.append(_img_block(fp))
+    return _message(blocks)
+
+
+def fault_lines(gate_report, hop6, hop5, items, base_item_id, brief_mode="full_edit"):
+    """The timeline-state checks as facts for the agent, one line each."""
+    out = []
+    for f in ((gate_report or {}).get("findings") or []):
+        if f.get("verdict") != "PASS":
+            out.append("%s: %s" % (f.get("check"), str(f.get("why"))[:200]))
+    if hop6 and hop6.get("state") == "FAILED":
+        out.append("face/text collision: %s" % str(hop6.get("why"))[:260])
+    if hop5 and hop5.get("state") == "FAILED":
+        out.append("overlay overlap: %s" % str(hop5.get("why"))[:200])
+    placed = [i for i in (items or []) if str(i.get("id") or "").replace("-", "")[:10] != str(base_item_id or "").replace("-", "")[:10]]
+    if not placed and brief_mode == "full_edit":
+        out.append("nothing placed on a full-edit brief: the timeline holds only the source")
+    caps = [i for i in placed if str(((i.get("asset") or {}) if isinstance(i.get("asset"), dict) else {}).get("name") or "").startswith("caption:")]
+    tracks = {}
+    for c in caps:
+        tracks.setdefault(str(c.get("trackAlias")), []).append(c)
+    if len(tracks) >= 2:
+        out.append("two caption tracks (%s) show the same speech" % ", ".join(sorted(tracks)))
+    return out
+
+
+def write_cli_context(tok):
+    """mcp.json (the shim), CLAUDE.md and system.md — the same bytes for a job
+    and for the keep-warm ping, because the cache key is those bytes.
+
+    KEPT AS THE CORRECTION: the first version of this function was RECURSIVE
+    — a str.replace aimed at edit()'s copy of this block hit this one first
+    (the earlier occurrence), leaving edit() with its own copy and this with
+    a call to itself. The leg that reads both functions caught it.
+    """
+    cfg = {"mcpServers": {"chatcut": {
+        "command": "python3", "args": ["/root/mcp_shim.py"],
+        "env": {"MCP_SHIM_UPSTREAM": MCP_URL, "MCP_SHIM_TOKEN": tok,
+                "MCP_SHIM_ALLOW": ",".join(NEEDED_TOOLS),
+                "MCP_SHIM_LOG": "/work/mcp_shim.log"}}}}
+    with open("/work/mcp.json", "w") as fh:
+        json.dump(cfg, fh)
+    with open("/work/CLAUDE.md", "w") as fh:
+        fh.write(CRAFT_CONTEXT)
+    sys_prompt = build_system_prompt()
+    with open("/work/system.md", "w") as fh:
+        fh.write(sys_prompt)
+    return sys_prompt
+
+
+def warm_ttl_minutes(warm_rec):
+    """How long the last ping's cache entry lives, from the TTL it WROTE.
+    -> 60 (1h entries), 5 (5m entries), or None when the ping recorded no
+    split. The cold-write line once compared against a literal 60 while the
+    container's CLI (2.1.272) writes 5-minute entries — every cold write
+    after 5 minutes would have been called a defect of a ping that had
+    already expired."""
+    if not isinstance(warm_rec, dict):
+        return None
+    if int(warm_rec.get("write_1h") or 0) > 0:
+        return 60
+    if int(warm_rec.get("write_5m") or 0) > 0:
+        return 5
+    return None
+
+
+def _read_prefix_rows(path="/work/prefix_calls.jsonl"):
+    """The proxy's fingerprint rows so far. -> list (empty when absent)."""
+    try:
+        return [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
+    except Exception:                                             # noqa: BLE001
+        return []
+
+
+def cli_version():
+    """`claude --version` where the CLI runs — the image installs it UNPINNED.
+    Read here because the container wrote 5-minute cache entries while the
+    local 2.1.226 writes 1-hour ones, and a version is the first suspect."""
+    try:
+        return subprocess.run(["claude", "--version"], capture_output=True, text=True, timeout=30).stdout.strip() or "ABSENT (empty)"
+    except Exception as e:                                        # noqa: BLE001
+        return "FAILED %s: %s" % (type(e).__name__, str(e)[:60])
+
+
+def cli_command(sid, model, use_hands=False, agents=None, partial=True, effort=None):
+    """The claude invocation, ONE turn (the caller appends --max-turns 1).
+
+    `effort` -> `--effort <level>` (low|medium|high|xhigh). Measured through
+    the proxy 2026-09-17, CLI 2.1.226: the body carries
+    output_config.effort (default xhigh) and, unless thinking is disabled,
+    thinking {type: adaptive} — MAX_THINKING_TOKENS=3000 does NOT put a
+    budget in the request. The effort flag is the dial that exists.
+    """
+    _sel = ",".join("mcp__chatcut__" + t for t in NEEDED_TOOLS)
+    return (["claude", "-p",
+             *(["--resume", sid] if sid else []),
+             "--input-format", "stream-json",
+             "--append-system-prompt-file", "/work/system.md",
+             *(["--agents", json.dumps(agents)] if use_hands and agents else []),
+             "--output-format", "stream-json", "--verbose",
+             "--mcp-config", "/work/mcp.json", "--strict-mcp-config",
+             "--settings", "/root/chatcut_hooks.json",
+             "--allowedTools",
+             ",".join(["mcp__chatcut__" + t for t in NEEDED_TOOLS]
+                      + ["Bash", "Read", "Write", "Glob", "Grep"]),
+             "--tools", "Bash,Read,Write,Glob,Grep," + _sel,
+             "--disallowedTools", "Skill,Task,Agent",
+             "--model", model]
+            + (["--effort", str(effort)] if effort else [])
+            + (["--include-partial-messages"] if partial else []))
+
+
+@app.function(image=IMG, timeout=900, cpu=4, memory=8192,
+              # SECTION B: the container's imports and CLI are snapshotted
+              # after module load; per-job ChatCut work (project, import,
+              # base item) cannot be, and is measured in PRESTAGE PHASES.
+              enable_memory_snapshot=True,
               secrets=[modal.Secret.from_name("chatcut-oauth"),
                        modal.Secret.from_name("anthropic-api-key")])
 def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
          run_id: str = "latest", use_hands: bool = False, plan: str = "",
-         think_tokens: int = 0, prestage_title: str = "",
+         think_tokens: int = -1, effort: str = "", prestage_title: str = "",
          prestage_controls: str = "", prestage_titles: str = "",
-         transcript: str = ""):
+         transcript: str = "",
+         # THE SUBTRACTION EXPERIMENT (2026-09-17). Same paragraph, same
+         # beats, same components; one arm resumes the watch and one does
+         # not; both stop the moment the first batch lands. If thinking drops
+         # from ~270s to ~30s without the watch, the watch is what the model
+         # deliberates over. If it does not, the watch is innocent and the
+         # cause is the input shape. Off for every real job.
+         read_ceiling: int = 0):
     t0 = time.time()
     marks = {}
 
@@ -2376,6 +4029,8 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     pf = preflight(tok)
     n_tools = pf["n_tools"]
     mark("preflight")
+    _cli_ver = cli_version()
+    print("  CLI VERSION     : %s" % _cli_ver, flush=True)
 
     os.makedirs("/work", exist_ok=True)
     # -L, AND THEN PROVE IT IS A VIDEO. Without -L an S3 presign against the
@@ -2399,6 +4054,51 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
             f"redirect body or an error page")
     print(f"  SOURCE          : MEASURED  {_p.stdout.strip().splitlines()[-1]}",
           flush=True)
+    # MARKED WHERE THE STAGE ENDS, NOT WHERE THE NEXT PRINT HAPPENS. This mark
+    # used to sit after the contact sheet was built, so every "download" figure
+    # this lane has ever reported silently included the sheet. Two stages under
+    # one name is the same defect as two numbers under one name, and it was
+    # invisible because the total was right.
+    mark("download")
+    # THE DETECTORS RUN OFF THE WALL CLOCK. `region_states` is ~160 res10
+    # inferences plus an EAST pass, and its answer is not needed until the
+    # REVIEW — which is the last stage of the run. Serially it would be pure
+    # added latency against a 90-second budget that the review already
+    # overruns; on a thread started here it costs nothing but CPU the
+    # container measured itself barely using (0.146 cores of 16.125).
+    #
+    # THE HOLDER STARTS AS A NAMED ABSENCE, NOT AS AN EMPTY DICT. If the
+    # thread dies, is still running, or never ran, the criteria must say which
+    # — "no faces found" and "we did not look" are different answers, and the
+    # second one printed as the first is the most dangerous bug this lane
+    # shipped.
+    _regions = {"face_state": "ABSENT — the detector thread did not finish "
+                              "before the review", "face_traj": None}
+
+    _dur_for_detect = 0.0
+    for _ln0 in _p.stdout.splitlines():
+        if _ln0.startswith("duration="):
+            _dur_for_detect = float(_ln0.split("=", 1)[1] or 0)
+
+    # THE DURATION IS PASSED, NOT CLOSED OVER. It resolved correctly either way
+    # — the thread starts after the binding — but a closure whose body READS a
+    # name bound five lines BELOW it is the exact shape that has cost this repo
+    # real time ("an edit above a rebinding is not an edit"), and the next
+    # person to move either line would have to re-derive that it is safe.
+    def _detect_into(_holder, _dur):
+        import sys as _s
+        if "/root" not in _s.path:
+            _s.path.insert(0, "/root")
+        try:
+            _holder.update(region_states("/work/source.mp4", _dur))
+        except Exception as _de:                                  # noqa: BLE001
+            _holder["face_state"] = "FAILED — %s: %s" % (
+                type(_de).__name__, str(_de)[:120])
+
+    _detect_th = threading.Thread(target=_detect_into,
+                                  args=(_regions, _dur_for_detect),
+                                  daemon=True)
+    _detect_th.start()
     # THE CONTACT SHEET IS BUILT BY THE HARNESS, NOT ASKED FOR IN THE PROMPT.
     # The Haiku arm inspected ZERO source frames and kept 4.4s of TikTok app
     # chrome that both Sonnet arms found and trimmed. Telling a model to look
@@ -2418,6 +4118,11 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         capture_output=True, text=True, timeout=180)
     _has_sheet = os.path.exists("/work/source_sheet.png") and \
         os.path.getsize("/work/source_sheet.png") > 5000
+    # MARKED, BECAUSE THE BUDGET CANNOT BE ITEMISED FROM STAGES THAT DO NOT
+    # REPORT. The 90s itemisation had eight UNMEASURED rows and two of them
+    # were harness work nobody had timed — a derived signal that is not
+    # printed cannot be verified, applied to the clock.
+    mark("sheet")
     if not _has_sheet:
         # ABSENT IS FATAL HERE. The whole point of this arm is that the agent
         # cannot skip looking; a missing sheet would silently return it to the
@@ -2429,24 +4134,15 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     print(f"  CONTACT SHEET   : MEASURED  /work/source_sheet.png "
           f"({os.path.getsize('/work/source_sheet.png')//1024} KB, "
           f"20 frames over {_dur:.1f}s)", flush=True)
-    mark("download")
 
     # THE MCP SERVER, CONFIGURED WITH A BEARER WE ALREADY PROVED WORKS. The
     # preflight above ran the same credential over the same endpoint, so a
     # failure after this point is the agent or the tools, never the auth.
-    cfg = {"mcpServers": {"chatcut": {
-        "type": "http", "url": MCP_URL,
-        "headers": {"Authorization": f"Bearer {tok}",
-                    "x-chatcut-mcp-client": "claude_code",
-                    "x-chatcut-mcp-surface": "embedded-preview"}}}}
-    with open("/work/mcp.json", "w") as fh:
-        json.dump(cfg, fh)
-    with open("/work/CLAUDE.md", "w") as fh:
-        fh.write(CRAFT_CONTEXT)
-
-    sys_prompt = build_system_prompt()
-    with open("/work/system.md", "w") as fh:
-        fh.write(sys_prompt)
+    # THROUGH THE SHIM, NOT THE HOSTED SERVER DIRECTLY. The tool block is the
+    # largest thing in the prefix after the watch — 59 schemas, 182,903 bytes,
+    # for nine callable tools — and `--tools` leaves MCP definitions in. The
+    # shim's tools/list is the upstream list filtered to NEEDED_TOOLS.
+    sys_prompt = write_cli_context(tok)
     _sel = ",".join("mcp__chatcut__" + t for t in NEEDED_TOOLS)
     # max_results DEFAULTS TO 5 AND THE SELECT LIST IS 26 NAMES LONG, so the
     # "fetch them in ONE call" instruction was unsatisfiable as written: the
@@ -2504,158 +4200,262 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     # quietly re-decide and the wall does not move. That failure is invisible
     # in the output — a good edit either way — so the harness MEASURES
     # adherence from the call stream rather than trusting the instruction.
-    _stage = None
-    if plan:
-        # THE RULED CONTROLS REACH THE ASSET. The planner now answers band,
-        # size, hold and colour (0 refused, first pass); an acceptor that
-        # ignores them is the v1 defect, and a harness that never forwards them
-        # is the same defect one layer out.
-        _ctl = json.loads(prestage_controls) if prestage_controls else {}
-        _titles = json.loads(prestage_titles) if prestage_titles else []
+    # PRESTAGE IS NOT PLAN WORK — IT IS WHAT MAKES A RUN POSSIBLE AT ALL.
+    #
+    # This block sat under `if plan:`. It was correct when a planner and an
+    # executor were two agents; the split is gone, the single-agent path has no
+    # plan, and so NO PROJECT WAS EVER CREATED. Measured 2026-09-16 on the
+    # blue-shirt clip: prestaged=false, 0 edit_item calls, 1,521s, $6.68 for no
+    # edit, and every downstream stage reporting ABSENT with an honest reason.
+    #
+    # The law is *a check can be correct when written and wrong once the design
+    # moves*, and the lesson is the one after it: I had already found `plan`
+    # gating hop 5 on this path, fixed that instance, and never asked what else
+    # the predicate gated. What stays under `if plan:` must defend a property
+    # genuinely about HAVING a plan, not merely correlate with one.
+    _ctl = json.loads(prestage_controls) if prestage_controls else {}
+    _titles = json.loads(prestage_titles) if prestage_titles else []
+    # WHAT THIS JOB HAS ALREADY DONE AND SPENT, from before any preemption. Read once
+    # here so the ceiling reasons about the job rather than this container.
+    _js = job_state(run_id)
+    _prior_read = int(_js.get("read_tok") or 0)
+    _attempt = int(_js.get("attempts") or 0) + 1
+    # ONE CEILING, BOUND ONCE. The comparison honoured `read_ceiling`; the
+    # kill message, the record and the summary line all printed
+    # READ_TOKEN_CEILING — an arm launched at 6M would have reported
+    # "against a ceiling of 2500000" while stopping at 6M.
+    _ceil = int(read_ceiling or READ_TOKEN_CEILING)
+    job_state_put(run_id, attempts=_attempt)
+    if _prior_read:
+        print("  RESUMED         : attempt %d — this job has already read %d "
+              "token(s) against a %d ceiling"
+              % (_attempt, _prior_read, _ceil), flush=True)
+    # IDEMPOTENT ON RESTART. Modal retries a preempted Function with the same
+    # input in a fresh container, and a retry that re-prestages creates a
+    # SECOND ChatCut project, re-uploads the source and re-registers 37
+    # components — paying twice for one setup and leaving an orphan. Run 3
+    # did exactly this. The stage is durable per run id; a retry that finds
+    # one reuses it, and says so.
+    _prior_stage = job_state(run_id).get("stage")
+    # AN EXPERIMENT ARM IS A FRESH JOB OR IT IS NOT AN ARM. A reused stage
+    # means a reused run id: prior read tokens already on the ceiling, a
+    # project that may hold items, and a "first" batch that is not the
+    # first. Refuse it rather than measure a contaminated arm.
+    if _prior_stage and _prior_stage.get("projectId"):
+        _stage = _prior_stage
+        print("  PRESTAGE        : REUSED  project=%s from attempt %d — this "
+              "is a preemption retry, not a new job"
+              % (str(_stage["projectId"])[:8], max(1, _attempt - 1)),
+              flush=True)
+        # WHAT THE EARLIER ATTEMPT LEFT ON THE TIMELINE, read rather than
+        # assumed empty: the paragraph names it so the agent revises instead
+        # of placing a second copy of everything.
+        try:
+            _prb = read_back(tok, _stage)
+            _stage["priorItems"] = [str(i.get("id")) for i in (_prb.get("items") or [])
+                                    if i.get("id") and str(i.get("id")).replace("-", "")[:10]
+                                    != str(_stage.get("baseItemId") or "").replace("-", "")[:10]]
+            print("  PRIOR ITEMS     : %d on the reused timeline (%s)"
+                  % (len(_stage["priorItems"]), _prb.get("read_why")), flush=True)
+        except Exception as _pe:                                  # noqa: BLE001
+            _stage["priorItems"] = []
+            print("  PRIOR ITEMS     : FAILED to read (%s)" % _pe, flush=True)
+    else:
         _stage = prestage(tok, prestage_title, controls=_ctl,
                           source_path="/work/source.mp4", titles=_titles)
-        _libn = len(_stage.get("components") or {})
-        # ── HOP 2: plan -> prestage ─────────────────────────────────────────
-        # Every assetId the plan names must be registered BEFORE the agent
-        # starts. The card was lost exactly here: the plan named it, the
-        # launcher never carried card_hero/card_label into the payload, the
-        # asset registered without them, and the run went green on a graphic
-        # that rendered its title and no card. A check that runs after the
-        # agent is a report; this one refuses to start.
-        sys.path.insert(0, "/root")
-        import verify_chain as _vc
-        _manifest = _vc.plan_manifest(plan or "")
-        _reg = dict(_stage.get("components") or {})
-        for _i2, _t2 in enumerate(_stage.get("titles") or []):
-            _reg["GRAPHIC %d" % (_i2 + 1)] = _t2["assetId"]
-        _miss2 = _vc.hop2_prestage(_manifest, _reg)
-        if _miss2:
-            raise RuntimeError(
-                "HOP 2 (plan -> prestage): the plan names %d add(s) with no "
-                "registered asset behind them. Refusing to run — the agent "
-                "would place them and the run would go green on placements "
-                "that cannot render:\n  %s"
-                % (len(_miss2), "\n  ".join(
-                    "CALL %s adds[%s] (%s): %s"
-                    % (r["call"], r["slot"], r["type"], why)
-                    for r, why in _miss2)))
+        job_state_put(run_id, stage=_stage)
+    # AND ITS ABSENCE IS FATAL IN SECONDS, NOT IN TWENTY MINUTES. A run with no
+    # project cannot place anything; letting it proceed buys a 1,500s timeout
+    # and a ledger full of honest, useless ABSENTs. Fail where the precondition
+    # is missing, not where its consequences surface.
+    if not (_stage and _stage.get("projectId")):
+        raise RuntimeError(
+            "PRESTAGE produced no projectId — there is no timeline to edit, so "
+            "the agent would spend the whole budget discovering that. "
+            "Envelope: %s" % str(_stage)[:300])
+    if not _stage.get("sourceAssetId"):
+        raise RuntimeError(
+            "PRESTAGE created project %s but registered NO SOURCE ASSET — the "
+            "agent would face an empty timeline with no clip to cut. "
+            "prestage() imports the source itself, so a missing sourceAssetId "
+            "means that upload failed silently."
+            % str(_stage.get("projectId"))[:12])
+    # THE WORDS, FETCHED WHILE THE REST OF SETUP HAPPENS. Transcription is a
+    # wait on somebody else's machine, and pass 1 cannot start without it, so
+    # it runs on a thread from the moment the asset exists and is joined where
+    # the message is built — overlapping the watch install, the system prompt
+    # and the frame extraction instead of adding to them.
+    _beats_box = {"beats": [], "state": "ABSENT", "why": "not started"}
+
+    def _fetch_beats():
+        try:
+            _b, _st, _w = source_beats(tok, _stage, _dur_for_detect)
+            _beats_box.update({"beats": _b, "state": _st, "why": _w})
+        except Exception as _be:                                  # noqa: BLE001
+            _beats_box.update({"state": "FAILED",
+                               "why": "%s: %s" % (type(_be).__name__,
+                                                  str(_be)[:140])})
+
+    _beats_th = threading.Thread(target=_fetch_beats, daemon=True)
+    _beats_th.start()
+    # THE SOURCE IS WATCHED THROUGH CHATCUT while the message is prepared.
+    _watch_box = {"state": "ABSENT", "why": "not started"}
+
+    def _watch_source():
+        try:
+            _watch_box.update(watch_asset(tok, _stage.get("sourceAssetId"),
+                                          _dur_for_detect, "/work/source_watch"))
+        except Exception as _we:                                  # noqa: BLE001
+            _watch_box.update({"state": "FAILED",
+                               "why": "%s: %s" % (type(_we).__name__, str(_we)[:140])})
+    _watch_th = threading.Thread(target=_watch_source, daemon=True)
+    _watch_th.start()
+    mark("prestage")
+    _libn = len(_stage.get("components") or {})
+
+    # THE STAGE REACHES THE AGENT ON EVERY PATH, NOT ONLY THE PLAN ONE.
+    #
+    # Measured 2026-09-16, run `blueshirt-fixed-3`: prestage created the
+    # project, imported the source and registered 37 components — and the
+    # DECIDING prompt named none of them. `timelineId` and `trackId` appeared
+    # ZERO times in edit(). So the agent was told to place things onto a
+    # project it could not name, reached for `read_project` to find out, was
+    # refused by the allowlist, retried once, and stopped. 9 turns, 0
+    # placements, 1,401s of silence.
+    #
+    # A PRODUCER WITH NO CONSUMER. The harness knew every id and told the agent
+    # nothing; this block is the consumer. It sits beside the plan path's
+    # identical block, which is why the plan path worked and this one never
+    # could — the same information, offered on one branch only.
+    # THE IDS GO IN THE SENTENCE, THE COMPONENTS GO IN A LIST.
+    #
+    # Zac, 2026-09-16: "Everything in it is an id or a sentence. No procedure,
+    # no warnings, no restatement of rules the tool schemas already carry."
+    # The ids are what the agent could not name and spent a whole run
+    # discovering; the component table is a lookup, which is a list.
+    _ids_line = "project %s" % _stage["projectId"]
+    for _k2, _lbl in (("timelineId", "timeline"), ("trackId", "track"),
+                      ("sourceAssetId", "source")):
+        if _stage.get(_k2):
+            _ids_line += ", %s %s" % (_lbl, _stage[_k2])
+    _components_block = (
+        ("\n\nTHE %d REGISTERED COMPONENTS — place one and set its text through "
+         "`propertyOverrides`. Use the whole id.\n%s\n"
+         % (_libn, "\n".join(
+             "    %-22s %s" % (
+                 _k, ((_v.get("assetId") if isinstance(_v, dict) else _v)
+                      or "?"))
+             for _k, _v in sorted(
+                 (_stage.get("components") or {}).items())[:60])))
+        if _libn else "")
+    # ── HOP 2: plan -> prestage ─────────────────────────────────────────
+    # Every assetId the plan names must be registered BEFORE the agent
+    # starts. The card was lost exactly here: the plan named it, the
+    # launcher never carried card_hero/card_label into the payload, the
+    # asset registered without them, and the run went green on a graphic
+    # that rendered its title and no card. A check that runs after the
+    # agent is a report; this one refuses to start.
+    sys.path.insert(0, "/root")
+    import verify_chain as _vc
+    _manifest = _vc.plan_manifest(plan or "")
+    _reg = dict(_stage.get("components") or {})
+    for _i2, _t2 in enumerate(_stage.get("titles") or []):
+        _reg["GRAPHIC %d" % (_i2 + 1)] = _t2["assetId"]
+    _miss2 = _vc.hop2_prestage(_manifest, _reg)
+    if _miss2:
+        raise RuntimeError(
+            "HOP 2 (plan -> prestage): the plan names %d add(s) with no "
+            "registered asset behind them. Refusing to run — the agent "
+            "would place them and the run would go green on placements "
+            "that cannot render:\n  %s"
+            % (len(_miss2), "\n  ".join(
+                "CALL %s adds[%s] (%s): %s"
+                % (r["call"], r["slot"], r["type"], why)
+                for r, why in _miss2)))
+    # AN EMPTY MANIFEST IS ABSENT, NOT A PASS.
+    #
+    # HOP 2 asks whether every assetId THE PLAN NAMES is registered before
+    # the agent starts. The single agent authors its own graphics at run
+    # time, so there is no plan and `_manifest` is empty — and
+    # `hop2_prestage([])` finds no misses and this line printed
+    # "MEASURED 0 add(s), every assetId registered". A check comparing
+    # against an empty set passes, and passes quietly; this repo has the
+    # rule and it still took writing a new smoke to see it here.
+    #
+    # The question it asked has not been lost, it has MOVED: whether a
+    # placement carries what it claims is now asked of the placed item by
+    # chatcut_gate.check_card_props_resolve, against the component library.
+    if not _manifest:
+        print("  HOP 2           : ABSENT — no plan names any asset "
+              "(single-agent path: the agent authors its own graphics). "
+              "The question moved to GATE B, which asks it of the PLACED "
+              "item.", flush=True)
+    else:
         print("  HOP 2           : MEASURED  %d add(s), every assetId "
               "registered" % len(_manifest), flush=True)
-        print("  TITLE CONTROLS  : %s" % (json.dumps(_ctl) if _ctl
-                                          else "ABSENT — defaults"), flush=True)
-        print("  PRESTAGE        : MEASURED  project=%s title=%s source=%s  "
-              "(the agent writes no JSX and uploads nothing)"
-              % (_stage["projectId"][:8], (_stage["titleAssetId"] or "?")[:8],
-                 (_stage["sourceAssetId"] or "ABSENT")[:8]), flush=True)
-    if plan:
-        with open("/work/PLAN.md", "w") as fh:
-            fh.write(plan)
-        prompt = (
-            f"THE CLIP: /work/source.mp4\n"
-            f"THE BRIEF: {brief}\n\n"
-            f"THE EDIT IS ALREADY DECIDED. The plan is at /work/PLAN.md and "
-            f"reproduced at the end of this message. It came from the pipeline "
-            f"that has already read this clip's transcript and its frames. "
-            f"YOUR JOB IS TO EXECUTE IT, LOOK AT WHAT YOU BUILT, AND FIX WHAT "
-            f"THE FRAMES SHOW IS WRONG. It is not to decide the edit again.\n\n"
-            f"DO NOT re-derive the cuts. Do not choose different moments, "
-            f"different wording, or a different number of placements. Where "
-            f"the plan is silent on a MECHANICAL detail — a font, an asset "
-            f"boundary, an id — choose it and move on. Where it is silent on "
-            f"an EDITORIAL one, build it as written and NAME THE OPEN QUESTION "
-            f"in your final message. Do not fill it in quietly: a guess from "
-            f"you is indistinguishable from a decision the pipeline made.\n\n"
-            f"THE ChatCut tool schemas are DEFERRED. Fetch them in ONE call "
-            f"before you start:\n  ToolSearch query=\"select:{_sel}\" "
-            f"max_results={_nsel}\n"
-            f"  (max_results defaults to 5 — without it you get five of the "
-            f"{_nsel} and the rest stay uncallable.)\n\n"
-            + TWO_TURN_LOOP
-            # SHEET_RULE USED TO SIT HERE AND THE CONSTANT NO LONGER EXISTS.
-            # It was deleted in 7a86e3b with the 20-frame contact sheet it
-            # described, and TWO uses were left behind — so every run on this
-            # path has died at `NameError: name 'SHEET_RULE' is not defined`
-            # since that commit, and nothing caught it because
-            # smoke_no_undefined_names.py's file list did not include this
-            # file. The RULE itself is not lost: `pass1_message` carries it in
-            # the text block beside the frames, where it now describes what is
-            # actually sent (14 individual frames, not a tile) instead of what
-            # used to be.
-            + FETCH_RULE
-            + (HANDS_PARA_PLAN if use_hands else "")
-            + (("EVERYTHING IS ALREADY STAGED. Create nothing and upload "
-                "nothing.\n"
-                f"  projectId      : {_stage['projectId']}\n"
-                f"  source assetId : {_stage['sourceAssetId']}\n"
-                + ("".join(
-                    "  GRAPHIC %d assetId : %s   %r\n"
-                    % (_i + 1, _t["assetId"], _t["text"])
-                    for _i, _t in enumerate(_stage.get("titles") or []))
-                   or (f"  title assetId  : {_stage['titleAssetId']}\n"
-                       if _stage.get("titleAssetId") else
-                       "  NO GRAPHIC IS STAGED — this plan names none. Place "
-                       "the video segments only.\n"))
-                + ("PASS `projectId` ON EVERY CALL — the id is above. Do "
-                   "NOT call target_project: binding the session is a turn, "
-                   "and every tool here takes projectId directly. Then place "
-                   "EVERY add the plan names, in the CALLS THE PLAN NAMES — "
-                   "it labels "
-                   "each add `CALL 1, adds[3]:` and says at the end how many "
-                   "calls there are and why. Each graphic's assetId is listed "
-                   "above and already carries its own text, band, size, hold "
-                   "and colours, so there is nothing to pass and nothing to "
-                   "decide. `import_media` and "
-                   "`create_motion_graphic_from_code` are both NOT part of "
-                   "this job. Your work is the placements, the look, and the "
-                   "one revision.\n")
-                + (("\nThe project also carries %d PRE-REGISTERED components, "
-                    "each already validated, each with its editable properties "
-                    "declared. If the plan calls for one, place it by the "
-                    "assetId BESIDE ITS NAME — the plan writes the NAME "
-                    "(`caption:TwoTone`), this list holds the ID. Never send a "
-                    "name as an assetId, and never author component code:\n"
-                    "%s\n"
-                    # THE WHOLE UUID. This printed `[:8]`, so every id the
-                    # agent could see was already truncated — and it then sent
-                    # `caption:TwoTone` (rejected, the run's only error) and
-                    # recovered with `c85df628`, the 8 characters this line
-                    # gave it. Every abbreviated id in two runs came from here.
-                    # edit_item happens to resolve a prefix and inspect_item
-                    # refuses one, so the truncation cost three failed calls in
-                    # the run before this and one rejected call in this one,
-                    # while looking like the agent mistyping.
-                    % (_libn, "\n".join(
-                        "    %-22s %s%s" % (
-                            k,
-                            ((v.get("assetId") if isinstance(v, dict) else v)
-                             or "?"),
-                            ("   (+overrides)" if isinstance(v, dict) else ""))
-                        for k, v in sorted(
-                            (_stage.get("components") or {}).items())[:60])))
-                   if _libn else "")
-                + "\n") if _stage else "")
-            + f"===== THE PLAN =====\n{plan}\n===== END OF PLAN =====\n")
-    else:
-        prompt = (
-            f"THE CLIP: /work/source.mp4\n"
-            f"THE BRIEF: {brief}\n\n"
-            # (the second dangling SHEET_RULE — same deletion, same fix; both
-            # branches are served by pass1_message, which carries the rule)
-            + FETCH_RULE
-            + f"BEFORE RENDER, call preview_timeline with viewerFrameCount to see the "
-            f"composed result. Both of these are checked after the run.\n\n"
-            f"The ChatCut tool schemas are DEFERRED. Fetch them in ONE call before "
-            f"you start:\n  ToolSearch query=\"select:{_sel}\" "
-            f"max_results={_nsel}\n"
-            f"  (max_results defaults to 5 — without it you get five of the "
-            f"{_nsel} and the rest stay uncallable.)\n"
-            f"The craft is already in your context — do not read /craft unless you "
-            f"need something it does not cover.\n\n"
-            + (HANDS_PARA_DECIDE if use_hands else ""))
+    print("  TITLE CONTROLS  : %s" % (json.dumps(_ctl) if _ctl
+                                      else "ABSENT — defaults"), flush=True)
+    print("  PRESTAGE        : MEASURED  project=%s title=%s source=%s  "
+          "(the agent writes no JSX and uploads nothing)"
+          % (_stage["projectId"][:8], (_stage["titleAssetId"] or "?")[:8],
+             (_stage["sourceAssetId"] or "ABSENT")[:8]), flush=True)
+    # THE PLAN PATH IS GONE (ruling C, 2026-09-17): one branch, the deciding paragraph.
+    _src_frames = int(round(_dur_for_detect * 30)) if _dur_for_detect else 0
+    _base_line = (
+        ("The source (%.2fs = %d frames at 30fps) is ALREADY on track V1 "
+         "as item %s, frames 0-%d, untrimmed. Cut it with edit_item "
+         "updates (fromFrame, durationInFrames, sourceStartFromInSeconds) "
+         "and adds of further video items from the same assetId; place "
+         "graphics on the tracks above it. "
+         % (_dur_for_detect, _src_frames, _stage.get("baseItemId"),
+            _src_frames))
+        if _stage.get("baseItemId") else
+        ("The source is %.2fs = %d frames at 30fps. "
+         % (_dur_for_detect, _src_frames)))
+    _prior_line = (
+        ("The timeline ALREADY HOLDS %d item(s) from an earlier attempt of "
+         "this same job (ids %s) — revise them; do not place them again. "
+         % (len(_stage.get("priorItems") or []),
+            ", ".join(str(x)[:8] for x in (_stage.get("priorItems") or [])[:8])))
+        if _stage.get("priorItems") else "")
+    prompt = (
+        ("You are editing this video. The project is open — %s. The %d "
+         "components are listed below, with a picture of each. You have "
+         "watched the ten reference edits; they are the standard.\n\n"
+         % (_ids_line, _libn))
+        + _base_line + _prior_line +
+        "An edit_item add takes assetId, trackId, fromFrame and "
+        "durationInFrames. A track-bound effect also takes trackBoundFrom "
+        "and trackBoundDurationInFrames. A component's text goes in "
+        "propertyOverrides. Caption edits take the revision "
+        "read_captions returns — Card edits AND track-wide ones "
+        "like set_max_characters.\n\n"
+        "Your %d ChatCut tools are loaded and the ChatCut guide is already "
+        "in your context.\n\n"
+        "THE BRIEF: %s\n\n"
+        # THE THREE-TURN CONTRACT, with the shapes ChatCut's slimmed schema
+        # cannot show (adds.items is {} upstream too). Measured 2026-09-17
+        # (h-th-think0): without them the agent guessed type "caption-track",
+        # wrapped its ops in the `json` string field, and put `why` where
+        # the shim could not take it off — three of four calls refused.
+        "Place everything in ONE edit_item call, using the adds/updates/"
+        "deletes fields directly (never the json field). Every add is "
+        "exactly this shape: {\"type\": \"motion-graphic\", \"assetId\": "
+        "\"<inventory id>\", \"fromFrame\": N, \"durationInFrames\": N, "
+        "\"propertyOverrides\": {...}, \"why\": \"one line: what it is for\"}. "
+        "type is motion-graphic for every inventory component. Captions are "
+        "NOT an item: one edit_captions call with action \"enable\" turns "
+        "them on. Put the why INSIDE each op — the harness reads it there; "
+        "write no files and call no preview: after your call the harness "
+        "watches the render and sends you the frames. Then you fix in one "
+        "call, and once more if needed, and say \"export\"."
+        % (_nsel, brief)
+        # THE CONTRACT, IN FULL. Until 2026-09-18 TWO_TURN_LOOP rode only the
+        # plan path (deleted); the deciding agent had never seen it.
+        + "\n\n" + TWO_TURN_LOOP
+        + _components_block
+        + (HANDS_PARA_DECIDE if use_hands else ""))
 
-    # THE PROMISE, CHECKED AGAINST THE CAPABILITY, IN THE LOG. Printed in the
-    # same commit that gates it — a counter added to answer a question and never
-    # shown answers nothing, and this one was invisible for two whole runs.
     _promises_hands = "`hands` subagent" in prompt
     print("  SUBAGENT        : offered=%s  promised_in_prompt=%s  %s"
           % (use_hands, _promises_hands,
@@ -2683,50 +4483,39 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         if os.path.exists("/work/source_sheet.png") else None
     # THE TRANSCRIPT TRAVELS WITH THE JOB, time-aligned, because pass 1 needs
     # to read the words against the frames it is looking at.
+    # A PASSED TRANSCRIPT WINS; OTHERWISE THE ONE WE FETCHED. Both are the
+    # same shape and the ledger says which arrived, because "no speech" and
+    # "we never asked" are different facts about the edit that follows.
     try:
         _beats = json.loads(transcript) if transcript else []
+        _beats_why = "passed in" if _beats else ""
     except Exception:                                             # noqa: BLE001
-        _beats = []
+        _beats, _beats_why = [], "the passed transcript did not parse"
+    if not _beats:
+        _beats_th.join(timeout=60)
+        _watch_th.join(timeout=120)
+        if _watch_th.is_alive():
+            _watch_box.update({"state": "ABSENT", "why": "watch_asset still running after 120s"})
+        print("  SOURCE WATCH    : %s — %s" % (_watch_box.get("state"), str(_watch_box.get("why"))[:140]),
+              flush=True)
+        if _beats_th.is_alive():
+            _beats_why = "the transcript fetch was still running after 60s"
+        else:
+            _beats = _beats_box["beats"]
+            _beats_why = "%s — %s" % (_beats_box["state"], _beats_box["why"])
+    print("  BEATS           : %s  %d beat(s)"
+          % (_beats_why or "ABSENT", len(_beats)), flush=True)
     print("  PASS 1 SERVES   : inventory=%s  source frames=%d  transcript=%d "
           "beat(s)"
-          % (os.path.exists("/craft/component_sheet.png"), SOURCE_FRAMES_N,
+          % (os.path.exists("/craft/component_sheet.png"), int(_watch_box.get("frames") or 0),
              len(_beats)), flush=True)
-    _cmd = (
-        ["claude", "-p",
-         "--input-format", "stream-json",
-         "--append-system-prompt-file", "/work/system.md",
-         *(["--agents", json.dumps(agents)] if use_hands else []),
-         # STREAM-JSON, because `json` returns only the final result and the
-         # ordered tool calls are then unrecoverable. That gap is what made the
-         # first run's 93 turns a number instead of a diagnosis.
-         "--output-format", "stream-json", "--verbose",
-         "--mcp-config", "/work/mcp.json",
-         # NOT bypassPermissions. It maps to --dangerously-skip-permissions,
-         # which REFUSES to run as root, and every Modal container is root:
-         # "cannot be used with root/sudo privileges for security reasons".
-         # An explicit allowlist is the right mechanism anyway — the agent
-         # should have exactly the ChatCut tools and the local file tools, and
-         # nothing it was never meant to reach.
-         # NAMED, NOT WILDCARDED. `mcp__chatcut__*` admits all 60 tools the
-         # server advertises, and 60 tools is why their schemas arrive
-         # DEFERRED — which is the whole reason a ToolSearch turn exists at
-         # all. Whether Claude Code's deferral counts the server's tools or
-         # the ALLOWED ones is not documented, so this run answers it: if the
-         # ToolSearch turn disappears, the deferral respects the allowlist and
-         # the turn was ours to remove. If it survives, the deferral is the
-         # server's tool count and the turn is the harness's, not the edit's.
-         # Either way the six are exactly what a pre-resolved plan needs.
-         "--allowedTools",
-         ",".join(["mcp__chatcut__" + t for t in NEEDED_TOOLS]
-                  + ["Bash", "Read", "Write", "Glob", "Grep"]),
-         "--model", model]
-        # THE FLAG THAT MAKES THE SPLIT POSSIBLE. Without the deltas, queue,
-        # prefill and generation collapse into one bucket — and a coarser
-        # answer that looks identical to a finer one is the oldest failure in
-        # this repo. Added only when the installed CLI actually takes it, and
-        # its absence is printed rather than silently changing the meaning of
-        # the number.
-        + (["--include-partial-messages"] if _pm else []))
+    # THE WATCH IS INSTALLED BEFORE THE COMMAND IS BUILT, because the command
+    # names its session id and a --resume onto a file that is not there is the
+    # one failure that looks exactly like success: the CLI starts a FRESH
+    # session, the edit runs, every gate passes, and the reference layer was
+    # never in context.
+    _watch_sid = install_watch("/work")
+    _cmd = cli_command(_watch_sid, model, use_hands, agents if use_hands else None, _pm, effort=(effort or None))
     # THE THINKING CAP. 267 of 608 seconds — 44% of the wall — was `thinking`
     # blocks on an agent handed a COMPLETE plan. It is executing, not deciding,
     # and it was reasoning as if it were. `MAX_THINKING_TOKENS` is read from the
@@ -2734,10 +4523,51 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     # CLAUDE_CODE_DISABLE_THINKING and DISABLE_INTERLEAVED_THINKING, and this
     # is the one that BOUNDS rather than removes — the review pass still needs
     # judgment about whether the composed frames are right.
-    _env = {"MAX_THINKING_TOKENS": str(think_tokens)} if think_tokens else {}
-    print("  THINKING CAP    : %s"
-          % (f"MAX_THINKING_TOKENS={think_tokens}" if think_tokens
-             else "UNCAPPED (default)"), flush=True)
+    # BOUNDED BY DEFAULT (Zac's table, 2026-09-17: output per run ≤8k, "no
+    # record, no plan"). Thinking is output; 546s of it wrote the record.
+    # -1 = the default bound; 0 = thinking REMOVED (the CLI's own switch,
+    # since what MAX_THINKING_TOKENS=0 means is not documented and an arm
+    # that silently ran the default would be no arm); N = a bound of N.
+    # MEASURED ON THE WIRE (2026-09-17, transparent proxy, CLI 2.1.226):
+    #   MAX_THINKING_TOKENS=0            -> thinking {type: disabled}   (the off switch)
+    #   CLAUDE_CODE_DISABLE_THINKING=1   -> no thinking field at all; Sonnet 5 then
+    #                                       thinks ADAPTIVELY — h-th-think0 streamed
+    #                                       25k thinking tokens in 300s under it
+    #   MAX_THINKING_TOKENS=N (N>0)      -> thinking {type: adaptive}, no budget
+    if think_tokens == 0:
+        _env = {"MAX_THINKING_TOKENS": "0"}
+    else:
+        _env = {"MAX_THINKING_TOKENS": str(think_tokens if think_tokens > 0 else DEFAULT_THINK_TOKENS)}
+    # NO ToolSearch. Tool definitions sit FIRST in the cache hierarchy; the
+    # ToolSearch turn loads nine schemas into that block on call 2 and every
+    # cached byte after it — system, watch, first message — is rewritten.
+    # Measured locally 2026-09-17: ENABLE_TOOL_SEARCH=false removes ToolSearch
+    # from the init tool list, and `--tools` restricts the block itself
+    # (5 tools -> 19,909 tokens written; eager-all -> 68,460). With both, the
+    # block is fixed from call 1 and there is no schema-fetch turn.
+    _env["ENABLE_TOOL_SEARCH"] = "false"
+    # EVERY REQUEST THROUGH THE RECORDING PROXY. Started here, on a thread,
+    # and torn down with the container. The fingerprints land in
+    # /work/prefix_calls.jsonl and reach the record below.
+    # TRANSPARENT (2026-09-17): handed to the CLI as HTTPS_PROXY + a CA only
+    # this process trusts, never as ANTHROPIC_BASE_URL — behind a base URL of
+    # http://127.0.0.1 the CLI's request changed (a "ping" thought 100s+ three
+    # times out of three; direct, 'pong' in 19s), and an instrument the
+    # subject can see is not an instrument.
+    try:
+        import api_proxy as _px
+        _px.FINGERPRINTS = "/work/prefix_calls.jsonl"
+        _px.FIRST_BODY = "/work/req_first.json"
+        _px.TRACE = "/work/proxy_trace.jsonl"
+        _px_port, _px_ca = _px.serve_mitm(0, "/work/mitm")
+        _env.update(_px.mitm_env(_px_port, _px_ca))
+        print("  API PROXY       : MEASURED  transparent, HTTPS_PROXY=http://127.0.0.1:%d, CA %s"
+              % (_px_port, _px_ca), flush=True)
+    except Exception as _pxe:                                     # noqa: BLE001
+        print("  API PROXY       : FAILED to start (%s) — the CLI goes direct and "
+              "this run carries NO prefix fingerprints" % _pxe, flush=True)
+    print("  THINKING CAP    : %s" % (" ".join("%s=%s" % kv for kv in _env.items() if "THINK" in kv[0])
+                                      + ("" if think_tokens > 0 else (" (removed)" if think_tokens == 0 else " (default)"))), flush=True)
     # ── THE HARNESS DRIVES THE CONVERSATION ─────────────────────────────────
     # Two user messages, both carrying PIXELS the harness already has:
     #   1. the plan, with the SOURCE contact sheet as an image
@@ -2746,155 +4576,231 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     # and the preview/curl/tile/Read the review used to cost — because none of
     # it is a decision. The model is needed for the LOOKING, not the fetching.
     sys.path.insert(0, "/root")
-    import verify_chain as _vc_f
-    _man = _vc_f.plan_manifest(plan or "")
-    _total_frames = max([(r["from"] or 0) + (r["dur"] or 0) for r in _man]
-                        or [0])
-    _n_calls = len({r["call"] for r in _man}) or 1
-    _state = {"edits": 0, "sent": False, "pass2": "",
-              # the frame server's own record: which preview_timeline
-              # calls are outstanding, what has been served, and which
-              # URLs are already pixels in the transcript.
-              "pending": set(), "served": [], "served_urls": set(),
-              "render_thread": None}
+    # THE EDIT'S LENGTH COMES FROM THE TIMELINE NOW, NOT FROM A PLAN.
+    #
+    # It was `max(from + dur)` over the plan manifest. With no plan the
+    # manifest is EMPTY, `max([] or [0])` is 0, and `_edit_frames` would have
+    # been asked to render a ZERO-FRAME edit — the review pass returning
+    # nothing, reported as "the harness could not render the edit", on a
+    # perfectly good timeline. Absence rendered as a value, in the number that
+    # decides whether the agent ever sees its own work.
+    #
+    # It is read at PASS 2 time rather than here, because at this point the
+    # agent has not placed anything and the answer would be 0 for a second,
+    # truer reason.
+    # ── THE THREE STRATEGIC TURNS (Zac, 2026-09-17) ──────────────────────
+    # One API call per turn (--max-turns 1); the harness fetches, applies,
+    # checks and serves between them; cap four; every later call must read
+    # the prefix the first established. The stream machine that used to live
+    # here — marks, rewatch threads, idle bounds — is gone with it.
+    _first_message = pass1_message(prompt, _beats, "/craft/component_sheet.png",
+                                   _watch_box, deciding=not bool(plan))
+    out_first = _first_message          # into the record below, in full (section C)
+    _turn_recs = []
 
-    def _serve_what_it_asked_to_see(ev, send):
-        """Every `preview_timeline` result becomes PIXELS in the next message.
+    def _invoke(n, message):
+        _stream = "/work/stream_turn%d.jsonl" % n
+        _tfile = "/work/timing_turn%d.json" % n
+        _st = {}
+        _calls, _texts, _res = [], [], {}
 
-        The agent asks to look; the harness fetches. It never writes a signed
-        URL, never runs curl, never tiles with ffmpeg, never Reads a file back
-        — 89% of everything it typed on run 24 was S3 URLs.
+        def _on(ev, send, close, kill=None):
+            if ev.get("type") == "assistant":
+                _st["read"] = _st.get("read", 0) + usage_once(_st, ev)
+                for b in ((ev.get("message") or {}).get("content") or []):
+                    if b.get("type") == "tool_use":
+                        _calls.append({"name": b.get("name"), "input": b.get("input"), "id": b.get("id")})
+                    elif b.get("type") == "text" and (b.get("text") or "").strip():
+                        _texts.append(b["text"].strip())
+            elif ev.get("type") == "result":
+                _res.update(ev)
+                # THE TURN IS OVER WHEN THE RESULT ARRIVES. In stream-json
+                # input mode the CLI keeps waiting for the next message; the
+                # keep-warm ping measured it: result at ~20s, killed at the
+                # 120s bound (rc -9). Closing stdin is the EOF that ends it.
+                try:
+                    close()
+                except Exception:                                 # noqa: BLE001
+                    pass
+        mark("turn%d.start" % n)
+        # THE ONLY KILL IS THE RUN BOUND: this turn may use whatever is left of it.
+        _left = max(10.0, RUN_TIMEOUT_S - (time.time() - _run_t0))
+        rc, err, wall, killed = turn_clock.run_timed(
+            _cmd + ["--max-turns", "1"], "/work", _stream, _tfile, _left,
+            env=_env, stdin_first=json.dumps(message), on_event=_on)
+        mark("turn%d" % n)
+        if wall > TURN_LAW_S:
+            print("  LAW MISS (turn) : turn %d took %.1fs, over the %ds turn law%s" % (n, wall, TURN_LAW_S, " — KILLED at the run bound" if killed else ""), flush=True)
+        u = _res.get("usage") or {}
+        rec = {"rc": rc, "subtype": _res.get("subtype"), "tool_calls": _calls,
+               "text": "\n".join(_texts)[:2000], "killed": bool(killed), "wall": round(wall, 2),
+               "bound_s": round(_left, 1), "over_turn_law": wall > TURN_LAW_S,
+               "usage": {"read": u.get("cache_read_input_tokens"), "write": u.get("cache_creation_input_tokens"),
+                         "in": u.get("input_tokens"), "out": u.get("output_tokens"),
+                         # WHICH TTL WAS WRITTEN. The rewatch probe's review wrote 231,986 as
+                         # ephemeral_5m while the local CLI (2.1.226) writes 1h — the keep-warm
+                         # cadence and the write rate both hang on this, so it is read per call.
+                         "write_1h": (u.get("cache_creation") or {}).get("ephemeral_1h_input_tokens"),
+                         "write_5m": (u.get("cache_creation") or {}).get("ephemeral_5m_input_tokens")},
+               "cost_usd": _res.get("total_cost_usd"), "err": (err or "")[-300:]}
+        try:
+            _tj = json.load(open(_tfile, encoding="utf-8"))
+            _b = turn_clock.budget(_tj)
+            rec["ttft"] = (_b.get("buckets_s") or {}).get("TTFT")
+            rec["generating_s"] = (_b.get("buckets_s") or {}).get("GENERATING")
+            _turn_recs.append((_tj, _stream))
+        except Exception as _te:                                  # noqa: BLE001
+            rec["timing"] = "FAILED: %s" % str(_te)[:100]
+        print("  TURN %d          : %s  calls=%s  read=%s write=%s out=%s  wall=%.1fs%s"
+              % (n, rec["subtype"], [c["name"].split("__")[-1] for c in _calls],
+                 rec["usage"]["read"], rec["usage"]["write"], rec["usage"]["out"], wall,
+                 ("  text=%r" % rec["text"][:80]) if rec["text"] else ""), flush=True)
+        return rec
 
-        This does not bound the looking. It makes looking free, which is the
-        opposite thing and the one Zac's ruling actually wanted.
-        """
-        if ev.get("type") == "assistant":
-            for _b in ((ev.get("message") or {}).get("content") or []):
-                if _b.get("type") == "tool_use" and \
-                        str(_b.get("name") or "").endswith("preview_timeline"):
-                    _state["pending"].add(_b.get("id"))
-            return
-        if ev.get("type") != "user":
-            return
-        _text = []
-        for _b in ((ev.get("message") or {}).get("content") or []):
-            if _b.get("type") != "tool_result":
-                continue
-            if _b.get("tool_use_id") not in _state["pending"]:
-                continue
-            _state["pending"].discard(_b.get("tool_use_id"))
-            _c = _b.get("content")
-            if isinstance(_c, list):
-                _c = " ".join(str(x.get("text") or "") for x in _c
-                              if isinstance(x, dict))
-            _text.append(str(_c or ""))
-        if not _text:
-            return
-        _urls = _frame_urls(" ".join(_text))
-        if not _urls:
-            _state["served"].append("ASKED but the result named no frame URL")
-            return
-        _blocks, _st = _fetch_frames(_urls, "/work/served",
-                                     _state["served_urls"])
-        _state["served"].append(_st)
-        print("  FRAMES SERVED   : %s" % _st, flush=True)
-        if _blocks:
-            send(_message([{"type": "text", "text":
-                            "The frames you just asked for, as pictures — "
-                            "in the order preview_timeline returned them. "
-                            "Do not download them; you are looking at them. "
-                            "Ask for more whenever you want to look again."}]
-                          + _blocks))
-
-    def _drive(ev, send, close):
-        """PASS 2: the edit is shown to the agent, once its placements land.
-
-        FIRED ON THE PLAN'S LAST CALL, not on a fixed count — a plan with no
-        effect names one call, and waiting for a second would have hung.
-        """
-        _serve_what_it_asked_to_see(ev, send)
-        if _state["sent"] or ev.get("type") != "assistant":
-            return
-        for b2 in ((ev.get("message") or {}).get("content") or []):
-            if b2.get("type") == "tool_use" and \
-                    str(b2.get("name") or "").endswith("edit_item"):
-                _state["edits"] += 1
-        if _state["edits"] < _n_calls or not _stage:
-            return
-        _state["sent"] = True
-        # OFF THE EVENT LOOP. `_edit_frames` submits a cloud render and polls
-        # it for up to 240s. Run synchronously here it stops this callback
-        # returning, so run_timed stops reading stdout, the pipe fills at 64K
-        # and the AGENT BLOCKS on a write — a hang that looks exactly like a
-        # slow model, inside the harness built to find out why the model is
-        # slow. And while it blocked, the agent had already gone and fetched
-        # the edit by hand.
-        import threading as _th
-
-        def _render_and_send():
-            # try/finally AROUND EVERYTHING, because `close()` lives in here
-            # now. stream-json input ends at EOF; a thread that dies before
-            # closing stdin leaves the agent waiting for a turn that never
-            # arrives, and the run burns to its 1500s timeout looking like a
-            # slow model. The old synchronous version could not fail this way —
-            # moving work onto a thread moved the close with it.
+    def _rewatch(n, final):
+        import chatcut_gate as _cgf
+        mark("rewatch%d.start" % n)
+        _rb = read_back(tok, _stage)
+        _items = _rb.get("items") or []
+        _bs, _bst, _ = _cgf.base_track(_items)
+        _sp, _sst, _swhy = (_cgf.kept_spans(_items, _bs, float(_rb.get("fps") or 30))
+                            if _bs else ([], "ABSENT", ""))
+        _end, _est, _ewhy = _cgf.timeline_end(_sp)
+        mark("rewatch%d.readback" % n)
+        _w = {"state": "ABSENT", "why": "no timeline end (%s)" % (_ewhy or _swhy)[:100], "sheets": [], "frames": 0, "times": []}
+        if _est == "MEASURED" and _end:
+            _sheets, _times = _preview_frames(tok, _stage["projectId"], _end, fps=float(_rb.get("fps") or 30),
+                                              mark=lambda k: mark("rewatch%d.%s" % (n, k)))
+            _w = {"state": "MEASURED" if _sheets else "ABSENT", "why": "%d sheet(s)" % len(_sheets),
+                  "sheets": _sheets, "frames": len(_times), "times": _times,
+                  "instrument": "preview_timeline x5 parallel (picked 2026-09-17: 47s vs 75s export->upload->inspect; both composite)"}
+            # THE SHEETS TRAVEL WITH THE RECORD, so a report can show what the
+            # review saw instead of counting it (RESULTS[run_id-sheets]).
             try:
-                _render_and_send_inner()
-            except Exception as _e:                               # noqa: BLE001
-                _state["pass2"] = ("FAILED %s: %s"
-                                   % (type(_e).__name__, str(_e)[:160]))
-                print("  PASS 2          : %s" % _state["pass2"], flush=True)
-            finally:
-                close()
+                import base64 as _b64
+                _sb = RESULTS.get(run_id + "-sheets") or {}
+                _sb["rewatch%d" % n] = [_b64.b64encode(open(x, "rb").read()).decode() for x in _sheets]
+                RESULTS[run_id + "-sheets"] = _sb
+            except Exception as _sbe:                             # noqa: BLE001
+                print("  SHEETS PERSIST  : FAILED %s" % str(_sbe)[:80], flush=True)
+        mark("rewatch%d.watch" % n)
+        _props = {}
+        _base = _stage.get("baseItemId")
+        for it in [x for x in _items if str(x.get("id") or "").replace("-", "")[:10] != str(_base or "").replace("-", "")[:10]][:20]:
+            try:
+                _ii = _mcp_call(tok, "inspect_item", {"projectId": _stage["projectId"], "itemId": it.get("id")}, expect=None)
+                _pv = _deep_find(_ii, "propertyOverrides") or _deep_find(_ii, "effectiveProps") or _deep_find(_ii, "properties")
+                if _pv:
+                    _props[str(it.get("id"))] = _pv
+            except Exception as _ie:                              # noqa: BLE001
+                _props[str(it.get("id"))] = {"inspect_item": "FAILED %s" % str(_ie)[:80]}
+        mark("rewatch%d.props" % n)
+        _rec = derive_record(_items, _beats, _base, "\n".join(_shim_whys()))
+        _g = gate_b(tok, _stage, _rec.get("rulings"), _rec.get("spec"),
+                    source_duration_s=(_dur_for_detect or None), prefetched=_rb, beats=_beats)
+        # THE CAPTION BAND FEEDS THE FACE/TEXT CHECK: a graphic on the
+        # captions is a collision the review must be told about.
+        try:
+            _cb, _cbw = caption_band(tok, _stage)
+        except Exception as _cbe:                                 # noqa: BLE001
+            _cb, _cbw = None, "caption_band FAILED: %s" % str(_cbe)[:80]
+        print("  CAPTION BAND    : %s" % (("MEASURED %s" % (list(_cb),)) if _cb else ("ABSENT — %s" % _cbw)), flush=True)
+        _h6 = {"state": "ABSENT", "why": "not run"}
+        try:
+            _h6 = verify_hop6_clear(None, "/work/source.mp4", items=_items, caption_band=_cb)
+        except Exception as _h6e:                                 # noqa: BLE001
+            _h6 = {"state": "ABSENT", "why": "hop6 %s" % str(_h6e)[:80]}
+        _faults = fault_lines(_g, _h6, None, _items, _base)
+        _scan = []
+        try:
+            if os.path.exists("/work/edit.mp4"):
+                _dl, _dsum = rendered_defects("/work/edit.mp4", spans=_sp, source_path="/work/source.mp4",
+                                              fps=float(_rb.get("fps") or 30), expect_end_frames=_end)
+                _scan = _dl
+        except Exception as _se:                                  # noqa: BLE001
+            _scan = ["  THE SCAN FAILED (%s)" % str(_se)[:80]]
+        mark("rewatch%d.checks" % n)
+        _msg = rewatch_message(n, _w, timeline_lines(_items, _props, _base), _faults, _scan, final=final)
+        print("  REWATCH %d       : %s — %d item(s), %d fault(s), props for %d"
+              % (n, _w["why"], len(_items), len(_faults), len(_props)), flush=True)
+        return {"message": _msg, "watch": {k: v for k, v in _w.items() if k != "sheets"}, "sheets": len(_w.get("sheets") or []),
+                "items": len(_items), "faults": _faults, "scan": _scan[:12], "gate_verdict": _g.get("verdict"),
+                "scan_state": "MEASURED" if os.path.exists("/work/edit.mp4") else "ABSENT (no render before the final export; the scan runs on it)",
+                "inspect_item_calls": len(_props)}
 
-        def _render_and_send_inner():
-            _got, _want = _edit_frames(tok, _stage["projectId"], _total_frames)
-            # PRINTED IN THE SAME COMMIT THAT NEEDS IT. Run 24 could not be
-            # read: the agent scrubbed 19 frames of its own with 10 Bash calls
-            # and 156s, and NOTHING in the record said whether that was because
-            # pass 2 never arrived or because it arrived and the agent looked
-            # further anyway. Those are opposite diagnoses — a broken harness
-            # against an agent doing exactly what it was told — and they
-            # rendered identically.
-            _state["pass2"] = ("SERVED %d frame(s)" % len(_got) if _got
-                               else "NOT SERVED — _edit_frames returned "
-                                    "nothing; the agent scrubs for itself, "
-                                    "and the frame server hands it the pixels")
-            print("  PASS 2          : %s" % _state["pass2"], flush=True)
-            if _got:
-                send(pass2_message(_got, _want))
-            else:
-                # NAMED, NOT SILENT. An agent told nothing would export blind.
-                # It is NOT told to curl: whatever it asks preview_timeline for
-                # comes back as pixels from the frame server.
-                send(_message([{"type": "text", "text":
-                                "The harness could not render the edit for "
-                                "you, so you have NOT seen it yet. Ask "
-                                "preview_timeline for the frames you want — "
-                                "%s is a reasonable place to start (it takes "
-                                "up to 25 at a time) — and they "
-                                "will be sent to you as pictures. Then say in "
-                                "your final message that the harness could not "
-                                "render the edit."
-                                % ", ".join(str(f) for f in _want[:25])}]))
-            close()
+    def _shim_whys():
+        out = []
+        try:
+            for ln in open("/work/mcp_shim.log", encoding="utf-8"):
+                try:
+                    j = json.loads(ln)
+                except ValueError:
+                    continue
+                for w in (j.get("whys") or []):
+                    out.append("%s: %s" % (w.get("op"), w.get("why")))
+        except Exception:                                         # noqa: BLE001
+            pass
+        return out
 
-        _state["render_thread"] = _th.Thread(target=_render_and_send,
-                                             daemon=True)
-        _state["render_thread"].start()
-
-    _rc, _errtxt, _wall, _killed = turn_clock.run_timed(
-        _cmd, "/work", "/work/stream.jsonl", "/work/timing.json", 1500,
-        env=_env,
-        stdin_first=json.dumps(pass1_message(
-            prompt, _beats, "/craft/component_sheet.png", "/work/source.mp4")),
-        on_event=_drive)
+    _run_t0 = time.time()
+    _tm = run_three_turns(_invoke, _rewatch, _first_message)
     mark("agent")
+    _tm["whys"] = _shim_whys()
+    # THE THINKING ARM, AS SENT (not as named): measured through the proxy
+    # 2026-09-17 on CLI 2.1.226 — CLAUDE_CODE_DISABLE_THINKING=1 sends no
+    # thinking block; MAX_THINKING_TOKENS=N sends thinking {type: adaptive}
+    # with NO budget (the review call under "3000" thought 7,976 tokens);
+    # --effort sets output_config.effort, default xhigh.
+    _wire = [((c.get("fp") or {}).get("request_fields") or {}) for c in _read_prefix_rows()]
+    _tm["thinking_arm"] = {"env": {k: v for k, v in _env.items() if k in ("MAX_THINKING_TOKENS",)},
+                           "effort_flag": effort or None,
+                           "asked": ("thinking {type: disabled}" if _env.get("MAX_THINKING_TOKENS") == "0"
+                                     else "thinking {type: adaptive}, no budget"),
+                           "on_the_wire": [{"thinking": w.get("thinking"), "effort": (w.get("output_config") or {}).get("effort")} for w in _wire]}
+    print("  THINKING ARM    : %s" % json.dumps(_tm["thinking_arm"]), flush=True)
+    if _tm.get("terminal"):
+        print("  TERMINAL        : %s — %s" % (_tm["terminal"]["kind"], _tm["terminal"]["why"]), flush=True)
+        print("  OWNER PAGE      : run %s ended terminal at turn %s (%s); ledger entry written; "
+              "refund applies on the production route" % (run_id, _tm["terminal"].get("at"), _tm["terminal"]["kind"]), flush=True)
+    else:
+        print("  VERDICT         : %s" % _tm.get("verdict"), flush=True)
+    # ── what the record tail reads, from the loop ──
+    _turns = _tm["turns"]
+    _reads = sum(int((t.get("usage") or {}).get("read") or 0) for t in _turns)
+    _state = {"experiment_stop": None, "served": [], "served_urls": set(),
+              "rewatch1_fired_by": "turn 1 placed" if len(_tm["rewatches"]) >= 1 else "NEVER FIRED",
+              "rewatch2_fired_by": "turn 2 reviewed" if len(_tm["rewatches"]) >= 2 else "NEVER FIRED",
+              "rewatch2_scan": ({"state": "MEASURED", "lines": _tm["rewatches"][1].get("scan")} if len(_tm["rewatches"]) >= 2 else None),
+              "read_tok": _reads, "pass2": ("SERVED %d sheet(s)" % _tm["rewatches"][0]["sheets"]) if _tm["rewatches"] else "NEVER FIRED — turn 1 placed nothing",
+              "pass3": ("SERVED %d sheet(s)" % _tm["rewatches"][1]["sheets"]) if len(_tm["rewatches"]) >= 2 else None,
+              "idle_death": None, "frames_delivered": sum(r["sheets"] for r in _tm["rewatches"]),
+              "ev": len(_turns), "done_seen": False, "done2_seen": False, "ceiling_hit": None,
+              "batches": sum(1 for t in _turns if _edit_ops(t.get("tool_calls"))),
+              "batch_results": [], "batch_events": [t["n"] for t in _turns if _edit_ops(t.get("tool_calls"))],
+              "agent_text": _tm["whys"], "withhold_lifted_by_harness": None, "render_thread": None}
+    # merged timing for the ledger: every turn's events, offset, one budget
+    _timing = {"events": [], "wall": 0.0, "cpu_state": "ABSENT", "cpu": []}
+    _off = 0.0
+    for _tj, _stream_p in _turn_recs:
+        for e in (_tj.get("events") or []):
+            e2 = dict(e); e2["t"] = float(e.get("t") or 0) + _off; _timing["events"].append(e2)
+        _off += float(_tj.get("wall") or 0); _timing["wall"] = _off
+    with open("/work/stream.jsonl", "w", encoding="utf-8") as _fh:
+        for _tj, _stream_p in _turn_recs:
+            try:
+                _fh.write(open(_stream_p, encoding="utf-8").read())
+            except Exception:                                     # noqa: BLE001
+                pass
+    _rc = (_turns[-1].get("rc") if _turns else 1)
+    _errtxt = (_turns[-1].get("err") if _turns else "no turn ran")
+    _wall = _timing["wall"]
+    _killed = any(t.get("killed") for t in _turns)
 
     class _R:
         pass
     r = _R()
     r.returncode, r.stdout, r.stderr = _rc, "", _errtxt
+    _timing = {}
     try:
         _timing = json.load(open("/work/timing.json", encoding="utf-8"))
         _budget = turn_clock.budget(_timing)
@@ -2912,9 +4818,12 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     _pt = (_budget or {}).get("per_turn") or []
     if _pt:
         _tot = sum(t["s"] for t in _pt) or 1.0
-        print("  MODEL TIME BY TURN: %.1fs over %d turn(s)   effort: NOT SET "
-              "(the CLI takes no effort flag; MAX_THINKING_TOKENS=%s)"
-              % (sum(t["s"] for t in _pt), len(_pt), think_tokens or "unset"),
+        # CORRECTED 2026-09-17: this line said "the CLI takes no effort flag".
+        # It does (`--effort`, measured through the proxy: output_config.effort,
+        # default xhigh), and MAX_THINKING_TOKENS is not a cap — see THINKING ARM.
+        print("  MODEL TIME BY TURN: %.1fs over %d turn(s)   effort: %s "
+              "(MAX_THINKING_TOKENS=%s sends adaptive thinking, not a budget)"
+              % (sum(t["s"] for t in _pt), len(_pt), (effort or "xhigh (CLI default)"), think_tokens or "unset"),
               flush=True)
         for t in _pt:
             _b = ", ".join("%s %.1fs" % (k, v) for k, v in
@@ -2927,8 +4836,16 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     print("  TURN BUDGET     : %s" % json.dumps(
         {k: v for k, v in (_budget or {}).items() if k != "gap_detail"}),
         flush=True)
-    out = {"pass2": _state.get("pass2") or "NEVER FIRED — the plan's last "
-                                           "edit_item call was not reached",
+    # THE RECORD IS BUILT AFTER REWATCH 1 HAS FINISHED SENDING. On
+    # final-arch-1 the ceiling killed the stream while the review render was
+    # still polling; the thread printed "PASS 2: SERVED 24 frame(s)" AFTER the
+    # record had read pass2 as empty and written NEVER FIRED.
+    _rt = _state.get("render_thread")
+    if _rt is not None and _rt.is_alive():
+        _rt.join(timeout=90)
+    out = {"pass2": _state.get("pass2") or ("NEVER FIRED — %s"
+                                            % (_state.get("rewatch1_fired_by")
+                                               or "no batch landed (no edit_item op reached the timeline)")),
            # THE FRAME SERVER'S OWN NUMBER, in the record, because the whole
            # point of it is that a number moves: 89% of everything the agent
            # typed on run 24 was signed S3 URLs it was about to curl.
@@ -2967,7 +4884,7 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     # path, not the expected one. What must hold is that the composed frames
     # reached it before it exported — by either route.
     _looked_before_render = (
-        bool(_state.get("sent")) and os.path.exists("/work/review.jpg")
+        _state.get("frames_delivered", 0) > 0
     ) or (bool(_prev_i) and (not _exp_i or min(_prev_i) < max(_exp_i)))
     # THE UNDER-DELIVERY GATE. Every adherence leg asked whether the agent
     # ADDED something ruled out; none asked whether it placed what was ruled IN.
@@ -3061,8 +4978,25 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         out["chain"].setdefault(_k, {"state": "FAILED",
                                      "why": "the hop 3/4 pass did not report"})
     out["chain"].setdefault("detail", [])
+    # ONE READ, SHARED. `_chain_items` asks for `limit: 100` and takes what
+    # comes; the gate's own `read_back` pages to exhaustion, so hops 5 and 6
+    # now get the SAME complete list the gate reasoned about rather than a
+    # possibly-truncated second opinion. Two readers disagreeing about what is
+    # on the timeline is how a placement reads as missing to one check and
+    # present to another.
+    _readback = read_back(tok, _stage) if _stage else {"items": None,
+                                                      "read_why": "no prestage"}
+    _hop_items = _readback.get("items")
+    if _hop_items is None:
+        # NAMED, NOT SILENTLY EMPTY. A read that failed and a timeline with
+        # nothing on it are different facts, and `_chain_items` returning None
+        # rather than [] is the only reason the hops can tell them apart.
+        print("  READ-BACK       : FAILED (%s) — falling back to the windowed "
+              "reader; hops 5/6 may see a SHORT list"
+              % _readback.get("read_why"), flush=True)
+        _hop_items = _chain_items(tok, _stage)
     out["chain"]["hop5"] = _hop("hop5", verify_hop5_composition, tok, _stage,
-                                plan, _chain_items(tok, _stage))
+                                plan, _hop_items)
     for _h in ("hop3", "hop4", "hop5"):
         print("  %s           : %s  %s"
               % (_h.upper(), out["chain"][_h]["state"], out["chain"][_h]["why"]),
@@ -3074,7 +5008,14 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     # whose frames carry two things on top of each other, does not pass —
     # whatever the agent exported. The deliverable is the edit that was ruled,
     # and an unverified one is not it.
-    out["chain"]["hop6"] = _hop("hop6", verify_hop6_clear, plan)
+    _cap_band, _cap_why = (caption_band(tok, _stage) if _stage
+                           else (None, "no prestage"))
+    print("  CAPTION BAND    : %s  (%s)"
+          % (_cap_band if _cap_band else "ABSENT", _cap_why), flush=True)
+    out["caption_band"] = {"band": list(_cap_band) if _cap_band else None,
+                           "why": _cap_why}
+    out["chain"]["hop6"] = _hop("hop6", verify_hop6_clear, plan,
+                                "/work/source.mp4", _hop_items, _cap_band)
     print("  HOP6           : %s  %s" % (out["chain"]["hop6"]["state"],
                                          out["chain"]["hop6"]["why"]), flush=True)
     for _l in out["chain"]["hop6"].get("detail") or []:
@@ -3084,12 +5025,195 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                                          out["chain"]["hop7"]["why"]), flush=True)
     for _l in out["chain"]["hop7"].get("detail") or []:
         print("      %s" % _l, flush=True)
+    # HOPS 3 AND 4 READ A PLAN. On the single-agent path there is none, and a
+    # gate that fails the chain on their ABSENT is keyed to a state that no
+    # longer exists — every run 6-9 printed "CHAIN GATE: FAILED on hop3, hop4"
+    # about hops that could not have run. They are N/A here, not failures.
+    _plan_hops = () if plan else ("hop3", "hop4")
+    for _h in _plan_hops:
+        out["chain"][_h]["state"] = "N/A"
+        out["chain"][_h]["why"] = "reads a plan; this path has none — not checked, not failed"
     _failed = [h for h in ("hop3", "hop4", "hop5", "hop6", "hop7")
-               if out["chain"][h]["state"] != "MEASURED"]
+               if h not in _plan_hops and out["chain"][h]["state"] != "MEASURED"]
     out["chain"]["gate"] = "FAILED" if _failed else "PASSED"
     if _failed:
         print("  CHAIN GATE      : FAILED on %s — the edit is NOT confirmed"
               % ", ".join(_failed), flush=True)
+
+    # ── GATE B RUNS AFTER THE PIXEL HOPS, AND THE EXPORT AFTER IT ───────────
+    # THE ORDERING WAS WRONG AND IT UNDID THE RULING. Gate B and the export sat
+    # 150 lines ABOVE this, so hops 5, 6 and 7 — the only checks that can see a
+    # placement that is present but illegible, covered, or on a face — ran
+    # AFTER the export had already been submitted. They were post-hoc
+    # diagnostics wearing a gate's name, which is precisely the shape Zac's
+    # ruling was written against: "harness checks between the placement call
+    # and the export".
+    #
+    # Now: the hops look at pixels, Gate B reads the timeline back and takes
+    # hop 6's measured bands, and only then does anything ship.
+    # ── GATE B, AND IT RUNS WHETHER OR NOT THE AGENT COOPERATED ─────────────
+    # POST-STREAM ON PURPOSE. An in-loop gate lets the agent fix what it finds,
+    # which is worth having — but a gate that only runs when the agent reaches
+    # it is a gate with a way past it. This one runs after the stream ends, on
+    # every path including a timeout, a crash and an agent that stopped early.
+    # The export is downstream of it, so there is no route to a deliverable
+    # that does not pass through here.
+    # DERIVED, with a file record honoured only if the agent wrote one anyway.
+    _file_rec, _file_why = read_record()
+    if _file_rec.get("rulings"):
+        _record, _rec_why = _file_rec, _file_why
+    else:
+        _record = derive_record((_readback or {}).get("items") or [], _beats,
+                                _stage.get("baseItemId") if _stage else None,
+                                "\n".join(_state.get("agent_text") or []))
+        _rec_why = ("DERIVED from the read-back (%s); why %s"
+                    % (_record["spec"]["derived_from"],
+                       "MEASURED (%d chars of reply text)" % len(_record["spec"]["why"] or "")
+                       if _record["spec"]["why"] else "ABSENT — the agent gave no line per item"))
+    print("  RECORD          : %s" % _rec_why, flush=True)
+    _gate = gate_b(tok, _stage, _record.get("rulings"), _record.get("spec"),
+                   source_duration_s=(_dur or None), prefetched=_readback,
+                   bands=(out["chain"].get("hop6") or {}).get("bands"),
+                   beats=_beats) \
+        if _stage else {"verdict": "WITHHOLD", "state": "ABSENT", "bad": [],
+                        "findings": [], "checked": 0,
+                        "read_why": "no prestage — nothing to read back"}
+    import sys as _sysg
+    _sysg.path.insert(0, "/root")
+    import chatcut_gate as _cg
+    _remove, _unbuilt = _cg.withhold(_gate)
+    # ZAC'S RULING: withhold the placement, export the rest, name it in the
+    # ledger. It is the graceful drop production already does for a graphic
+    # that cannot clear a face — a component was considered and not placed.
+    # THE REMOVAL IS VERIFIED BY READ-BACK, NOT BY THE RESPONSE.
+    #
+    # `edit_item` takes `deletes`, but the ELEMENT SHAPE and the response key
+    # are things I have not observed on a live timeline, and this lane asserts
+    # only what it has observed. An earlier version sent `{"itemId": ...}` and
+    # demanded `ok` back: a wrong `expect` would have turned every successful
+    # delete into a reported failure, and a wrong element shape would have
+    # returned success while the item stayed. Both render identically in a log.
+    #
+    # So the response is not trusted at all. The deletes are sent, the timeline
+    # is read again, and an item still present is NOT REMOVED — which is the
+    # same principle the gate itself rests on, applied to the gate's own
+    # remedy. ChatCut resolves an id PREFIX, so the comparison does too.
+    _removed_ok, _remove_why = [], []
+    if _remove and _stage:
+        for _r in _remove:
+            try:
+                _mcp_call(tok, "edit_item",
+                          {"projectId": _stage["projectId"],
+                           "deletes": [{"itemId": _r["item"]}]})
+            except Exception as _e:                               # noqa: BLE001
+                _remove_why.append("%s: the call failed (%s)"
+                                   % (_r["item"], str(_e)[:100]))
+        _after = read_back(tok, _stage)
+        _still = _after.get("items")
+        if _still is None:
+            # A PLACEMENT THAT COULD NOT BE CONFIRMED GONE IS NOT GONE.
+            _remove_why.append("the timeline could not be re-read (%s), so no "
+                               "removal is confirmed" % _after.get("read_why"))
+        else:
+            _ids = [str(i.get("id") or "") for i in _still]
+            for _r in _remove:
+                _it = str(_r["item"])
+                # HYPHENS OUT: the echo is `78d2b44bc6`, the read-back is
+                # `78d2b44b-c6b1-...` — measured 2026-09-17.
+                _nh = lambda x: str(x or "").replace("-", "")        # noqa: E731
+                _present = any(_nh(_i) == _nh(_it) or _nh(_i).startswith(_nh(_it))
+                               or _nh(_it).startswith(_nh(_i)) for _i in _ids if _i)
+                if _present:
+                    _remove_why.append(
+                        "%s IS STILL ON THE TIMELINE after the delete — the "
+                        "export carries a placement the gate refused" % _it)
+                else:
+                    _removed_ok.append(_r)
+    print("  WITHHELD        : %d placement(s) removed, %d ruling(s) never "
+          "landed%s" % (len(_removed_ok), len(_unbuilt),
+                        (", %d COULD NOT BE REMOVED" % len(_remove_why))
+                        if _remove_why else ""), flush=True)
+    # ── THE FLOOR ──────────────────────────────────────────────────────────
+    # A RUN MUST NEVER PRODUCE NOTHING AND COST MONEY.
+    #
+    # The ceiling stops a run that spends too much. This stops one that spends
+    # anything at all for no output: if the timeline is empty when the stream
+    # closes there is nothing to ship, and exporting it bills a cloud render to
+    # deliver the source back unedited — which reads downstream as a finished
+    # job. Three runs today reached this point having placed nothing.
+    #
+    # EMPTY AND UNREADABLE ARE DIFFERENT DEATHS and it says which. `read_back`
+    # separates them already: items == [] with a "0 item(s)" why is genuinely
+    # empty; items is None with a FAILED why means nobody could tell. Both
+    # refuse to export, and a reader must be able to see which happened —
+    # collapsing them is the defect this whole lane is built against.
+    _final = read_back(tok, _stage) if _stage else {
+        "items": None, "read_why": "no prestage"}
+    _fitems = _final.get("items")
+    if _fitems is None:
+        out["floor"] = {
+            "state": "FAILED",
+            "why": ("the timeline could not be read back (%s), so whether "
+                    "anything was placed is UNKNOWN — refusing to export on a "
+                    "timeline nobody could see"
+                    % str(_final.get("read_why"))[:200])}
+    elif _cg.base_track(_fitems)[1] != _cg.MEASURED:
+        # ITEMS ARE NOT AN EDIT. Run 6 put SIX items on the timeline — all of
+        # them full-frame motion graphics — and never placed the source video.
+        # The floor counted 6 and passed, so a render was billed for graphics
+        # over black.
+        #
+        # AND THE FIX'S FIRST VERSION WAS ITS OWN SECOND READER. It tested
+        # `i["type"]`/`i["kind"]` against ("video","clip") — a guessed field
+        # name. ChatCut's read-back calls it `itemType`, so on run 7 the floor
+        # reported "NOT ONE of them is video" about 36 items while GATE B, from
+        # the SAME read-back, named the base-track video item by id. Two
+        # readers of one timeline disagreeing, and mine was the invented one.
+        # `base_track` already answers this and is RED-proven; it is the only
+        # reader now.
+        out["floor"] = {
+            "state": "NO_BASE",
+            "items": len(_fitems),
+            "why": ("%d item(s) on the timeline and NOT ONE of them is video "
+                    "— there is no footage under the graphics, so an export "
+                    "renders overlays on black" % len(_fitems))}
+    elif len(_fitems) == 0:
+        out["floor"] = {
+            "state": "EMPTY",
+            "why": ("the timeline holds ZERO items after the stream closed "
+                    "(%s) — there is no edit to export, and exporting would "
+                    "bill a render to hand back the source unedited"
+                    % str(_final.get("read_why"))[:120])}
+    else:
+        out["floor"] = {"state": "MEASURED",
+                        "items": len(_fitems),
+                        "why": "%d item(s) on the timeline" % len(_fitems)}
+    print("  FLOOR           : %s — %s"
+          % (out["floor"]["state"], out["floor"]["why"]), flush=True)
+
+    # THE EXPORT IS THE HARNESS'S, and it is the only path to a deliverable.
+    if out["floor"]["state"] != "MEASURED":
+        _export = {"state": "REFUSED", "why": out["floor"]["why"]}
+        print("  EXPORT          : REFUSED — %s" % out["floor"]["why"],
+              flush=True)
+    else:
+        _export = harness_export(tok, _stage) if _stage else {
+            "state": "ABSENT", "why": "no prestage"}
+        print("  EXPORT          : %s" % json.dumps(_export), flush=True)
+
+    out["gate"] = {k: v for k, v in _gate.items()
+                   if k not in ("findings", "_items")}
+    out["gate_findings"] = _gate.get("findings") or []
+    # THE DURABLE ARTEFACT. `spec.why` is the field the 43% was found in —
+    # seven ledgers compared. A run that does not carry it is a run whose
+    # failure is not diagnosable afterwards, which is the capability the
+    # planner/executor split was keeping.
+    out["spec"] = _record.get("spec")
+    out["rulings"] = _record.get("rulings")
+    out["record_why"] = _rec_why
+    out["withheld"] = {"removed": _removed_ok, "unbuilt": _unbuilt,
+                       "could_not_remove": _remove_why}
+    out["export"] = _export
 
     out["visual_pass"] = {
         "read_source_sheet": _saw_sheet,
@@ -3100,7 +5224,189 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     print("  VISUAL PASS     : %s  sheet=%s  preview_before_render=%s"
           % (out["visual_pass"]["state"], _saw_sheet, _looked_before_render),
           flush=True)
+    # THE TURN MACHINE'S OWN RECORD. Printed AND ledgered in the commit that
+    # adds it: run 4 could not be diagnosed from its ledger because nothing
+    # said why a rewatch fired or how many batches landed, and the answer had
+    # to be reconstructed from 41 tool calls by hand.
+    # THE SCAN'S OWN RESULT, IN THE RECORD. It was written into `_state`,
+    # printed once, and read by nothing — so the durable record could not say
+    # whether the desync/black/freeze/silence scan had run at all. That is the
+    # precise distinction the scan's three states exist for ("0 findings" vs
+    # "0 checks completed"), lost one layer below where it was built.
+    # THE TIMELINE AS CHATCUT RETURNS IT, VERBATIM AND BOUNDED.
+    #
+    # `kept_spans` hard-fails when a base-track video item has no
+    # `sourceRange.startSeconds/endSeconds`, and that single failure is
+    # upstream of every ABSENT in runs 7, 8 and 9: no spans -> no timeline end
+    # -> no render window -> the review is served nothing -> no acceptance
+    # criteria and no gate. Whether the agent omits a field or ChatCut simply
+    # does not return one for an untrimmed item is NOT DECIDABLE from any
+    # record so far, because `read_back` computed the items and the record
+    # never carried them.
+    #
+    # Three items with their keys settles it in one run. I have guessed an
+    # envelope shape twice this week and been wrong twice; this is the same
+    # correction as the raw-wire sample, applied to ChatCut's side.
+    _fi = (_final.get("items") or [])
+    out["timeline_sample"] = {
+        "count": len(_fi),
+        "video_count": sum(1 for i in _fi
+                           if str(i.get("itemType")) == "video"),
+        "items": [{k: i.get(k) for k in sorted(i.keys())[:18]}
+                  for i in _fi[:3]],
+        "why": ("verbatim read-back items — kept_spans needs "
+                "sourceRange.startSeconds/endSeconds and "
+                "timelineRange.fromFrame/toFrame; read these before adding a "
+                "field to the add shape"),
+    }
+    out["rewatch2_scan"] = _state.get("rewatch2_scan") or {
+        "state": "NEVER RAN", "why": "the second rewatch did not reach the scan"}
+    out["turn_machine"] = {
+        "batches": _state.get("batches", 0),
+        "batch_events": _state.get("batch_events") or [],
+        "assistant_events_seen": _state.get("ev", 0),
+        "rewatch1_fired_by": _state.get("rewatch1_fired_by") or "NEVER FIRED",
+        "rewatch2_fired_by": _state.get("rewatch2_fired_by") or "NEVER FIRED",
+        "done_seen": bool(_state.get("done_seen")),
+        "done2_seen": bool(_state.get("done2_seen")),
+        "idle_death": _state.get("idle_death"),
+        "read_tok": _state.get("read_tok", 0),
+        "read_ceiling": _ceil,
+        # MEASURED / ABSENT, never a bare number: a run that stopped on the
+        # ceiling and one that merely spent a lot look identical once you are
+        # reading the token count alone.
+        "ceiling": _state.get("ceiling_hit") or "NOT REACHED",
+        "three_turns": {"api_calls": len(_tm["turns"]), "verdict": _tm.get("verdict"),
+                        "terminal": _tm.get("terminal"), "cold_write": _tm.get("cold_write"),
+                        "killed": bool(_killed), "kill_reason": _timing.get("kill_reason")},
+    }
+    print("  TURN MACHINE    : %d batch(es)  rewatch1=%s  rewatch2=%s  "
+          "read=%d/%d"
+          % (out["turn_machine"]["batches"],
+             out["turn_machine"]["rewatch1_fired_by"],
+             out["turn_machine"]["rewatch2_fired_by"],
+             out["turn_machine"]["read_tok"], _ceil), flush=True)
     out["wall_s"] = round(time.time() - t0, 2)
+    out["prestage_phases"] = (_stage or {}).get("phases")
+    # SECTION C: the system prompt and the first message AS RUN, in full —
+    # images as their pixel sizes, every text block verbatim.
+    out["system_prompt"] = sys_prompt
+    _fm = []
+    for _b in (out_first.get("message") or {}).get("content") or []:
+        if _b.get("type") == "text":
+            _fm.append({"text": _b.get("text")})
+        elif _b.get("type") == "image":
+            try:
+                from PIL import Image as _PI
+                import base64 as _b64, io as _io
+                _im = _PI.open(_io.BytesIO(_b64.b64decode(_b["source"]["data"])))
+                _fm.append({"image": "%dx%d %s" % (_im.size[0], _im.size[1], _b["source"]["media_type"])})
+            except Exception as _ie:                              # noqa: BLE001
+                _fm.append({"image": "unreadable: %s" % str(_ie)[:60]})
+    out["first_message"] = _fm
+    out["three_turns"] = _tm
+    # SECTION E: THE PER-RUN LINE, printed in the commit that adds it.
+    _kinds = {}
+    for _t in _tm["turns"]:
+        for _c in (_t.get("tool_calls") or []):
+            _k = str(_c.get("name") or "").split("__")[-1]
+            _kinds[_k] = _kinds.get(_k, 0) + 1
+    _rd = sum(int((_t.get("usage") or {}).get("read") or 0) for _t in _tm["turns"])
+    _wr = sum(int((_t.get("usage") or {}).get("write") or 0) for _t in _tm["turns"])
+    _in = sum(int((_t.get("usage") or {}).get("in") or 0) for _t in _tm["turns"])
+    _ou = sum(int((_t.get("usage") or {}).get("out") or 0) for _t in _tm["turns"])
+    _wr1 = sum(int((_t.get("usage") or {}).get("write_1h") or 0) for _t in _tm["turns"])
+    _wr5 = sum(int((_t.get("usage") or {}).get("write_5m") or 0) for _t in _tm["turns"])
+    _ttl_state = "MEASURED" if (_wr1 + _wr5) == _wr else "ABSENT (no TTL split in usage; priced at 1h)"
+    _usd = (_rd * 0.30 + _wr5 * 3.75 + (_wr - _wr5) * 6.00 + _in * 3.00 + _ou * 15.00) / 1e6
+    _cli_usd = sum(float(_t.get("cost_usd") or 0) for _t in _tm["turns"])
+    _req_mb = [round(float(x.get("req_bytes") or 0) / 1e6, 2) for x in (out.get("proxy_trace") or []) if isinstance(x, dict)
+               and str(x.get("path", "")).split("?")[0] == "/v1/messages" and "req_bytes" in x]
+    if any(m > 30.0 for m in _req_mb):
+        print("  REQUEST SIZE    : %s MB per call — over 30 MB the CLI prunes old images to stay under the API's 32 MB limit and the prefix is rewritten" % _req_mb, flush=True)
+    out["run_line"] = {"model": model, "api_calls": len(_tm["turns"]), "tool_calls_by_kind": _kinds, "request_mb": _req_mb,
+                       "model_wall_s": round(_wall, 1),
+                       "tokens": {"cached_read": _rd, "cache_write": _wr, "cache_write_1h": _wr1, "cache_write_5m": _wr5,
+                                  "uncached_in": _in, "out": _ou, "ttl_split": _ttl_state},
+                       "usd_at_rate": round(_usd, 4), "usd_cli": round(_cli_usd, 4),
+                       "rates": "read $0.30/M, write 1h $6/M or 5m $3.75/M by the measured split, in $3/M, out $15/M",
+                       "cli_version": _cli_ver,
+                       "marks_s": marks, "wall_s": out["wall_s"], "verdict": _tm.get("verdict"),
+                       "terminal": _tm.get("terminal"), "cold_write": _tm.get("cold_write")}
+    print("  RUN LINE        : %s | api_calls=%d | tools=%s | tokens read=%d write=%d (1h %d / 5m %d) in=%d out=%d | request MB per call=%s | $%.4f at rate ($%.4f CLI) | wall=%.1fs | cli=%s | marks=%s"
+          % (model, len(_tm["turns"]), _kinds, _rd, _wr, _wr1, _wr5, _in, _ou, _req_mb, _usd, _cli_usd, out["wall_s"],
+             _cli_ver, json.dumps(marks)), flush=True)
+    if out["wall_s"] > LAW_WALL_S:
+        print("  LAW MISS        : %.1fs over the %ds law — stages: %s" % (out["wall_s"], LAW_WALL_S, json.dumps(marks)), flush=True)
+    if _tm.get("cold_write", {}).get("cold"):
+        try:
+            _warm = WARM.get("last") if "last" in WARM else None
+        except Exception:                                         # noqa: BLE001
+            _warm = None
+        _mins = ((time.time() - float(_warm["t"])) / 60.0) if _warm and _warm.get("t") else None
+        _ttl = warm_ttl_minutes(_warm)
+        print("  COLD WRITE      : call 1 wrote %d read %d — %s since the last warm (its TTL: %s)%s"
+              % (_tm["cold_write"]["write"], _tm["cold_write"]["read"],
+                 ("%.0f min" % _mins) if _mins is not None else "no warm on record",
+                 ("%d min" % _ttl) if _ttl else "unknown",
+                 " — a DEFECT, the ping was alive" if (_mins is not None and _ttl and _mins < _ttl) else ""), flush=True)
+        out["run_line"]["warm_ttl_minutes"] = _ttl
+        out["run_line"]["cold_write_minutes_since_warm"] = _mins
+    # THE UPSTREAM LEG OF EVERY CALL (status, first byte, bytes relayed, error).
+    out["proxy_trace"] = []
+    try:
+        for _ln in open("/work/proxy_trace.jsonl", encoding="utf-8"):
+            out["proxy_trace"].append(json.loads(_ln))
+    except Exception as _pte:                                     # noqa: BLE001
+        out["proxy_trace"] = "ABSENT %s" % str(_pte)[:80]
+    print("  PROXY TRACE     : %s" % json.dumps([{k: v for k, v in r.items() if k in ("status", "ttfb_s", "done_s", "relayed_bytes", "error", "failed_s", "req_bytes")}
+                                                  for r in out["proxy_trace"]] if isinstance(out["proxy_trace"], list) else out["proxy_trace"])[:1200], flush=True)
+    # THE PREFIX, CALL BY CALL, and against the previous run's first call.
+    out["prefix_calls"] = []
+    try:
+        for _ln in open("/work/prefix_calls.jsonl", encoding="utf-8"):
+            out["prefix_calls"].append(json.loads(_ln))
+    except Exception as _pe:                                      # noqa: BLE001
+        out["prefix_calls"] = {"state": "ABSENT", "why": str(_pe)[:120]}
+    if isinstance(out["prefix_calls"], list) and out["prefix_calls"]:
+        for _r in out["prefix_calls"]:
+            _d = _r.get("vs_prev") or {}
+            print("  PREFIX call %-2s : tools=%s system=%s msgs=%d | vs prev: %s%s"
+                  % (_r.get("n"), (_r.get("fp") or {}).get("tools", {}).get("n"),
+                     (_r.get("fp") or {}).get("system", {}).get("sha"),
+                     len((_r.get("fp") or {}).get("messages") or []),
+                     _d.get("state"), (" at %s" % _d["first_diff"]) if _d.get("first_diff") else ""),
+                  flush=True)
+        try:
+            import api_proxy as _px2
+            _first = out["prefix_calls"][0]
+            _body1 = json.load(open("/work/req_first.json", encoding="utf-8"))
+            _ref = RESULTS.get("prefix-ref") if "prefix-ref" in RESULTS else None
+            if _ref and _ref.get("body_lite"):
+                out["prefix_vs_previous_run"] = dict(
+                    _px2.diff_prefix(_ref["body_lite"], _ref["fp"], _body1, _first["fp"]),
+                    previous_run=_ref.get("run_id"))
+            else:
+                out["prefix_vs_previous_run"] = {"state": "NO REFERENCE — first run with the proxy"}
+            print("  PREFIX vs prev run: %s%s" % (
+                out["prefix_vs_previous_run"].get("state"),
+                (" at %s" % out["prefix_vs_previous_run"]["first_diff"])
+                if out["prefix_vs_previous_run"].get("first_diff") else ""), flush=True)
+            # what the NEXT run diffs against: the first call, images dropped to
+            # their sha so the reference stays small
+            def _lite(body):
+                msgs = []
+                for _m in body.get("messages") or []:
+                    _c = _m.get("content")
+                    if isinstance(_c, list):
+                        _c = [({"type": "image", "sha": _px2._sha(b)[0]} if (b or {}).get("type") == "image" else b) for b in _c]
+                    msgs.append({"role": _m.get("role"), "content": _c})
+                return {"tools": body.get("tools"), "system": body.get("system"), "messages": msgs}
+            _lite1 = _lite(_body1)
+            RESULTS["prefix-ref"] = {"run_id": run_id, "fp": _px2.fingerprint(_lite1), "body_lite": _lite1,
+                                     "note": "images replaced by their sha; message shas here differ from the live fingerprint"}
+        except Exception as _pe2:                                 # noqa: BLE001
+            out["prefix_vs_previous_run"] = {"state": "FAILED", "why": "%s: %s" % (type(_pe2).__name__, str(_pe2)[:160])}
     RESULTS[run_id] = out
     print(f"  RESULT PERSISTED: chatcut-results[{run_id}]", flush=True)
     return out
@@ -3110,6 +5416,255 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
 # NO SECRETS. This fetches a public CDN URL and runs two local models; it
 # touches neither ChatCut nor Anthropic, and a function that asks for
 # credentials it does not use is a function that fails for the wrong reason.
+
+@app.function(image=IMG, timeout=300, cpu=2, memory=4096,
+              secrets=[modal.Secret.from_name("chatcut-oauth"),
+                       modal.Secret.from_name("anthropic-api-key")])
+def keep_warm(model: str = "claude-sonnet-5", proxy: bool = False, base_url: str = ""):
+    """ONE PING AGAINST THE BYTE-IDENTICAL PREFIX, so the watch stays warm.
+
+    Zac, ruling 1 (2026-09-17): one ping per 55 minutes on the 1h TTL. The
+    CLI marks the last two messages (measured through the proxy), so a
+    --resume of the watch with a one-word message writes the cache entry a
+    job's first call looks up. Same image, same shim, same system.md, same
+    watch — the cache key is those bytes. Records read/write in the
+    chatcut-warm Dict; a job's call 1 reads it to age a cold write.
+    A schedule is not attached here: this lane does not deploy (Rule 0). Run
+    it by hand before a job — `modal run chatcut_job_app.py::warm`.
+    """
+    os.makedirs("/work", exist_ok=True)
+    tok = _access_token()
+    sid = install_watch("/work")
+    write_cli_context(tok)
+    env = {"ENABLE_TOOL_SEARCH": "false", "MAX_THINKING_TOKENS": str(DEFAULT_THINK_TOKENS)}
+    sys.path.insert(0, "/root")
+    import turn_clock
+    # `proxy`: the same ping THROUGH the recording proxy — the first job run
+    # through it (h-th-think0) got no byte back in 120s, and a 228k ping is
+    # the $0.10 way to ask whether proxy+CLI is the pair that fails in the
+    # container before a $2.50 run asks again.
+    if proxy:
+        import api_proxy as _px
+        _px.FINGERPRINTS, _px.FIRST_BODY, _px.TRACE = "/work/warm_fp.jsonl", "/work/warm_first.json", "/work/warm_trace.jsonl"
+        _pp, _pca = _px.serve_mitm(0, "/work/mitm")
+        env.update(_px.mitm_env(_pp, _pca))
+    elif base_url:
+        # the experiment: the REAL endpoint, but named through the env var —
+        # does the variable's presence alone change what the CLI sends?
+        env["ANTHROPIC_BASE_URL"] = base_url
+    msg = _message([{"type": "text", "text": "ping"}])
+    res = {}
+
+    def _on(ev, send, close, kill=None):
+        if ev.get("type") == "result":
+            res.update(ev)
+            try:
+                close()                    # EOF on stdin ends the invocation
+            except Exception:                                     # noqa: BLE001
+                pass
+    rc, err, wall, killed = turn_clock.run_timed(
+        cli_command(sid, model) + ["--max-turns", "1"], "/work", "/work/warm_stream.jsonl",
+        "/work/warm_timing.json", 120, env=env, stdin_first=json.dumps(msg), on_event=_on)
+    u = res.get("usage") or {}
+    _cc = u.get("cache_creation") or {}
+    # WHAT CAME BACK, in both modes: output volume and the reply's head — the
+    # proxied ping streamed thousands of tokens for "ping" while the direct
+    # one answered in ~20s; the two must be compared on the same fields.
+    _out_tok = u.get("output_tokens"); _think = (u.get("output_tokens_details") or {}).get("thinking_tokens")
+    _reply = (res.get("result") or "")[:300]
+    rec = {"t": time.time(), "read": u.get("cache_read_input_tokens"),
+           "out": _out_tok, "thinking": _think, "reply_head": _reply, "result_wall_s": res.get("duration_api_ms"),
+           "write": u.get("cache_creation_input_tokens"), "rc": rc, "wall": round(wall, 1),
+           "write_1h": _cc.get("ephemeral_1h_input_tokens"), "write_5m": _cc.get("ephemeral_5m_input_tokens"),
+           "cli_version": cli_version(), "proxy": bool(proxy), "subtype": res.get("subtype"), "killed": bool(killed)}
+    if proxy:
+        try:
+            rec["proxy_trace"] = [json.loads(l) for l in open("/work/warm_trace.jsonl", encoding="utf-8") if l.strip()]
+        except Exception as _te:                                  # noqa: BLE001
+            rec["proxy_trace"] = "ABSENT %s" % str(_te)[:80]
+        print("  PROXY TRACE     : %s" % json.dumps(rec["proxy_trace"])[:2500], flush=True)
+        try:
+            rec["fingerprints"] = [json.loads(l) for l in open("/work/warm_fp.jsonl", encoding="utf-8") if l.strip()]
+        except Exception as _fe:                                  # noqa: BLE001
+            rec["fingerprints"] = "ABSENT %s" % str(_fe)[:80]
+        print("  PROXY FP        : %s" % json.dumps(rec["fingerprints"])[:600], flush=True)
+        rec["stderr_tail"] = (err or "")[-800:]
+        print("  CLI STDERR      : %r" % rec["stderr_tail"][-400:], flush=True)
+        # THE REQUEST'S NON-PREFIX FIELDS, which the fingerprint does not cover
+        try:
+            _fb = json.load(open("/work/warm_first.json", encoding="utf-8"))
+            rec["request_fields"] = {k: _fb.get(k) for k in ("thinking", "output_config", "max_tokens", "stream", "context_management", "temperature", "top_p")}
+            rec["request_fields"]["metadata_keys"] = sorted((_fb.get("metadata") or {}).keys())
+            rec["request_fields"]["cache_control"] = [(i, b.get("cache_control")) for i, b in enumerate(_fb.get("system") or []) if isinstance(b, dict) and b.get("cache_control")]
+            _recv = next((r for r in (rec.get("proxy_trace") or []) if isinstance(r, dict) and r.get("req_headers")), {})
+            rec["request_fields"]["anthropic_beta"] = (_recv.get("req_headers") or {}).get("anthropic-beta") or (_recv.get("req_headers") or {}).get("Anthropic-Beta")
+            rec["request_fields"]["user_agent"] = (_recv.get("req_headers") or {}).get("user-agent") or (_recv.get("req_headers") or {}).get("User-Agent")
+        except Exception as _fbe:                                 # noqa: BLE001
+            rec["request_fields"] = "ABSENT %s" % str(_fbe)[:80]
+        print("  REQUEST FIELDS  : %s" % json.dumps(rec["request_fields"])[:1200], flush=True)
+        # THE CLI'S SIDE OF THE SAME SECONDS: what it emitted, and when.
+        try:
+            _lines = [json.loads(l) for l in open("/work/warm_stream.jsonl", encoding="utf-8") if l.strip()]
+            rec["cli_events"] = [{"type": e.get("type"), "subtype": e.get("subtype"),
+                                  "event": ((e.get("event") or {}).get("type") if isinstance(e.get("event"), dict) else None)}
+                                 for e in _lines][:12]
+            rec["cli_event_count"] = len(_lines)
+        except Exception as _ce:                                  # noqa: BLE001
+            rec["cli_events"] = "ABSENT %s" % str(_ce)[:80]
+        try:
+            _tj = json.load(open("/work/warm_timing.json", encoding="utf-8"))
+            rec["cli_timeline"] = [(round(float(e.get("t") or 0), 1), e.get("kind") or e.get("type")) for e in (_tj.get("events") or [])][:12]
+        except Exception as _ce:                                  # noqa: BLE001
+            rec["cli_timeline"] = "ABSENT %s" % str(_ce)[:80]
+        print("  CLI EVENTS      : n=%s %s | timeline %s" % (rec.get("cli_event_count"), json.dumps(rec["cli_events"])[:700], json.dumps(rec["cli_timeline"])[:400]), flush=True)
+    WARM["last"] = rec
+    print("  WARM            : read=%s write=%s (1h %s / 5m %s) out=%s thinking=%s wall=%.1fs rc=%s cli=%s reply=%r"
+          % (rec["read"], rec["write"], rec["write_1h"], rec["write_5m"], rec["out"], rec["thinking"], wall, rc, rec["cli_version"], rec["reply_head"][:120]), flush=True)
+    return rec
+
+
+@app.local_entrypoint()
+def warm(proxy: bool = False, base_url: str = ""):
+    from require_detach import require_detach
+    require_detach("the keep-warm ping")
+    print(json.dumps(keep_warm.remote(proxy=proxy, base_url=base_url))[:3000])
+
+
+@app.function(image=IMG, timeout=900, cpu=4, memory=8192,
+              secrets=[modal.Secret.from_name("chatcut-oauth"),
+                       modal.Secret.from_name("anthropic-api-key")])
+def probe_rewatch(clip_url: str, model: str = "claude-sonnet-5"):
+    """RULING 5 + THE PLANTED-DEFECT PROOF, on one scratch timeline.
+
+    Plants three defects the review must name — a card centred on the
+    speaker's face, a second caption track showing the same speech, an
+    overlay at 3x its intended size — then times both rewatch instruments on
+    that same timeline: preview_timeline's viewer (composed pixels, 9 per
+    call) and export -> upload -> inspect_asset (watch_asset). Each is judged
+    on wall AND on whether its frames show the composite. Then ONE review call
+    (--max-turns 1, the real model, the rewatch message exactly as a job
+    sends it) and the record says which of the three it named.
+    """
+    _t0 = time.time()
+    RESULTS["probe-rewatch"] = {"state": "STARTED", "t0": _t0}
+    os.makedirs("/work", exist_ok=True)
+    subprocess.run(["curl", "-fsSL", "-o", "/work/source.mp4", clip_url], check=True, timeout=300)
+    tok = _access_token()
+    stage = prestage(tok, "", controls={}, source_path="/work/source.mp4",
+                     want_components={"StatCard", "caption:TwoTone", "PullQuote"}, titles=[])
+    pid = stage["projectId"]
+    comps = stage.get("components") or {}
+    _aid = lambda n: (comps.get(n) or {}).get("assetId") if isinstance(comps.get(n), dict) else comps.get(n)
+    out = {"state": "RUNNING", "projectId": pid, "components": {k: (_aid(k) or None) for k in ("StatCard", "caption:TwoTone", "PullQuote")}, "planted": []}
+    # the defects: centre band card over the face, two caption tracks, a 3x overlay
+    adds = [{"type": "motion-graphic", "assetId": _aid("StatCard"), "fromFrame": 30, "durationInFrames": 150,
+             # THE LABELS CARRY NO DETECTION WORD. The first probe planted
+             # "ON THE FACE" and "THREE TIMES TOO BIG", the review quoted both
+             # back, and the keyword reader scored 3 of 3 named when it had
+             # named ONE (the duplicate captions) — the other two matched the
+             # plant's own text. Read by eye 2026-09-17.
+             "propertyOverrides": {"label": "REVENUE", "value": "10x", "offsetY": 0}},
+            {"type": "motion-graphic", "assetId": _aid("caption:TwoTone"), "fromFrame": 0, "durationInFrames": 600},
+            {"type": "motion-graphic", "assetId": _aid("caption:TwoTone"), "fromFrame": 0, "durationInFrames": 600},
+            {"type": "motion-graphic", "assetId": _aid("PullQuote"), "fromFrame": 300, "durationInFrames": 150,
+             "propertyOverrides": {"text": "THE PAYOFF", "fontSize": 3 * 64}}]
+    for a in adds:
+        try:
+            r = _mcp_call(tok, "edit_item", {"projectId": pid, "adds": [a]}, expect="adds")
+            _eid = ((r.get("adds") or [{}])[0] or {}).get("id")
+            out["planted"].append({"add": a, "echo": str(r.get("adds"))[:160], "echo_id": _eid})
+        except Exception as e:                                    # noqa: BLE001
+            out["planted"].append({"add": a, "FAILED": str(e)[:200]})
+    rb = read_back(tok, stage); items = rb.get("items") or []
+    out["items_on_timeline"] = len(items)
+    sys.path.insert(0, "/root")
+    import chatcut_gate as _cg
+    _bt, _, _ = _cg.base_track(items); _sp, _, _ = _cg.kept_spans(items, _bt, 30.0); _end, _, _ = _cg.timeline_end(_sp)
+    # instrument A: preview_timeline viewer, 9 frames per call, ~40 frames
+    tA = time.time(); a_frames = []; a_calls = 0
+    try:
+        for k in range(0, 40, 9):
+            fr = [int(_end * (k + i + 0.5) / 40) for i in range(9) if k + i < 40]
+            r = _mcp_call(tok, "preview_timeline", {"projectId": pid, "views": ["viewer"], "viewerFrames": fr}, expect=None)
+            a_calls += 1
+            a_frames += _frame_urls(json.dumps(r) + str(r.get("_text") or ""))
+        import chatcut_reference as _cr
+        got, fst = _cr.fetch(a_frames, "/work/probe_preview", cap=45)
+        sheetsA = tile_sheets([("f%d" % i, pth) for i, (_u, pth) in enumerate(got)], "/work/probe_preview/sheets", per_sheet=20, cols=5, cell_w=180)
+        out["preview_timeline"] = {"wall_s": round(time.time() - tA, 1), "calls": a_calls, "frames": len(got), "sheets": len(sheetsA), "fetch": fst}
+    except Exception as e:                                        # noqa: BLE001
+        out["preview_timeline"] = {"wall_s": round(time.time() - tA, 1), "FAILED": str(e)[:200]}; sheetsA = []
+    # instrument B: export -> upload -> inspect_asset
+    tB = time.time(); marksB = {}
+    sheetsB, timesB = _edit_frames(tok, pid, _end, mark=lambda k: marksB.__setitem__(k, round(time.time() - tB, 1)))
+    out["export_upload_inspect"] = {"wall_s": round(time.time() - tB, 1), "marks": marksB, "frames": len(timesB), "sheets": len(sheetsB)}
+    # one review call, the rewatch message exactly as a job sends it, on instrument B's sheets (or A's if B failed)
+    sid = install_watch("/work"); write_cli_context(tok)
+    tl = timeline_lines(items, None, stage.get("baseItemId"))
+    msg = rewatch_message(1, {"frames": len(timesB or []), "sheets": sheetsB or sheetsA, "state": "MEASURED"}, tl, [], [], final=False)
+    import turn_clock
+    res = {}; texts = []; calls = []
+
+    def _on(ev, send, close, kill=None):
+        if ev.get("type") == "result":
+            res.update(ev)
+            try:
+                close()
+            except Exception:                                     # noqa: BLE001
+                pass
+        if ev.get("type") == "assistant":
+            for b in ((ev.get("message") or {}).get("content") or []):
+                if b.get("type") == "text": texts.append(b.get("text") or "")
+                if b.get("type") == "tool_use": calls.append({"name": b.get("name"), "input": b.get("input")})
+    env = {"ENABLE_TOOL_SEARCH": "false", "MAX_THINKING_TOKENS": str(DEFAULT_THINK_TOKENS)}
+    tC = time.time()
+    rc, err, wall, killed = turn_clock.run_timed(cli_command(sid, model) + ["--max-turns", "1"], "/work", "/work/probe_review.jsonl",
+                                                 "/work/probe_review_timing.json", 180, env=env, stdin_first=json.dumps(msg), on_event=_on)
+    # NAMED = an op touched THAT plant and its `why` says the planted fault.
+    # A keyword over the whole reply matched the plants' own labels quoted
+    # back (first probe: "3 of 3" for one real). The reply text is kept and
+    # reported beside it, never counted.
+    _pid8 = lambda x: str(x or "").replace("-", "")[:8]
+    _plants = {"card": _pid8((out["planted"][0] or {}).get("echo_id")),
+               "captions": [_pid8((out["planted"][i] or {}).get("echo_id")) for i in (1, 2)],
+               "quote": _pid8((out["planted"][3] or {}).get("echo_id"))}
+    _ops = [(k, o) for c in calls if str(c.get("name") or "").endswith("edit_item")
+            for k in ("deletes", "updates") for o in ((c.get("input") or {}).get(k) or [])]
+    _touched = {}
+    for k, o in _ops:
+        _touched.setdefault(_pid8(o.get("id")), []).append("%s: %s" % (k, str(o.get("why") or "")))
+    _why = lambda ids: " ".join(w for i in ids for w in _touched.get(i, [])).lower()
+    _acted = {"card": bool(_touched.get(_plants["card"])), "captions": any(_touched.get(i) for i in _plants["captions"]),
+              "quote": bool(_touched.get(_plants["quote"]))}
+    out["review"] = {"wall_s": round(time.time() - tC, 1), "rc": rc, "subtype": res.get("subtype"),
+                     "usage": res.get("usage"), "text": "\n".join(texts)[:2000], "tool_calls": calls[:6],
+                     "plants": _plants, "acted_on": _acted, "ops_whys": _touched,
+                     "named": {"card_on_face": _acted["card"] and any(w in _why([_plants["card"]]) for w in ("face", "speaker", "cover", "eyes", "head")),
+                               "duplicate_captions": _acted["captions"] and any(w in _why(_plants["captions"]) for w in ("duplicate", "two caption", "second caption", "same", "twice", "both")),
+                               "oversized_overlay": _acted["quote"] and any(w in _why([_plants["quote"]]) for w in ("big", "large", "size", "scale", "font", "huge", "oversized"))}}
+    try:
+        import base64 as _b64
+        out["sheets_b64"] = {"A": [_b64.b64encode(open(x, "rb").read()).decode() for x in (sheetsA or [])],
+                             "B": [_b64.b64encode(open(x, "rb").read()).decode() for x in (sheetsB or [])]}
+    except Exception as _sbe:                                     # noqa: BLE001
+        out["sheets_b64"] = "FAILED %s" % str(_sbe)[:80]
+    out["wall_s"] = round(time.time() - _t0, 1); out["state"] = "MEASURED"
+    RESULTS["probe-rewatch"] = out
+    print("  PREVIEW_TIMELINE: %s" % json.dumps(out["preview_timeline"]), flush=True)
+    print("  EXPORT+INSPECT  : %s" % json.dumps(out["export_upload_inspect"]), flush=True)
+    print("  REVIEW NAMED    : %s  acted_on=%s (wall %.1fs)" % (out["review"]["named"], out["review"]["acted_on"], out["review"]["wall_s"]), flush=True)
+    return out
+
+
+@app.local_entrypoint()
+def probe_rw(clip_url: str = "", out: str = "/tmp/bs/probe_rewatch.json"):
+    from require_detach import require_detach
+    require_detach("the rewatch-instrument probe")
+    r = probe_rewatch.remote(clip_url)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    json.dump(r, open(out, "w", encoding="utf-8"), indent=1)
+    print("WROTE %s" % out); print("  preview:", r.get("preview_timeline")); print("  export+inspect:", r.get("export_upload_inspect")); print("  named:", (r.get("review") or {}).get("named"))
+
 @app.function(image=IMG, timeout=1800,
               secrets=[modal.Secret.from_name("chatcut-oauth")])
 def audio_roundtrip(clip_url: str):
@@ -3192,6 +5747,186 @@ def audio_roundtrip(clip_url: str):
     return out
 
 
+@app.function(image=IMG, timeout=600, cpu=2, memory=4096, secrets=[modal.Secret.from_name("chatcut-oauth")])
+def probe_sheets(pid: str, asset_prefix: str, end_frames: int = 610, dur_s: float = 20.35, serial_a: bool = True):
+    """THE SHEETS THEMSELVES, for a timeline that already exists.
+
+    The rewatch probe timed both instruments and kept only counts — 40 frames,
+    2 sheets each — and a count cannot say whether a frame shows the composite
+    (Zac's ruling 5 asks exactly that). This re-reads the same scratch
+    timeline with both instruments and carries the PNGs out as base64, plus
+    one raw edit_item envelope so the plant reader's failure can be read from
+    what ChatCut actually sent rather than from a 200-character excerpt.
+    No model call. Cost: the container only.
+    """
+    import base64
+    tok = _access_token()
+    out = {"state": "RUNNING", "projectId": pid}
+    sys.path.insert(0, "/root")
+    import chatcut_reference as _cr
+    os.makedirs("/work", exist_ok=True)
+    # instrument A: preview_timeline viewer, 9 per call
+    tA = time.time(); a_urls = []; a_calls = 0
+    try:
+        if not serial_a:
+            raise RuntimeError("SKIPPED by request (serial A measured on the previous pass)")
+        for k in range(0, 40, 9):
+            fr = [int(end_frames * (k + i + 0.5) / 40) for i in range(9) if k + i < 40]
+            r = _mcp_call(tok, "preview_timeline", {"projectId": pid, "views": ["viewer"], "viewerFrames": fr}, expect=None)
+            a_calls += 1
+            a_urls += _frame_urls(json.dumps(r) + str(r.get("_text") or ""))
+        got, fst = _cr.fetch(a_urls, "/work/ps_a", cap=45)
+        sheetsA = tile_sheets([("f%d" % i, pth) for i, (_u, pth) in enumerate(got)], "/work/ps_a/sheets", per_sheet=20, cols=5, cell_w=180)
+        out["A"] = {"wall_s": round(time.time() - tA, 1), "calls": a_calls, "frames": len(got), "fetch": fst,
+                    "sheets_b64": [base64.b64encode(open(x, "rb").read()).decode() for x in sheetsA]}
+    except Exception as e:                                        # noqa: BLE001
+        out["A"] = {"wall_s": round(time.time() - tA, 1), "FAILED": "%s: %s" % (type(e).__name__, str(e)[:300])}
+    # instrument A again, the five calls IN PARALLEL (harness-side; ruling 4 bounds the agent's calls, not these)
+    tP = time.time()
+    try:
+        from concurrent.futures import ThreadPoolExecutor
+        def _one(k):
+            fr = [int(end_frames * (k + i + 0.5) / 40) for i in range(9) if k + i < 40]
+            r = _mcp_call(tok, "preview_timeline", {"projectId": pid, "views": ["viewer"], "viewerFrames": fr}, expect=None)
+            return _frame_urls(json.dumps(r) + str(r.get("_text") or ""))
+        with ThreadPoolExecutor(max_workers=5) as ex:
+            p_urls = sum(list(ex.map(_one, range(0, 40, 9))), [])
+        t_calls = round(time.time() - tP, 1)
+        gotp, fstp = _cr.fetch(p_urls, "/work/ps_p", cap=45)
+        out["A_parallel"] = {"wall_s": round(time.time() - tP, 1), "calls_wall_s": t_calls, "frames": len(gotp), "fetch": fstp}
+    except Exception as e:                                        # noqa: BLE001
+        out["A_parallel"] = {"wall_s": round(time.time() - tP, 1), "FAILED": "%s: %s" % (type(e).__name__, str(e)[:300])}
+    # instrument B: inspect_asset on the imported edit asset (watch_asset)
+    tB = time.time()
+    try:
+        ba = _mcp_call(tok, "browse_assets", {"projectId": pid}, expect=None)
+        blob = json.dumps(ba) + str(ba.get("_text") or "")
+        # browse_assets ids are the 10-hex echo shape ("e2c6e741da"), not the
+        # hyphenated read-back UUID — the first pass demanded 20+ chars and
+        # found nothing in a library that held it. Match the id FIELD, either shape.
+        m = re.search(r'"id"\s*:\s*"(' + re.escape(asset_prefix) + r'[0-9a-f-]*)"', blob)
+        if not m:
+            out["B"] = {"wall_s": round(time.time() - tB, 1), "FAILED": "no asset starting %s in browse_assets; first 600: %s" % (asset_prefix, blob[:600])}
+        else:
+            w = watch_asset(tok, m.group(1), dur_s, "/work/ps_b")
+            out["B"] = {"wall_s": round(time.time() - tB, 1), "asset": m.group(1), "state": w["state"], "why": w["why"],
+                        "frames": w["frames"], "sheets_b64": [base64.b64encode(open(x, "rb").read()).decode() for x in w["sheets"]]}
+    except Exception as e:                                        # noqa: BLE001
+        out["B"] = {"wall_s": round(time.time() - tB, 1), "FAILED": "%s: %s" % (type(e).__name__, str(e)[:300])}
+    # the raw envelope of a track-creating add, then the item is removed again
+    try:
+        ba2 = _mcp_call(tok, "browse_assets", {"projectId": pid}, expect=None)
+        blob2 = json.dumps(ba2) + str(ba2.get("_text") or "")
+        pq = re.search(r'"id"\s*:\s*"([0-9a-f-]{8,36})",\s*"name"\s*:\s*"PullQuote"', blob2)
+        if pq:
+            raw = mcp_rpc(tok, "tools/call", {"name": "edit_item", "arguments": {"projectId": pid, "adds": [
+                {"type": "motion-graphic", "assetId": pq.group(1), "fromFrame": 560, "durationInFrames": 30}]}}, 901)
+            out["raw_add_envelope"] = json.dumps(raw)[:6000]
+            ids = re.findall(r'"id"\s*:\s*"([0-9a-f]{8,}[0-9a-f-]*)"', json.dumps(raw))
+            out["raw_add_ids"] = ids[:5]
+            if ids:
+                d = mcp_rpc(tok, "tools/call", {"name": "edit_item", "arguments": {"projectId": pid, "deletes": [{"id": ids[0]}]}}, 902)
+                out["raw_delete_ok"] = not d.get("error")
+        else:
+            out["raw_add_envelope"] = "ABSENT: no PullQuote asset id found in browse_assets; first 600: %s" % blob2[:600]
+    except Exception as e:                                        # noqa: BLE001
+        out["raw_add_envelope"] = "FAILED %s: %s" % (type(e).__name__, str(e)[:300])
+    out["state"] = "MEASURED"
+    RESULTS["probe-sheets"] = out
+    print("  A: %s" % json.dumps({k: v for k, v in out["A"].items() if k != "sheets_b64"}), flush=True)
+    print("  A_parallel: %s" % json.dumps(out.get("A_parallel")), flush=True)
+    print("  B: %s" % json.dumps({k: v for k, v in out["B"].items() if k != "sheets_b64"}), flush=True)
+    print("  RAW ADD: %s" % str(out.get("raw_add_envelope"))[:400], flush=True)
+    return {k: v for k, v in out.items() if k not in ("A", "B")} | {"A_sheets": len(out["A"].get("sheets_b64", [])), "B_sheets": len(out["B"].get("sheets_b64", []))}
+
+
+@app.local_entrypoint()
+def probe_sh(pid: str, asset_prefix: str, out: str = "/tmp/bs/probe_sheets.json", serial_a: bool = True):
+    """Fetch the sheets of both rewatch instruments for an existing scratch timeline."""
+    import base64
+    from require_detach import require_detach
+    require_detach("the sheet probe")
+    r = probe_sheets.remote(pid, asset_prefix, serial_a=serial_a)
+    full = RESULTS["probe-sheets"]
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    for inst in ("A", "B"):
+        for i, b in enumerate((full.get(inst) or {}).get("sheets_b64") or []):
+            pth = out.replace(".json", "_%s%d.png" % (inst, i))
+            open(pth, "wb").write(base64.b64decode(b)); print("  SHEET %s" % pth)
+    slim = {k: ({kk: vv for kk, vv in v.items() if kk != "sheets_b64"} if isinstance(v, dict) else v) for k, v in full.items()}
+    json.dump(slim, open(out, "w"), indent=1); print("WROTE %s" % out); print(json.dumps(r)[:600])
+
+@app.function(image=IMG, timeout=300, cpu=2, memory=2048, secrets=[modal.Secret.from_name("anthropic-api-key")])
+def egress_probe():
+    """WHY THE PROXY'S UPSTREAM LEG NEVER RETURNS IN THE CONTAINER. No model.
+
+    The proxied ping (2026-09-17) got no byte in 120s and wrote no trace row,
+    so the handler thread was stuck inside connect/request. This reads the
+    container's own facts: the address families api.anthropic.com resolves
+    to, whether each connects within 8s, and whether a one-token call relays
+    through the proxy with the default connection class and with the
+    IPv4-only one, each bounded at 40s.
+    """
+    import socket, threading, urllib.request as _ur
+    sys.path.insert(0, "/root")
+    import api_proxy as _px
+    out = {"state": "RUNNING"}
+    try:
+        infos = socket.getaddrinfo("api.anthropic.com", 443, 0, socket.SOCK_STREAM)
+        out["families"] = [("v6" if af == socket.AF_INET6 else "v4", sa[0]) for af, _st, _pr, _cn, sa in infos]
+    except Exception as e:                                        # noqa: BLE001
+        out["families"] = "FAILED %s" % str(e)[:120]; infos = []
+    conn = []
+    for af, st, pr, _cn, sa in infos[:6]:
+        t0 = time.time()
+        try:
+            sk = socket.socket(af, st, pr); sk.settimeout(8); sk.connect(sa); sk.close()
+            conn.append({"addr": sa[0], "ok": True, "s": round(time.time() - t0, 2)})
+        except Exception as e:                                    # noqa: BLE001
+            conn.append({"addr": sa[0], "ok": False, "s": round(time.time() - t0, 2), "err": "%s: %s" % (type(e).__name__, str(e)[:60])})
+    out["connects"] = conn
+    key = os.environ.get("ANTHROPIC_API_KEY", "")
+    body = json.dumps({"model": "claude-haiku-4-5-20251001", "max_tokens": 5, "messages": [{"role": "user", "content": "Say ok."}]}).encode()
+
+    def _via(cls, tag):
+        _px.CONNECTION = cls
+        _px.TRACE = "/work/egress_%s.jsonl" % tag
+        os.makedirs("/work", exist_ok=True)
+        port = _px.serve(0)
+        res = {"tag": tag}
+        def _go():
+            t0 = time.time()
+            try:
+                req = _ur.Request("http://127.0.0.1:%d/v1/messages" % port, data=body, method="POST",
+                                  headers={"content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"})
+                with _ur.urlopen(req, timeout=40) as r:
+                    res["status"] = r.status; res["bytes"] = len(r.read()); res["s"] = round(time.time() - t0, 2)
+            except Exception as e:                                # noqa: BLE001
+                res["error"] = "%s: %s" % (type(e).__name__, str(e)[:120]); res["s"] = round(time.time() - t0, 2)
+        th = threading.Thread(target=_go, daemon=True); th.start(); th.join(45)
+        if th.is_alive():
+            res["error"] = "HUNG past 45s"
+        try:
+            res["trace"] = [json.loads(l) for l in open(_px.TRACE, encoding="utf-8") if l.strip()]
+        except Exception as e:                                    # noqa: BLE001
+            res["trace"] = "ABSENT %s" % type(e).__name__
+        return res
+    out["default_class"] = _via(__import__("http.client").client.HTTPSConnection, "default")
+    out["v4_class"] = _via(_px.V4HTTPSConnection, "v4")
+    out["state"] = "MEASURED"
+    RESULTS["egress-probe"] = out
+    print("  EGRESS          : %s" % json.dumps(out)[:2500], flush=True)
+    return out
+
+
+@app.local_entrypoint()
+def egress(out: str = "/tmp/bs/egress.json"):
+    from require_detach import require_detach
+    require_detach("the egress probe")
+    r = egress_probe.remote()
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    json.dump(r, open(out, "w"), indent=1); print("WROTE %s" % out)
+
 @app.local_entrypoint()
 def roundtrip(clip_url: str = "", out: str = "/tmp/bs/roundtrip.json"):
     from require_detach import require_detach
@@ -3207,6 +5942,64 @@ def roundtrip(clip_url: str = "", out: str = "/tmp/bs/roundtrip.json"):
             print("    %-28s edit_lists=%s" % (v["label"], v["edit_lists"]))
     print("  probe1: project=%s render=%s"
           % (r["probe1"].get("projectId"), r["probe1"].get("renderId")))
+
+
+def region_states(path, duration_s=0.0):
+    """Face trajectory and burned-in text for ONE LOCAL FILE, three-state.
+
+    HOISTED OUT OF `detect_regions` DELIBERATELY. The merged single-agent path
+    needs exactly this answer and already has the clip at /work/source.mp4 in
+    the SAME image that carries the models — so calling the @app.function would
+    spawn a second container to re-download a file we are sitting on. A rule
+    that lives inside a dispatch cannot be driven by a check, and a second copy
+    of it is how the two drift; there is one implementation and both callers
+    use it.
+
+    FAILED IS NOT ABSENT IS NOT MEASURED. A detector that could not load says
+    so rather than returning an empty trajectory, because "no faces found" and
+    "we did not look" must never be the same value.
+    """
+    # BOUNDED. Every other subprocess in this file carries a timeout; this one
+    # did not, and an ffprobe that never returns would hang the rewatch thread
+    # with no watchdog under it.
+    _d = duration_s or float(subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "csv=p=0", path],
+        capture_output=True, text=True, timeout=120).stdout.strip() or 0.0)
+    out = {"duration_s": _d, "face_state": "ABSENT", "text_state": "ABSENT",
+           "face_traj": None, "source_text_regions": None}
+    try:
+        import face_bands as fb
+        ts = [round(i * 0.25, 2) for i in range(int(max(1.0, _d) / 0.25) + 1)]
+        traj = fb.detect_face_positions(path, ts)
+        if traj is None:
+            out["face_state"] = "FAILED"
+            out["face_why"] = "cv2 or the res10 model is missing"
+        else:
+            out["face_traj"] = traj
+            out["face_state"] = "MEASURED"
+            out["faces_found"] = sum(1 for p in traj if p.get("found"))
+            out["face_sampled"] = len(traj)
+    except Exception as e:                                        # noqa: BLE001
+        out["face_state"] = "FAILED"
+        out["face_why"] = "%s: %s" % (type(e).__name__, str(e)[:160])
+    try:
+        import burned_text as bt
+        b = bt.detect_burned_in_text(path)
+        if b is None:
+            out["text_state"] = "FAILED"
+            out["text_why"] = "the EAST model is missing or unreadable"
+        else:
+            out["source_text_regions"] = list(b.get("source_text_regions") or ())
+            out["text_state"] = "MEASURED"
+            out["has_burned_captions"] = bool(b.get("has_burned_captions"))
+    except Exception as e:                                        # noqa: BLE001
+        out["text_state"] = "FAILED"
+        out["text_why"] = "%s: %s" % (type(e).__name__, str(e)[:160])
+    print("  DETECT          : face=%s (%s/%s found)  text=%s %s"
+          % (out["face_state"], out.get("faces_found"), out.get("face_sampled"),
+             out["text_state"], out.get("source_text_regions")), flush=True)
+    return out
 
 
 @app.function(image=IMG, timeout=900)
@@ -3232,41 +6025,190 @@ def detect_regions(clip_url: str, duration_s: float = 0.0):
     os.makedirs("/work", exist_ok=True)
     subprocess.run(["curl", "-fsSL", "-o", "/work/src.mp4", clip_url],
                    check=True, timeout=600)
-    _d = duration_s or float(subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-         "-of", "csv=p=0", "/work/src.mp4"],
-        capture_output=True, text=True).stdout.strip() or 0.0)
-    out = {"duration_s": _d, "face_state": "ABSENT", "text_state": "ABSENT",
-           "face_traj": None, "source_text_regions": None}
-    try:
-        import face_bands as fb
-        ts = [round(i * 0.25, 2) for i in range(int(max(1.0, _d) / 0.25) + 1)]
-        traj = fb.detect_face_positions("/work/src.mp4", ts)
-        if traj is None:
-            out["face_why"] = "cv2 or the res10 model is missing"
-        else:
-            out["face_traj"] = traj
-            out["face_state"] = "MEASURED"
-            out["faces_found"] = sum(1 for p in traj if p.get("found"))
-            out["face_sampled"] = len(traj)
-    except Exception as e:                                        # noqa: BLE001
-        out["face_why"] = "%s: %s" % (type(e).__name__, str(e)[:160])
-    try:
-        import burned_text as bt
-        b = bt.detect_burned_in_text("/work/src.mp4")
-        if b is None:
-            out["text_why"] = "the EAST model is missing or unreadable"
-        else:
-            out["source_text_regions"] = list(b.get("source_text_regions") or ())
-            out["text_state"] = "MEASURED"
-            out["has_burned_captions"] = bool(b.get("has_burned_captions"))
-    except Exception as e:                                        # noqa: BLE001
-        out["text_why"] = "%s: %s" % (type(e).__name__, str(e)[:160])
-    print("  DETECT          : face=%s (%s/%s found)  text=%s %s"
-          % (out["face_state"], out.get("faces_found"), out.get("face_sampled"),
-             out["text_state"], out.get("source_text_regions")), flush=True)
+    return region_states("/work/src.mp4", duration_s)
+
+
+
+# ONE READ-BACK, FOUR WRITE SHAPES. Settles whether an untrimmed video item
+# carries sourceRange — and WHICH write field makes it so — the same way
+# cutaway and transition were verified: by doing it.
+@app.function(image=IMG, timeout=1200,
+              secrets=[modal.Secret.from_name("chatcut-oauth")])
+def probe_sourcerange(clip_url: str):
+    """Which video-add shape comes back with sourceRange? -> per-variant, verbatim.
+
+    THE QUESTION, and why one shape could not answer it. `kept_spans` hard-fails
+    when a base-track video item lacks sourceRange.startSeconds/endSeconds; that
+    one failure is upstream of every ABSENT in runs 7, 8 and 9. Two opposite
+    fixes look identical from the records — the agent omits a field, or the gate
+    demands one ChatCut never sets — and the read-back items never reached any
+    record.
+
+    THE FIRST VERSION OF THIS PROBE WOULD HAVE ANSWERED ON THE WRONG SIDE. It
+    sent one shape and its verdict could only say "gate right" or "gate wrong".
+    The refutation pass found, on disk, that the OLD planner-path agent always
+    wrote `sourceStartFromInSeconds: 0` and `from` (not `fromFrame`), and that
+    ChatCut's own echo uses `from` — so the live hypothesis is a WRITE-FIELD
+    dependency: sourceRange exists only when sourceStartFromInSeconds is written.
+    A one-shape probe cannot see that, and `fromFrame: 0` masks an ignored key
+    because an ignored key and an honoured one both land at frame 0.
+
+    SO: four adds, SEPARATE calls (the batch is atomic — one rejection would
+    hide the other three), spaced in time so they cannot overlap on one track,
+    NONZERO offsets on B/C/D so the position key is proven honoured, and the
+    verdict comes from REPLAYING THE GATE (base_track + kept_spans) rather than
+    re-implementing it with a weaker predicate. Each read-back item is tied to
+    its add through the id in ChatCut's echo, never by "any video item".
+
+      A  {type, assetId, trackId, fromFrame:0,    durationInFrames:612}
+         — the new paragraph's shape, VERBATIM. 612 > 20.362s x 30 = 610.86,
+           so it is OVER-LENGTH and labelled so; a clamp is a trim.
+      B  A at fromFrame:700, durationInFrames:610, + sourceStartFromInSeconds:0
+      C  {type, assetId, trackId, from:1400, durationInFrames:610}
+         — the OLD agent's position key
+      D  A at fromFrame:2100, durationInFrames:610 — honest length, honest key
+
+    ABSENT IS NAMED PER VARIANT. A refusal, a missing echo id, or an item that
+    did not come back each says so on its own line; no `all()` over a mixed list.
+    """
+    _t0 = time.time()
+    RESULTS["probe-sourcerange"] = {"state": "STARTED", "t0": _t0}
+    os.makedirs("/work", exist_ok=True)
+    subprocess.run(["curl", "-fsSL", "-o", "/work/source.mp4", clip_url],
+                   check=True, timeout=300)
+    _pr = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
+                          "format=duration", "-of", "csv=p=0",
+                          "/work/source.mp4"], capture_output=True, text=True,
+                         timeout=60)
+    _dur = float((_pr.stdout or "0").strip() or 0)
+    _src_frames = int(_dur * 30)                  # prestage creates fps=30
+    tok = _access_token()
+    stage = prestage(tok, "", controls={}, source_path="/work/source.mp4",
+                     want_components={"__no_components__"}, titles=[])
+    if not (stage.get("trackId") and stage.get("sourceAssetId")):
+        raise RuntimeError("prestage returned no trackId/sourceAssetId — the "
+                           "add would be sent against None: %s"
+                           % json.dumps({k: stage.get(k) for k in
+                                         ("projectId", "trackId",
+                                          "sourceAssetId")}))
+    out = {"state": "RUNNING", "projectId": stage["projectId"],
+           "trackId": stage["trackId"], "sourceAssetId": stage["sourceAssetId"],
+           "source_duration_s": _dur, "source_frames_at_30": _src_frames,
+           "prestage_wall_s": round(time.time() - _t0, 1), "variants": {}}
+    base = {"type": "video", "assetId": stage["sourceAssetId"],
+            "trackId": stage["trackId"]}
+    V = {
+        "A_paragraph_verbatim_612": dict(base, fromFrame=0,
+                                         durationInFrames=612),
+        "B_sourceStartFromInSeconds": dict(base, fromFrame=700,
+                                           durationInFrames=610,
+                                           sourceStartFromInSeconds=0),
+        "C_old_agent_from_key": dict(base, **{"from": 1400,
+                                              "durationInFrames": 610}),
+        "D_honest_length_offset": dict(base, fromFrame=2100,
+                                       durationInFrames=610),
+    }
+    _sent_pos = {"A_paragraph_verbatim_612": 0, "B_sourceStartFromInSeconds": 700,
+                 "C_old_agent_from_key": 1400, "D_honest_length_offset": 2100}
+    for name, add in V.items():
+        rec = {"add_sent": add, "over_length": add["durationInFrames"] > _src_frames}
+        try:
+            r = _mcp_call(tok, "edit_item",
+                          {"projectId": stage["projectId"], "adds": [add]},
+                          expect="adds")
+            _echo = r.get("adds") or []
+            _eid = None
+            for e in _echo:
+                if isinstance(e, dict) and e.get("id"):
+                    _eid = str(e["id"])
+                    break
+            rec["echo"] = (json.dumps(r) + str(r.get("_text") or ""))[:700]
+            rec["echo_id"] = _eid
+            rec["edit_item_state"] = "MEASURED" if _eid else (
+                "MEASURED-NO-ID — the echo carried no item id, so this add "
+                "cannot be tied to a read-back item")
+        except Exception as e:                                    # noqa: BLE001
+            rec["edit_item_state"] = "FAILED"
+            rec["echo"] = "%s: %s" % (type(e).__name__, str(e)[:500])
+            rec["echo_id"] = None
+        out["variants"][name] = rec
+        print("  ADD %-28s %s" % (name, rec["edit_item_state"][:60]), flush=True)
+    # ONE READ-BACK, THEN THE GATE REPLAYED VERBATIM
+    rb = read_back(tok, stage)
+    items = rb.get("items")
+    out["read_why"] = rb.get("read_why")
+    out["read_state"] = ("FAILED" if items is None else
+                         "EMPTY" if not items else "MEASURED")
+    items = items or []
+    out["items_verbatim"] = items[:6]
+    # THE KEYS THE READ-BACK ACTUALLY CARRIES, recorded before any matching —
+    # the gate ties items by `id` (chatcut_gate.py:356) and so does this
+    # probe; if the read-back spells it differently every variant reads
+    # UNDECIDED and this line is what says why.
+    out["readback_item_keys"] = sorted(items[0].keys()) if items else None
+    sys.path.insert(0, "/root")
+    import chatcut_gate as _cg
+    _bt, _bst, _bwhy = _cg.base_track(items)
+    _sp, _sst, _swhy = _cg.kept_spans(items, _bt, float(rb.get("fps") or 30))
+    out["gate_replay"] = {"base_track": _bt, "base_state": _bst, "base_why": _bwhy,
+                          "spans": _sp, "spans_state": _sst, "spans_why": _swhy}
+    by_id = {str(i.get("id")).replace("-", ""): i for i in items if i.get("id")}
+    for name, rec in out["variants"].items():
+        it = by_id.get(str(rec.get("echo_id") or "").replace("-", ""))
+        if rec["edit_item_state"] != "MEASURED":
+            rec["verdict"] = "ABSENT — the add did not succeed (%s)" % rec["edit_item_state"][:40]
+            continue
+        if it is None:
+            # maybe the id is a prefix of the read-back id
+            _cands = [i for k, i in by_id.items() if k.startswith(rec["echo_id"])
+                      or rec["echo_id"].startswith(k)]
+            it = _cands[0] if len(_cands) == 1 else None
+        if it is None:
+            rec["verdict"] = ("UNDECIDED — echo id %s matched no read-back item "
+                              "(read: %s)" % (rec["echo_id"], out["read_why"]))
+            continue
+        rec["readback_keys"] = sorted(it.keys())
+        rec["sourceRange"] = it.get("sourceRange")
+        rec["timelineRange"] = it.get("timelineRange")
+        _tr = it.get("timelineRange") or {}
+        _obs = _tr.get("fromFrame")
+        rec["position_honoured"] = (
+            "MEASURED yes" if _obs == _sent_pos[name] else
+            "MEASURED NO — sent %s, landed at %r (the key was ignored or "
+            "remapped)" % (_sent_pos[name], _obs))
+        _sr = it.get("sourceRange")
+        rec["verdict"] = (
+            "sourceRange PRESENT (%r)" % _sr if isinstance(_sr, dict)
+            and "start" in _sr and "end" in _sr else
+            "sourceRange ABSENT (keys: %s)" % rec["readback_keys"])
+    out["gate_verdict"] = (
+        "GATE IS RIGHT — kept_spans MEASURED over the probe's items: %s" % _swhy
+        if _sst == "MEASURED" else
+        "GATE FAILS ON THESE ITEMS — %s; see per-variant lines for which "
+        "shape(s) carry sourceRange" % _swhy)
+    out["wall_s"] = round(time.time() - _t0, 1)
+    out["state"] = "MEASURED"
+    print("  GATE REPLAY     : %s" % out["gate_verdict"], flush=True)
+    for name, rec in out["variants"].items():
+        print("  %-28s %s | pos %s" % (name, rec.get("verdict", "?")[:70],
+                                        rec.get("position_honoured", "-")[:40]),
+              flush=True)
+    RESULTS["probe-sourcerange"] = out
     return out
 
+
+@app.local_entrypoint()
+def probe_sr(clip_url: str = "", out: str = "/tmp/bs/probe_sourcerange.json"):
+    from require_detach import require_detach
+    require_detach("the sourceRange probe")
+    r = probe_sourcerange.remote(clip_url)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    with open(out, "w", encoding="utf-8") as fh:
+        json.dump(r, fh, indent=1)
+    print("WROTE %s" % out)
+    print("  gate:", r.get("gate_verdict"))
+    for n, v in (r.get("variants") or {}).items():
+        print("  %-28s %s" % (n, v.get("verdict")))
 
 @app.local_entrypoint()
 def detect(clip_url: str = "", out: str = "/tmp/bs/regions.json"):
@@ -3699,8 +6641,9 @@ def rendercheck(props_file: str = ""):
 @app.local_entrypoint()
 def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
          run_id: str = "", wait: bool = False,
+         read_ceiling: int = 0,
          model: str = "claude-sonnet-5", use_hands: bool = False,
-         plan_file: str = "", think_tokens: int = 0,
+         think_tokens: int = -1, effort: str = "",
          prestage_title: str = "", prestage_controls: str = "",
          prestage_titles: str = "", transcript_file: str = ""):
     if not clip_url:
@@ -3709,13 +6652,7 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
     # value. Mounting it would make the container's copy a second artifact that
     # can drift from the ledger it came from; a string argument cannot.
     plan_text = ""
-    if plan_file:
-        plan_text = open(plan_file, encoding="utf-8").read()
-        if not plan_text.strip():
-            raise SystemExit(f"plan file {plan_file} is EMPTY — refusing to "
-                             f"run a plan-mode job with no plan, which would "
-                             f"silently be an ordinary deciding run.")
-        print(f"  PLAN            : {len(plan_text)} chars from {plan_file}")
+    plan_text = None            # the plan route is gone (one session; Zac, 2026-09-17)
     # A PRESIGNED URL IS A CLAIM WITH AN EXPIRY DATE ON IT. Run 2 of arm A was
     # launched eight minutes after its URL expired: the container booted, paid
     # for the image, authenticated, ran the preflight, and died on a 403 with
@@ -3780,11 +6717,11 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
     if wait:
         print(json.dumps(edit.remote(clip_url, brief, model=model, run_id=rid,
                                      use_hands=use_hands, plan=plan_text,
-                                     think_tokens=think_tokens,
+                                     think_tokens=think_tokens, effort=effort,
                                      prestage_title=prestage_title,
                       prestage_controls=prestage_controls,
                       prestage_titles=prestage_titles,
-                      transcript=_tx),
+                      transcript=_tx, read_ceiling=read_ceiling),
                          indent=1)[:6000])
         return
     # SPAWN, DO NOT WAIT. The result lands in the chatcut-results Dict, so the
@@ -3810,10 +6747,10 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
     require_detach("a spawned ChatCut edit")
     call = edit.spawn(clip_url, brief, model=model, run_id=rid,
                       use_hands=use_hands, plan=plan_text,
-                      think_tokens=think_tokens,
+                      think_tokens=think_tokens, effort=effort,
                       prestage_title=prestage_title,
                       prestage_controls=prestage_controls,
                       prestage_titles=prestage_titles,
-                      transcript=_tx)
+                      transcript=_tx, read_ceiling=read_ceiling)
     print(f"SPAWNED run_id={rid} call={call.object_id}")
     print(f"read it with:  modal run chatcut_read_result.py --run-id {rid}")

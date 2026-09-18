@@ -86,9 +86,8 @@ def legs():
     if _fn is not None:
         _h2 = [n.lineno for n in ast.walk(_fn) if isinstance(n, ast.Constant)
                and isinstance(n.value, str) and "HOP 2 (plan" in n.value]
-        _ag = [n.lineno for n in ast.walk(_fn) if isinstance(n, ast.List)
-               and n.elts and isinstance(n.elts[0], ast.Constant)
-               and n.elts[0].value == "claude"]
+        _ag = [n.lineno for n in ast.walk(_fn) if isinstance(n, ast.Call)
+               and getattr(n.func, "id", "") == "run_three_turns"]   # the launch is the loop
         if not (_h2 and _ag and min(_h2) < min(_ag)):
             bad.append(("hop2", "hop 2 does not run BEFORE the agent — a gate "
                                 "that fires after the turn is spent is a "

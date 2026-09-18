@@ -36,22 +36,39 @@ fail = 0
 docs = A._RULING_TIME_DOCS
 text = A.ruling_time_knowledge()
 
-# ── 1. THE STANDARD IS THERE, AS TEXT, NOT AS A NAME IN A TUPLE ─────────────
-if STD not in docs:
-    print(f"  *** {STD} is not in _RULING_TIME_DOCS — it never reaches the "
-          f"prefix"); fail += 1
-if text.find("THE STANDARD — HOW THE EXAMPLES") < 0:
-    print("  *** the standard is not in the ASSEMBLED prefix (a name in the "
-          "tuple is not a document in the block)"); fail += 1
-if "MISSING and not read" in text:
-    print("  *** the prefix says a document is missing: "
-          + text[text.find("MISSING and not read"):][:120]); fail += 1
+# ── 1. THE STANDARD IS THERE, AS TEXT ───────────────────────────────────────
+# THIRD RE-AIM OF THIS FILE, and the class is the same each time: it defends a
+# PROPERTY — the prefix carries Zac's standard and nothing describing
+# strangers — while the DOCUMENT that carries the property keeps moving.
+#   2026-09-15  17_craft_the_wider_field cut. Legs re-aimed off ordering.
+#   2026-09-16  16_craft_the_standard cut too, with the Gemini artefact.
+#               The standard is now `reference_standard.md`, written from
+#               watching the ten at 2fps through inspect_asset.
+# A check written against the document would have been rewritten three times;
+# written against the property it is re-pointed three times, which is cheaper
+# and keeps the guarantee continuous.
+_std = A.reference_standard()
+if len(_std) < 2000:
+    print("  *** the reference standard is %d chars — too short to be the "
+          "standard; a truncated or absent file would satisfy a looser check"
+          % len(_std)); fail += 1
+if "THIS IS THE BAR" not in _std:
+    print("  *** the standard does not declare itself the bar"); fail += 1
+if "ABSENT" in _std[:200] or "UNREADABLE" in _std[:200]:
+    print("  *** the standard did not load: " + _std[:120]); fail += 1
 
-# ── 2. IT DECLARES ITS OWN AUTHORITY ────────────────────────────────────────
-# Order alone is not a statement, and with one craft document there is no order
-# to rely on at all.
-if "THIS ONE WINS" not in text:
-    print("  *** the standard does not say it wins a contradiction"); fail += 1
+# ── 2. IT SAYS WHAT IT IS AND WHAT IT IS NOT ────────────────────────────────
+# The old leg asked for "THIS ONE WINS", which existed to resolve a
+# contradiction between TWO craft documents. With one standard there is no
+# contradiction to resolve; what must survive is that it states its own
+# provenance and its own limit, so nothing downstream reads it as more than it
+# is.
+if "watched all ten myself" not in _std:
+    print("  *** the standard does not say where it came from"); fail += 1
+if "without sound" not in _std:
+    print("  *** the standard does not state its own limit — an artefact that "
+          "implies coverage it lacks is worse than one that names the gap")
+    fail += 1
 
 # ── 3. NOTHING IN THE PREFIX IS A SURVEY OF STRANGERS ───────────────────────
 # Checked on the ASSEMBLED text, which is what the turn receives, not on the
@@ -62,16 +79,19 @@ for marker, why in (("THE WIDER FIELD — WHAT OTHER PEOPLE", "the field report"
     if marker in text:
         print(f"  *** {why} is in the prefix ({marker!r}) — Zac ruled it out "
               f"2026-09-15"); fail += 1
-if FIELD in docs:
-    print(f"  *** {FIELD} is back in _RULING_TIME_DOCS"); fail += 1
+for _gone in (STD, FIELD):
+    if _gone in docs:
+        print(f"  *** {_gone} is back in _RULING_TIME_DOCS — both were cut")
+        fail += 1
 
 # ── 4. IT IS STILL ON DISK ──────────────────────────────────────────────────
 # Removed from the prefix is not deleted. A document that vanished from the
 # repo cannot be reconsidered, and this removal is a cost call, not a verdict
 # on the document.
-if not os.path.isfile(os.path.join(HERE, "knowledge", FIELD)):
-    print(f"  *** {FIELD} is gone from knowledge/ — it was removed from the "
-          f"prefix, not from the repo"); fail += 1
+for _gone in (STD, FIELD):
+    if not os.path.isfile(os.path.join(HERE, "knowledge", _gone)):
+        print(f"  *** {_gone} is gone from knowledge/ — it was removed from "
+              f"the prefix, not from the repo"); fail += 1
 
 # ── 5. AND NO RATES SURVIVED INTO THE PREFIX ────────────────────────────────
 # The guard runs at synthesis time; this is the same question asked of what

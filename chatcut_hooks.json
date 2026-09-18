@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__chatcut__preview_timeline",
+        "hooks": [{"type": "command", "command": "/root/withhold_preview.sh"}]
+      }
+    ]
+  }
+}

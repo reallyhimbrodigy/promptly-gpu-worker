@@ -1,0 +1,37 @@
+{
+  "_source": "Live ChatCut MCP tool definitions, read 2026-09-17 via ToolSearch on plugin:chatcut:chatcut. NOT from memory and NOT from the skill docs — the two limit mismatches this file exists for were both invisible to a reading of either.",
+  "_note": "Only the constraints a CALL SITE can violate are recorded: the allowed key set (every one of these schemas is additionalProperties:false), numeric maxima, and closed enums.",
+  "preview_timeline": {
+    "keys": ["projectId","timelineId","views","tracks","itemIds","fromFrame","toFrame","limit","offset","viewerFrames","viewerFrameCount"],
+    "max": {"limit": 100, "viewerFrameCount": 9, "viewerFrames": 9, "itemIds": 10, "tracks": 10},
+    "enum": {"views": ["timeline","viewer","transcript"]}
+  },
+  "submit_export": {
+    "keys": ["projectId","timelineId","format","codec","resolution","fps","name","startFrame","endFrameExclusive","startSeconds","endSeconds","subtitleFormat","nleFormat","confirmFontFallback","bundleChatcutMedia","bundleMotionGraphics","bundleUserUploads","motionGraphicRenderKeys"],
+    "max": {},
+    "enum": {"format": ["video","audio","subtitles","xml","archive"], "codec": ["h264","vp8","mp3"], "resolution": ["480p","720p","1080p"], "subtitleFormat": ["srt","txt"], "nleFormat": ["fcp_xml","fcp_xml_resolve"]}
+  },
+  "track_export": {
+    "keys": ["projectId","timelineId","action","renderIds","latest","onlyActive"],
+    "required": ["action"], "max": {}, "enum": {}
+  },
+  "browse_library": {
+    "keys": ["category","group","id","query","limit","offset"],
+    "max": {"limit": 30},
+    "enum": {"category": ["motion-graphics","luts","zoom","effects","audio-effects","sound-effects","transitions"]}
+  },
+  "edit_item": {
+    "keys": ["projectId","adds","updates","deletes","json","ripple","validateOnly"],
+    "max": {}, "enum": {}
+  },
+  "edit_captions": {
+    "keys": ["projectId","action","json","preset","templatePreset","trackId","trackOrder","list","captionsItemId"],
+    "required": ["action"], "max": {},
+    "enum": {"action": ["enable","disable","refresh","reset","set_card_text","set_card_tokens","set_card_style","set_card_span_style","set_card_layout","set_max_characters","split_card","merge_cards","reset_card","resegment_cards","cue_override","cue_reset","template","translate","style","layout","layout_policy","positions","preset_apply","preset_delete","preset_list","preset_rename","preset_save","bilingual","source_add","source_list","source_remove","set_sources","source_set","source_layout","source_update","track"]}
+  },
+  "read_captions": { "keys": ["projectId","json"], "max": {}, "enum": {} },
+  "create_project": {
+    "keys": ["name","description","compositionWidth","compositionHeight","fps","editorBaseUrl"],
+    "max": {}, "enum": {}
+  }
+}

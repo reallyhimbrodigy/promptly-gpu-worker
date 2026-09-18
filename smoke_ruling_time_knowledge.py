@@ -57,15 +57,26 @@ BLOCK = A.ruling_time_knowledge()
 # file also states its own precedence). Zac's call; the cost was MEASURED, not
 # estimated: +4,690 tokens per distinct prefix on round 52 (turn-1
 # cache_write + cache_read against the recorded round-51 baseline).
-check("exactly five documents are selected", len(A._RULING_TIME_DOCS) == 5,
+check("exactly four documents are selected", len(A._RULING_TIME_DOCS) == 4,
       str(A._RULING_TIME_DOCS))
-# FIVE since 2026-09-15: the wider-field report came out on Zac's ruling. The
-# property this leg defends is the one the ordering leg used to defend — the
-# prefix carries a standard, not a survey of strangers — and it is checked on
-# the ASSEMBLED text by smoke_craft_reports_ordered.py, where it belongs. What
-# is checked here is only that the block did not quietly grow again.
-check("the standard is selected", "16_craft_the_standard.md"
-      in A._RULING_TIME_DOCS, str(A._RULING_TIME_DOCS))
+# FOUR since 2026-09-16. 17_craft_the_wider_field came out on 2026-09-15 and
+# 16_craft_the_standard on 2026-09-16, when Zac cut the Gemini artefact with
+# it. Both were PROSE ABOUT the references — one model's reading, handed on.
+# The standard is now `reference_standard.md`, written from watching all ten
+# at 2fps through inspect_asset, and it reaches the prefix by its own loader
+# rather than through this tuple.
+#
+# THIS LEG ONLY GUARDS THE COUNT. What the standard SAYS is checked on the
+# assembled text by smoke_craft_reports_ordered.py, where it belongs; a count
+# here and content there is the split that stopped this file being rewritten
+# every time a document moved.
+check("the standard reaches the prefix by its own loader",
+      len(A.reference_standard()) > 2000
+      and "THIS IS THE BAR" in A.reference_standard(),
+      "%d chars" % len(A.reference_standard()))
+check("the cut documents did not come back",
+      not ({"16_craft_the_standard.md", "17_craft_the_wider_field.md"}
+           & set(A._RULING_TIME_DOCS)), str(A._RULING_TIME_DOCS))
 for _d in ("02_intent_standard.md", "13_placement_findings.md",
            "14_card_text_placement_rules.md"):
     check(f"{_d} is included", _d in A._RULING_TIME_DOCS)
