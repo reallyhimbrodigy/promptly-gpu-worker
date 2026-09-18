@@ -3802,6 +3802,11 @@ def run_three_turns(invoke, rewatch, first_message, cap=TURN_CAP,
                 tm["terminal"] = {"kind": "CACHE MISS", "at": n,
                                   "why": "call %d did not read the prefix call 1 established (%s) — the bytes moved" % (n, why)}
                 return None
+        if isinstance(r.get("api_status"), int) and r["api_status"] >= 400:
+            tm["turns"].append(r)
+            tm["terminal"] = {"kind": "API ERROR", "at": n,
+                              "why": "turn %d: the API answered %d: %s" % (n, r["api_status"], (r.get("api_head") or "")[:120])}
+            return None
         if r.get("killed") or r.get("subtype") in ("error_during_execution",):
             tm["turns"].append(r)
             tm["terminal"] = {"kind": "TURN FAILED", "at": n,
@@ -3953,6 +3958,14 @@ def warm_ttl_minutes(warm_rec):
     return None
 
 
+def _read_trace_rows(path="/work/proxy_trace.jsonl"):
+    """The proxy's trace rows so far. -> list (empty when absent)."""
+    try:
+        return [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
+    except Exception:                                             # noqa: BLE001
+        return []
+
+
 def _read_prefix_rows(path="/work/prefix_calls.jsonl"):
     """The proxy's fingerprint rows so far. -> list (empty when absent)."""
     try:
@@ -3998,6 +4011,9 @@ def cli_command(sid, model, use_hands=False, agents=None, partial=True, effort=N
             + (["--effort", str(effort)] if effort else [])
             + (["--include-partial-messages"] if partial else []))
 
+
+RUN_FIRST_TEXT_JOB = "THE COMPONENT INVENTORY"   # the first text of pass1_message: what the proxy finds the watch's end by
+RUN_FIRST_TEXT_PING = "ping"
 
 @app.function(image=IMG, timeout=900, cpu=4, memory=8192,
               # SECTION B: the container's imports and CLI are snapshotted
@@ -4559,6 +4575,7 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         _px.FINGERPRINTS = "/work/prefix_calls.jsonl"
         _px.FIRST_BODY = "/work/req_first.json"
         _px.TRACE = "/work/proxy_trace.jsonl"
+        _px.RUN_FIRST_TEXT = RUN_FIRST_TEXT_JOB      # the watch-end breakpoint (ruling 2)
         _px_port, _px_ca = _px.serve_mitm(0, "/work/mitm")
         _env.update(_px.mitm_env(_px_port, _px_ca))
         print("  API PROXY       : MEASURED  transparent, HTTPS_PROXY=http://127.0.0.1:%d, CA %s"
@@ -4632,9 +4649,14 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         if wall > TURN_LAW_S:
             print("  LAW MISS (turn) : turn %d took %.1fs, over the %ds turn law%s" % (n, wall, TURN_LAW_S, " — KILLED at the run bound" if killed else ""), flush=True)
         u = _res.get("usage") or {}
+        # THE API'S OWN ANSWER, from the trace: a 400 "Credit balance is too
+        # low" once reached the machine as the agent's NO PLACEMENT.
+        _legs = [x for x in _read_trace_rows() if isinstance(x, dict) and str(x.get("path", "")).split("?")[0] == "/v1/messages" and "status" in x and "req_bytes" in x]
+        _api = _legs[-1] if _legs else {}
         rec = {"rc": rc, "subtype": _res.get("subtype"), "tool_calls": _calls,
                "text": "\n".join(_texts)[:2000], "killed": bool(killed), "wall": round(wall, 2),
                "bound_s": round(_left, 1), "over_turn_law": wall > TURN_LAW_S,
+               "api_status": _api.get("status"), "api_head": str(_api.get("head") or "")[:200], "api_calls_seen": len(_legs),
                "usage": {"read": u.get("cache_read_input_tokens"), "write": u.get("cache_creation_input_tokens"),
                          "in": u.get("input_tokens"), "out": u.get("output_tokens"),
                          # WHICH TTL WAS WRITTEN. The rewatch probe's review wrote 231,986 as
@@ -5192,7 +5214,12 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
           % (out["floor"]["state"], out["floor"]["why"]), flush=True)
 
     # THE EXPORT IS THE HARNESS'S, and it is the only path to a deliverable.
-    if out["floor"]["state"] != "MEASURED":
+    # NOTHING IS EXPORTED AFTER A TERMINAL (ruling 3: kill, ledger, owner page,
+    # refund) — the floor once exported the untouched source after a 400.
+    if _tm.get("terminal"):
+        _export = {"state": "WITHHELD", "why": "terminal %s at turn %s — nothing is exported after a terminal" % (_tm["terminal"]["kind"], _tm["terminal"].get("at"))}
+        print("  EXPORT          : WITHHELD — %s" % _export["why"], flush=True)
+    elif out["floor"]["state"] != "MEASURED":
         _export = {"state": "REFUSED", "why": out["floor"]["why"]}
         print("  EXPORT          : REFUSED — %s" % out["floor"]["why"],
               flush=True)
@@ -5420,7 +5447,7 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
 @app.function(image=IMG, timeout=300, cpu=2, memory=4096,
               secrets=[modal.Secret.from_name("chatcut-oauth"),
                        modal.Secret.from_name("anthropic-api-key")])
-def keep_warm(model: str = "claude-sonnet-5", proxy: bool = False, base_url: str = ""):
+def keep_warm(model: str = "claude-sonnet-5", proxy: bool = True, base_url: str = ""):
     """ONE PING AGAINST THE BYTE-IDENTICAL PREFIX, so the watch stays warm.
 
     Zac, ruling 1 (2026-09-17): one ping per 55 minutes on the 1h TTL. The
@@ -5446,6 +5473,7 @@ def keep_warm(model: str = "claude-sonnet-5", proxy: bool = False, base_url: str
     if proxy:
         import api_proxy as _px
         _px.FINGERPRINTS, _px.FIRST_BODY, _px.TRACE = "/work/warm_fp.jsonl", "/work/warm_first.json", "/work/warm_trace.jsonl"
+        _px.RUN_FIRST_TEXT = RUN_FIRST_TEXT_PING       # the same watch-end breakpoint the job gets
         _pp, _pca = _px.serve_mitm(0, "/work/mitm")
         env.update(_px.mitm_env(_pp, _pca))
     elif base_url:
@@ -5524,7 +5552,7 @@ def keep_warm(model: str = "claude-sonnet-5", proxy: bool = False, base_url: str
 
 
 @app.local_entrypoint()
-def warm(proxy: bool = False, base_url: str = ""):
+def warm(proxy: bool = True, base_url: str = ""):
     from require_detach import require_detach
     require_detach("the keep-warm ping")
     print(json.dumps(keep_warm.remote(proxy=proxy, base_url=base_url))[:3000])

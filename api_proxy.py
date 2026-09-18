@@ -72,6 +72,68 @@ class V4HTTPSConnection(http.client.HTTPSConnection):
 # relay against a canned response without touching http.client itself
 CONNECTION = http.client.HTTPSConnection
 
+# ── THE WATCH-END BREAKPOINT (Zac, ruling 2, 2026-09-18) ────────────────────
+# The CLI marks only its own last two messages, so a keep-warm ping never
+# leaves a cache entry at the end of the shared watch and a job's first call
+# reads 12.6k of 235k (`previous_message_not_found`). No CLI flag places one.
+# So the proxy does, on every /v1/messages call, ping and job alike: a
+# cache_control with ttl 1h on the last content block of the message just
+# before this run's own first message (found by RUN_FIRST_TEXT). The API's
+# rules, honoured here and to be verified on the wire: at most four
+# breakpoints per request (the CLI's second-to-last message marker is dropped
+# to make room), and 1h entries must precede 5-minute ones (the CLI's system
+# markers are raised to 1h; the last-message marker stays 5m, after them).
+RUN_FIRST_TEXT = os.environ.get("API_PROXY_RUN_FIRST_TEXT", "")
+MAX_BREAKPOINTS = 4
+
+
+def inject_watch_breakpoint(body, run_first_text):
+    """-> (body, note). PURE on its input (a deep copy is returned)."""
+    if not run_first_text or not isinstance(body.get("messages"), list):
+        return body, {"injected": False, "why": "no run_first_text or no messages"}
+    b = json.loads(json.dumps(body))
+    msgs = b["messages"]
+    first = None
+    for i, m in enumerate(msgs):
+        c = m.get("content")
+        texts = [x.get("text", "") for x in c if isinstance(x, dict) and x.get("type") == "text"] if isinstance(c, list) else [str(c or "")]
+        if any(run_first_text in t for t in texts):
+            first = i
+            break
+    if first is None or first == 0:
+        return body, {"injected": False, "why": "run_first_text not found in any message" if first is None else "run's first message is message 0 — no watch before it"}
+    idx = first - 1
+    tail = msgs[idx].get("content")
+    if not isinstance(tail, list) or not tail or not isinstance(tail[-1], dict):
+        return body, {"injected": False, "why": "message %d has no block to mark" % idx}
+    # the CLI's message markers: keep the LAST, drop the rest (room for ours)
+    marked = [i for i, m in enumerate(msgs) if isinstance(m.get("content"), list)
+              and any(isinstance(x, dict) and x.get("cache_control") for x in m["content"])]
+    dropped = []
+    for i in marked[:-1]:
+        if i == idx:
+            continue
+        for x in msgs[i]["content"]:
+            if isinstance(x, dict) and x.get("cache_control"):
+                x.pop("cache_control", None)
+                dropped.append(i)
+    # 1h must precede 5m: every system marker becomes 1h
+    raised = 0
+    if isinstance(b.get("system"), list):
+        for x in b["system"]:
+            if isinstance(x, dict) and x.get("cache_control"):
+                x["cache_control"] = {**x["cache_control"], "ttl": "1h"}
+                raised += 1
+    tail[-1]["cache_control"] = {"type": "ephemeral", "ttl": "1h"}
+    n_bp = raised + sum(1 for m in msgs if isinstance(m.get("content"), list)
+                        for x in m["content"] if isinstance(x, dict) and x.get("cache_control"))
+    if isinstance(b.get("tools"), list):
+        n_bp += sum(1 for t in b["tools"] if isinstance(t, dict) and t.get("cache_control"))
+    if n_bp > MAX_BREAKPOINTS:
+        return body, {"injected": False, "why": "would carry %d breakpoints (cap %d)" % (n_bp, MAX_BREAKPOINTS)}
+    return b, {"injected": True, "watch_end_message": idx, "run_first_message": first, "dropped_cli_markers": dropped,
+               "system_markers_raised_to_1h": raised, "breakpoints": n_bp}
+
 
 def _trace(row):
     try:
@@ -225,7 +287,12 @@ class H(http.server.BaseHTTPRequestHandler):
         if self.path.split("?")[0] == "/v1/messages":
             try:
                 body = json.loads(raw.decode("utf-8"))
+                body, inj = inject_watch_breakpoint(body, RUN_FIRST_TEXT)
+                if inj.get("injected"):
+                    raw = json.dumps(body).encode("utf-8")
+                _trace({"phase": "breakpoint", **inj})
                 fp = fingerprint(body)
+                fp["breakpoint"] = inj
                 with _LOCK:
                     _STATE["n"] += 1
                     k = _STATE["n"]

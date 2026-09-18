@@ -686,8 +686,8 @@ def main():
           len(_legs_) == 1 and _legs_[0].get("status") == 200 and "ttfb_s" in _legs_[0] and _legs_[0].get("relayed_bytes") == len(b"".join(_sse))
           and "sk-secret" not in json.dumps(_rows) and "<redacted" in json.dumps(_legs_[0].get("req_headers")),
           "rows=%s" % json.dumps(_rows)[:300])
-    check("the relay traces its phases in order: received, body_read, upstream_connected, request_sent, response_headers, first_chunk, relaying, upstream_eof, relay_closed",
-          _phases == ["received", "body_read", "upstream_connected", "request_sent", "response_headers", "first_chunk", "relaying", "upstream_eof", "relay_closed"]
+    check("the relay traces its phases in order: received, body_read, breakpoint, upstream_connected, request_sent, response_headers, first_chunk, relaying, upstream_eof, relay_closed",
+          _phases == ["received", "body_read", "breakpoint", "upstream_connected", "request_sent", "response_headers", "first_chunk", "relaying", "upstream_eof", "relay_closed"]
           and next(r for r in _rows if r.get("phase") == "body_read").get("bytes") == len(_body)
           and next(r for r in _rows if r.get("phase") == "upstream_eof").get("relayed") == len(b"".join(_sse)),
           "phases=%s" % _phases)
@@ -826,6 +826,66 @@ def main():
           "sha eq=%s billing=%s d=%s d3=%s" % (_f1["system"]["sha"] == _f2["system"]["sha"], _f1["system"].get("billing_header_blocks"), _d.get("first_diff"), _d3.get("first_diff")))
     _rl_keys = {k.value for n in ast.walk(_edit_fn) if isinstance(n, ast.Dict) for k in n.keys if isinstance(k, ast.Constant)}
     check("the run line carries the request size per call (request_mb)", "request_mb" in _rl_keys)
+
+    # ---- RULING 2: THE WATCH-END BREAKPOINT, PLACED BY THE PROXY ----
+    def _msg(role, blocks, mark=False):
+        c = [{"type": "text", "text": t} for t in blocks]
+        if mark: c[-1]["cache_control"] = {"type": "ephemeral"}
+        return {"role": role, "content": c}
+    _wb = {"model": "m", "tools": [], "system": [{"type": "text", "text": "billing"}, {"type": "text", "text": "S1", "cache_control": {"type": "ephemeral", "scope": "global"}},
+                                                 {"type": "text", "text": "S2", "cache_control": {"type": "ephemeral"}}],
+           "messages": [_msg("user", ["w0"]), _msg("assistant", ["w1"]), _msg("user", ["w2"]), _msg("assistant", ["w3 the watch ends here"]),
+                        _msg("user", ["THE COMPONENT INVENTORY — pictures", "more"], mark=True), _msg("system", ["reminder"]), _msg("user", ["tail"], mark=True)]}
+    _ob, _note = PX.inject_watch_breakpoint(_wb, "THE COMPONENT INVENTORY")
+    _marks = [(i, [x.get("cache_control") for x in m["content"] if x.get("cache_control")]) for i, m in enumerate(_ob["messages"]) if any(x.get("cache_control") for x in m["content"])]
+    _sys_ttl = [x["cache_control"].get("ttl") for x in _ob["system"] if x.get("cache_control")]
+    check("the proxy marks the watch's last block with a 1h breakpoint, raises the system markers to 1h, drops the CLI's second-to-last message marker, and stays within four",
+          _note.get("injected") is True and _note.get("watch_end_message") == 3 and _marks == [(3, [{"type": "ephemeral", "ttl": "1h"}]), (6, [{"type": "ephemeral"}])]
+          and _sys_ttl == ["1h", "1h"] and _note.get("breakpoints") == 4 and _note.get("dropped_cli_markers") == [4]
+          and _wb["messages"][3]["content"][-1].get("cache_control") is None,
+          "note=%s marks=%s sys=%s" % (_note, _marks, _sys_ttl))
+    _ob2, _note2 = PX.inject_watch_breakpoint(_wb, "NOT IN ANY MESSAGE")
+    check("with no run-first text found nothing is rewritten and the note says so", _ob2 is _wb and _note2.get("injected") is False and "not found" in _note2.get("why", ""), "%s" % _note2)
+    # the rewritten body is what goes upstream (through the tunnel, with RUN_FIRST_TEXT set)
+    _saved_rft, _saved_conn3, _saved_tr3, _saved_fp3, _saved_fb3 = PX.RUN_FIRST_TEXT, PX.CONNECTION, PX.TRACE, PX.FINGERPRINTS, PX.FIRST_BODY
+    try:
+        PX.RUN_FIRST_TEXT = "THE COMPONENT INVENTORY"; PX.CONNECTION = _FakeConn; PX.TRACE = tempfile.mktemp(suffix=".jsonl")
+        PX.FINGERPRINTS = tempfile.mktemp(suffix=".jsonl"); PX.FIRST_BODY = tempfile.mktemp(suffix=".json")
+        _port3 = PX.serve(0)
+        _req3 = _ur2.Request("http://127.0.0.1:%d/v1/messages?beta=true" % _port3, data=json.dumps({**_wb, "stream": True}).encode(), method="POST",
+                             headers={"Content-Type": "application/json"})
+        with _ur2.urlopen(_req3, timeout=20) as _r:
+            _r.read()
+        _sent = json.loads(_FakeConn.last["body"])
+        _fp3 = [json.loads(l) for l in open(PX.FINGERPRINTS, encoding="utf-8") if l.strip()]
+    finally:
+        PX.RUN_FIRST_TEXT, PX.CONNECTION, PX.TRACE, PX.FINGERPRINTS, PX.FIRST_BODY = _saved_rft, _saved_conn3, _saved_tr3, _saved_fp3, _saved_fb3
+    check("upstream receives the REWRITTEN body and the fingerprint row records the breakpoint",
+          _sent["messages"][3]["content"][-1].get("cache_control") == {"type": "ephemeral", "ttl": "1h"}
+          and (_fp3[0].get("fp") or {}).get("breakpoint", {}).get("injected") is True and "message:3" in (_fp3[0]["fp"].get("cache_control_at") or []),
+          "sent marks=%s fp=%s" % ([i for i, m in enumerate(_sent["messages"]) if any(x.get("cache_control") for x in m["content"])], (_fp3[0].get("fp") or {}).get("cache_control_at") if _fp3 else None))
+    _rft_sites = [n.name for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef)
+                  if any(isinstance(a, ast.Attribute) and a.attr == "RUN_FIRST_TEXT" for a in ast.walk(n))]
+    _m1t = next(b.get("text") for b in J.pass1_message(None, [], os.path.join(HERE, "sheet", "INVENTORY.png"), source_watch=None, deciding="x")["message"]["content"] if b.get("type") == "text")
+    check("job and ping both hand the proxy their run-first text, and the job's first message really starts with it",
+          {"edit", "keep_warm"} <= set(_rft_sites) and _m1t.startswith(J.RUN_FIRST_TEXT_JOB) and J.RUN_FIRST_TEXT_PING == "ping",
+          "sites=%s first=%r" % (_rft_sites, _m1t[:40]))
+    # ---- THE API'S OWN ANSWER IS A TERMINAL, NEVER THE AGENT'S FAULT; NOTHING EXPORTS AFTER A TERMINAL ----
+    class _Inv400:
+        log = []
+        def __call__(self, n, message):
+            self.log.append(n)
+            return {"rc": 1, "subtype": "success", "tool_calls": [], "text": "Credit balance is too low", "killed": False, "wall": 7.0,
+                    "usage": {"read": 0, "write": 0, "in": 0, "out": 0}, "api_status": 400, "api_head": '{"type":"error","error":{"message":"Credit balance is too low"}}'}
+    _i400 = _Inv400()
+    _tm400 = J.run_three_turns(_i400, lambda n, final: {"message": {}, "sheets": 0}, {"type": "user", "message": {"role": "user", "content": []}})
+    check("a 4xx from the API is the terminal API ERROR at that turn, carrying the status and the API's words, and is never retried",
+          (_tm400["terminal"] or {}).get("kind") == "API ERROR" and "400" in _tm400["terminal"]["why"] and "Credit balance" in _tm400["terminal"]["why"] and _i400.log == [1],
+          "%s log=%s" % (_tm400.get("terminal"), _i400.log))
+    _exp_if = [n for n in ast.walk(_edit_fn) if isinstance(n, ast.If) and ast.unparse(n.test) == "_tm.get('terminal')"
+               and any(isinstance(x, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "_export" for t in x.targets) for x in n.body)]
+    check("the export is WITHHELD after any terminal (the floor once exported the untouched source after a 400)",
+          len(_exp_if) == 1 and "WITHHELD" in ast.unparse(_exp_if[0].body[0]), "export ifs on terminal: %d" % len(_exp_if))
 
     # ---- EVERY RUN-TIME IMPORT IS MOUNTED (the rewatch probe, 2026-09-17) ----
     _tree = ast.parse(src)
