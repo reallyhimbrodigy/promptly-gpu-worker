@@ -20,8 +20,8 @@ case "$STAGE" in
   th3000) CMD="modal run --detach chatcut_job_app.py::main --clip-url '$SRC' --brief 'just make it pop' --run-id h-th-think3000 --think-tokens 3000" ;;
   thlow)  CMD="modal run --detach chatcut_job_app.py::main --clip-url '$SRC' --brief 'just make it pop' --run-id h-th-low --think-tokens 3000 --effort low" ;;
   nowatch) CMD="modal run --detach chatcut_job_app.py::main --clip-url '$SRC' --brief 'just make it pop' --run-id h-th-nowatch --think-tokens 0 --no-watch" ;;
-  motion) CMD="modal run --detach chatcut_job_app.py::main --clip-url '$SRC' --brief 'just make it pop' --run-id h-motion-1 --think-tokens 3000" ;;
-  car)    CMD="modal run --detach chatcut_job_app.py::main --clip-url '$SRC' --brief 'just make it pop' --run-id h-car-1 --think-tokens 3000" ;;
+  motion) CMD="modal run --detach chatcut_job_app.py::main --clip-url '$SRC' --brief 'just make it pop' --run-id h-motion-1 --think-tokens 0" ;;
+  car)    CMD="modal run --detach chatcut_job_app.py::main --clip-url '$SRC' --brief 'just make it pop' --run-id h-car-1 --think-tokens 0" ;;
   *) echo "unknown stage"; exit 2 ;;
 esac
 rm -f "$LOG" "$RC"; nohup sh -c "$CMD > $LOG 2>&1; echo \$? > $RC" >/dev/null 2>&1 &

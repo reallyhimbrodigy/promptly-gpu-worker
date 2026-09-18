@@ -1075,14 +1075,17 @@ def prestage(access_token, title_text, controls=None, source_path=None,
             _r = call("create_motion_graphic_from_code",
                       {"projectId": pid, "name": _n, "code": _c["code"],
                        "width": w, "height": h, "durationInSeconds": 5,
-                       "properties": _c["properties"]}, 100 + _i)
+                       "properties": normalise_properties(_c["properties"])}, 100 + _i)
             _ov = _c.get("overrides") or {}
+            _ref = registration_refusal(_r)
+            if _ref:
+                return _n, None, ["ChatCut refused the registration: %s" % _ref]
             _v = _find(_r, "validation") or {}
             if _v.get("errors"):
                 return _n, None, _v["errors"][:2]
             _aid_ = asset_id_from(_r)
             if not _aid_:
-                return _n, None, ["registered without an id — the response carried none this reader could find: %s" % str(_r.get("_text") or _r)[:160]]
+                return _n, None, ["registered without an id — the response carried none this reader could find: %s" % str(_r.get("_text") or _r)[:900]]
             return _n, ({"assetId": _aid_, "overrides": _ov} if _ov else _aid_), None
         except Exception as e:                                    # noqa: BLE001
             return _n, None, [f"{type(e).__name__}: {e}"][:1]
@@ -4122,6 +4125,38 @@ def stage_line(marks, wall_s):
     return txt, st
 
 
+def normalise_properties(props):
+    """The property list as ChatCut's validator takes it. PURE.
+
+    Measured 2026-09-18 (regprobe, StatCard): `MCP error -32602 ... path
+    ["properties", 1, "options", 0] ... expected object, received string`.
+    The baked registry carries a select's options as strings; the acceptor
+    wants objects. Every other field passes through untouched, so a second
+    refusal would name a different path, never this one again.
+    """
+    out = []
+    for p in (props or []):
+        if not isinstance(p, dict):
+            out.append(p); continue
+        q = dict(p)
+        if isinstance(q.get("options"), list):
+            q["options"] = [({"value": o, "label": str(o)} if not isinstance(o, dict) else o) for o in q["options"]]
+        out.append(q)
+    return out
+
+
+def registration_refusal(envelope):
+    """The validator's own words out of a refused registration, or None. PURE."""
+    txt = str((envelope or {}).get("_text") or "") if isinstance(envelope, dict) else ""
+    if not txt:
+        for c in ((envelope or {}).get("content") or []) if isinstance(envelope, dict) else []:
+            if isinstance(c, dict) and c.get("type") == "text":
+                txt += c.get("text") or ""
+    if "-32602" in txt or "Input validation" in txt:
+        return txt[:900]
+    return None
+
+
 def asset_id_from(envelope):
     """The asset id ChatCut returned, wherever it put it. -> str or None.
 
@@ -6218,6 +6253,32 @@ def egress(out: str = "/tmp/bs/egress.json"):
     r = egress_probe.remote()
     os.makedirs(os.path.dirname(out), exist_ok=True)
     json.dump(r, open(out, "w"), indent=1); print("WROTE %s" % out)
+
+@app.function(image=IMG, timeout=300, cpu=2, memory=2048, secrets=[modal.Secret.from_name("chatcut-oauth")])
+def probe_register(name: str = "StatCard"):
+    """ONE create_motion_graphic_from_code, its full answer. NO MODEL CALL.
+    The probe's plants and 28 of 36 inventory components were refused with
+    'MCP error -32602: Input validation ...' cut at 160 chars (2026-09-18)."""
+    tok = _access_token()
+    reg = json.load(open("/craft/chatcut_registry_baked.json", encoding="utf-8")); comps = reg.get("components") or reg
+    c = comps.get(name) or {}
+    proj = _mcp_call(tok, "create_project", {"name": "regprobe-%d" % int(time.time())}, expect=None)
+    pid = _deep_find(proj, "projectId") or _deep_find(proj, "id")
+    r = mcp_rpc(tok, "tools/call", {"name": "create_motion_graphic_from_code", "arguments": {
+        "projectId": pid, "name": name, "code": c.get("code"), "width": 1080, "height": 1920, "durationInSeconds": 5, "properties": normalise_properties(c.get("properties"))}}, 901)
+    out = {"name": name, "projectId": pid, "props_n": len(c.get("properties") or []), "code_chars": len(c.get("code") or ""),
+           "properties_head": json.dumps(c.get("properties"))[:600], "response": json.dumps(r)[:3000]}
+    print("  REGPROBE        : %s" % json.dumps(out)[:2800], flush=True)
+    RESULTS["regprobe"] = out
+    return out
+
+
+@app.local_entrypoint()
+def regprobe(name: str = "StatCard", out: str = "/tmp/bs/regprobe.json"):
+    from require_detach import require_detach
+    require_detach("the registration probe")
+    r = probe_register.remote(name)
+    os.makedirs(os.path.dirname(out), exist_ok=True); json.dump(r, open(out, "w"), indent=1); print("WROTE %s" % out)
 
 @app.local_entrypoint()
 def roundtrip(clip_url: str = "", out: str = "/tmp/bs/roundtrip.json"):

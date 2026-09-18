@@ -1124,6 +1124,46 @@ def main():
     check("a registration without an id is returned as a refusal, never counted as registered",
           _guards == ["not _aid_"] and any(isinstance(n, ast.Call) and ast.unparse(n.func) == "asset_id_from" for n in ast.walk(_ro)), "guards=%s" % _guards)
 
+    # ---- A REFUSED PREFLIGHT STANDS FOR EVERY LATER CALL (the CLI retried a 409 and paid the cold write) ----
+    _saved5 = (PX.CONNECTION, PX.TRACE, PX.FINGERPRINTS, PX.FIRST_BODY, PX.EXPECT_SYSTEM, PX.PREFLIGHT_DONE, PX.PREFLIGHT_REFUSED, PX.RUN_FIRST_TEXT)
+    try:
+        PX.CONNECTION = _FakeConn; PX.TRACE = tempfile.mktemp(suffix=".jsonl"); PX.FINGERPRINTS = tempfile.mktemp(suffix=".jsonl"); PX.FIRST_BODY = tempfile.mktemp(suffix=".json")
+        PX.EXPECT_SYSTEM = ["S1"]; PX.PREFLIGHT_DONE = False; PX.PREFLIGHT_REFUSED = None; PX.RUN_FIRST_TEXT = ""
+        _FakeConn.last = {}
+        _port5 = PX.serve(0)
+        _codes = []
+        for _i in range(2):
+            _rq = _ur2.Request("http://127.0.0.1:%d/v1/messages" % _port5, data=json.dumps({"model": "m", "tools": [], "system": [{"type": "text", "text": "S1 changed"}], "messages": []}).encode(), method="POST", headers={"Content-Type": "application/json"})
+            try:
+                _ur2.urlopen(_rq, timeout=20); _codes.append(200)
+            except _ur2.HTTPError as _he:
+                _codes.append(_he.code)
+        for _i in range(20):
+            if _FakeConn.last.get("body"):
+                break
+            _tm_.sleep(0.05)
+    finally:
+        PX.CONNECTION, PX.TRACE, PX.FINGERPRINTS, PX.FIRST_BODY, PX.EXPECT_SYSTEM, PX.PREFLIGHT_DONE, PX.PREFLIGHT_REFUSED, PX.RUN_FIRST_TEXT = _saved5
+    check("a refused preflight refuses the CLI's retry too, and nothing ever reaches upstream", _codes == [409, 409] and not _FakeConn.last.get("body"), "codes=%s forwarded=%s" % (_codes, bool(_FakeConn.last.get("body"))))
+    _st_sh = io.open(os.path.join(HERE, "scripts", "h_stage.sh"), encoding="utf-8").read()
+    check("the no-speech and car stages run on the off arm, the arm the batch's ping carries (an adaptive stage against an off-arm ping was refused, retried, and paid)",
+          all(("--run-id h-%s-1 --think-tokens 0" % k) in _st_sh for k in ("motion", "car")))
+
+    # ---- REGISTRATION: select options as the acceptor's objects; a refusal named in the validator's words ----
+    _np = J.normalise_properties([{"key": "anchor", "type": "select", "defaultValue": "center", "options": ["center", "top"]}, {"key": "decimals", "type": "number", "defaultValue": 0}, {"key": "x", "type": "select", "options": [{"value": "a", "label": "A"}]}])
+    check("select options become {value, label} objects; other fields and already-object options pass through untouched",
+          _np[0]["options"] == [{"value": "center", "label": "center"}, {"value": "top", "label": "top"}] and _np[1] == {"key": "decimals", "type": "number", "defaultValue": 0}
+          and _np[2]["options"] == [{"value": "a", "label": "A"}], "%s" % _np)
+    _refusal_env = {"content": [{"type": "text", "text": 'MCP error -32602: Input validation error: Invalid arguments for tool create_motion_graphic_from_code: [ { "expected": "object", "code": "invalid_type", "path": ["properties", 1, "options", 0], "message": "Invalid input: expected object, received string" } ]'}]}
+    _rr = J.registration_refusal({"_text": _refusal_env["content"][0]["text"]})
+    check("a -32602 refusal is returned in the validator's own words (path and message), and an ordinary answer is not a refusal",
+          _rr is not None and '"path": ["properties", 1, "options", 0]' in _rr and J.registration_refusal({"_text": "Created asset abcdef0123"}) is None, "%r" % (_rr or "")[:120])
+    _ro2 = next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "_register_one")
+    _ro2_calls = [ast.unparse(n.func) for n in ast.walk(_ro2) if isinstance(n, ast.Call)]
+    check("every registration goes through the normaliser and a refusal is returned before any id is looked for",
+          "normalise_properties" in _ro2_calls and "registration_refusal" in _ro2_calls
+          and _ro2_calls.index("registration_refusal") < _ro2_calls.index("asset_id_from"), "%s" % [c for c in _ro2_calls if c in ("normalise_properties", "registration_refusal", "asset_id_from")])
+
     # ---- EVERY RUN-TIME IMPORT IS MOUNTED (the rewatch probe, 2026-09-17) ----
     _tree = ast.parse(src)
     _mounted = set(re.findall(r'"/root/([A-Za-z_][A-Za-z0-9_]*)\.py"', src))

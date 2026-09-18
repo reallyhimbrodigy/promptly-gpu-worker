@@ -106,6 +106,7 @@ EXPECT_SYSTEM = None
 # thinking and effort, and a mismatch is refused here like a system diff.
 EXPECT_FIELDS = None      # {"thinking": ..., "effort": ...} from the ping's request
 PREFLIGHT_DONE = False
+PREFLIGHT_REFUSED = None  # the refusal, once made, stands for every later call: the CLI retries a 409
 # THE OS LINE, PINNED. The CLI writes "OS Version: <uname release>" into its
 # environment section and Modal's fleet is not one kernel; two containers of
 # one image can differ there, and every byte after the system block then
@@ -383,11 +384,19 @@ class H(http.server.BaseHTTPRequestHandler):
             try:
                 body = json.loads(raw.decode("utf-8"))
                 body, pinned = pin_os_line(body)
-                global PREFLIGHT_DONE
+                global PREFLIGHT_DONE, PREFLIGHT_REFUSED
                 if not PREFLIGHT_DONE:
                     PREFLIGHT_DONE = True
                     ok, rep_ = preflight(body, EXPECT_SYSTEM, EXPECT_FIELDS)
                     _trace({"phase": "preflight", **rep_})
+                    if not ok:
+                        PREFLIGHT_REFUSED = rep_
+                elif PREFLIGHT_REFUSED is not None:
+                    ok, rep_ = False, {**PREFLIGHT_REFUSED, "state": "REFUSED AGAIN (the CLI retried)"}
+                    _trace({"phase": "preflight", **rep_})
+                else:
+                    ok = True
+                if True:
                     if not ok:
                         # REFUSED BEFORE IT IS PAID FOR: nothing goes upstream
                         msg = json.dumps({"type": "error", "error": {"type": "preflight_refused", "message": "system differs from the ping: %s" % json.dumps(rep_)[:600]}}).encode()
