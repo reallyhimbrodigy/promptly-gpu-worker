@@ -117,13 +117,20 @@ def inject_watch_breakpoint(body, run_first_text):
         return body, {"injected": False, "why": "no run_first_text or no messages"}
     b = json.loads(json.dumps(body))
     msgs = b["messages"]
+    # THE RUN'S FIRST MESSAGE: the LAST user-role message carrying the text.
+    # The first ping marked message 0 — the CLI's own system-role message at
+    # index 1 contains "ping" as a substring ("skipping"), and a first-match
+    # over every role took it (measured 2026-09-18: 1h entry covered 55k of
+    # 226k). User role only, last match, so a watch that quotes the sentinel
+    # cannot steal it either.
     first = None
     for i, m in enumerate(msgs):
+        if m.get("role") != "user":
+            continue
         c = m.get("content")
         texts = [x.get("text", "") for x in c if isinstance(x, dict) and x.get("type") == "text"] if isinstance(c, list) else [str(c or "")]
         if any(run_first_text in t for t in texts):
             first = i
-            break
     if first is None or first == 0:
         return body, {"injected": False, "why": "run_first_text not found in any message" if first is None else "run's first message is message 0 — no watch before it"}
     idx = first - 1

@@ -844,6 +844,17 @@ def main():
           and _sys_ttl == ["1h", "1h"] and _note.get("breakpoints") == 4 and _note.get("dropped_cli_markers") == [4]
           and _wb["messages"][3]["content"][-1].get("cache_control") is None,
           "note=%s marks=%s sys=%s" % (_note, _marks, _sys_ttl))
+    # a system-role message carrying the text (the CLI's own "skipping" matched "ping") and an earlier user quote are both passed over
+    _wb2 = json.loads(json.dumps(_wb)); _wb2["messages"][1]["content"][0]["text"] = "skipping ahead — THE COMPONENT INVENTORY was mentioned"; _wb2["messages"][2]["role"] = "user"
+    _wb2["messages"][5]["content"][0]["text"] = "reminder: THE COMPONENT INVENTORY is above"   # a system-role message AFTER the run's first message: the role filter is what keeps the mark on 3
+    _ob3, _note3 = PX.inject_watch_breakpoint(_wb2, "THE COMPONENT INVENTORY")
+    check("only user-role messages count and the LAST match is the run's first message (a system-role 'skipping' once stole the mark)",
+          _note3.get("run_first_message") == 4 and _note3.get("watch_end_message") == 3, "%s" % _note3)
+    _kw0 = next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "keep_warm")
+    check("the ping's sentinel is distinctive, and the ping sends exactly it",
+          "ping" != J.RUN_FIRST_TEXT_PING and len(J.RUN_FIRST_TEXT_PING) > 20
+          and any(isinstance(n, ast.Name) and n.id == "RUN_FIRST_TEXT_PING" for n in ast.walk(_kw0)) and not any(isinstance(n, ast.Constant) and n.value == "ping" for n in ast.walk(_kw0)),
+          "%r" % J.RUN_FIRST_TEXT_PING)
     _ob2, _note2 = PX.inject_watch_breakpoint(_wb, "NOT IN ANY MESSAGE")
     check("with no run-first text found nothing is rewritten and the note says so", _ob2 is _wb and _note2.get("injected") is False and "not found" in _note2.get("why", ""), "%s" % _note2)
     # the rewritten body is what goes upstream (through the tunnel, with RUN_FIRST_TEXT set)
@@ -868,7 +879,7 @@ def main():
                   if any(isinstance(a, ast.Attribute) and a.attr == "RUN_FIRST_TEXT" for a in ast.walk(n))]
     _m1t = next(b.get("text") for b in J.pass1_message(None, [], os.path.join(HERE, "sheet", "INVENTORY.png"), source_watch=None, deciding="x")["message"]["content"] if b.get("type") == "text")
     check("job and ping both hand the proxy their run-first text, and the job's first message really starts with it",
-          {"edit", "keep_warm"} <= set(_rft_sites) and _m1t.startswith(J.RUN_FIRST_TEXT_JOB) and J.RUN_FIRST_TEXT_PING == "ping",
+          {"edit", "keep_warm"} <= set(_rft_sites) and _m1t.startswith(J.RUN_FIRST_TEXT_JOB) and len(J.RUN_FIRST_TEXT_PING) > 20,
           "sites=%s first=%r" % (_rft_sites, _m1t[:40]))
     # ---- THE API'S OWN ANSWER IS A TERMINAL, NEVER THE AGENT'S FAULT; NOTHING EXPORTS AFTER A TERMINAL ----
     class _Inv400:

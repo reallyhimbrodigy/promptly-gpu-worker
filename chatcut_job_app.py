@@ -4038,7 +4038,7 @@ def cli_command(sid, model, use_hands=False, agents=None, partial=True, effort=N
 
 
 RUN_FIRST_TEXT_JOB = "THE COMPONENT INVENTORY"   # the first text of pass1_message: what the proxy finds the watch's end by
-RUN_FIRST_TEXT_PING = "ping"
+RUN_FIRST_TEXT_PING = "KEEP-WARM PING FROM THE HARNESS: reply pong"   # distinctive: "ping" alone matched "skipping" in the CLI's own message
 
 @app.function(image=IMG, timeout=900, cpu=4, memory=8192,
               # SECTION B: the container's imports and CLI are snapshotted
@@ -5521,7 +5521,7 @@ def keep_warm(model: str = "claude-sonnet-5", proxy: bool = True, base_url: str 
         # the experiment: the REAL endpoint, but named through the env var —
         # does the variable's presence alone change what the CLI sends?
         env["ANTHROPIC_BASE_URL"] = base_url
-    msg = _message([{"type": "text", "text": "ping"}])
+    msg = _message([{"type": "text", "text": RUN_FIRST_TEXT_PING}])
     res = {}
 
     def _on(ev, send, close, kill=None):
