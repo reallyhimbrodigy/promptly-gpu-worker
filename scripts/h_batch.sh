@@ -17,17 +17,20 @@ verdict() { python3 "$SC/batch_verdict.py" "$1" > $B/verdict.txt; rc=$?; log "$(
 mp4() { runid=$1; out=$2; (cd $D && modal run chatcut_read_result.py --run-id "$runid-mp4" --out "$out.json" > $B/read_$runid.log 2>&1); python3 "$SC/batch_mp4.py" "$out" > $B/mp4.txt; log "$(cat $B/mp4.txt)"; }
 cap_or_stop() { if over_cap; then log "STOP: spend cap (\$$(spend))"; exit 6; fi; log "spend so far: \$$(spend)"; }
 log "BATCH START $(date '+%H:%M:%S')"
-# 1. the ping (the 1h watch-end breakpoint; its system text is what the preflight compares against)
-idle; sh $SC/h_stage.sh warm >> $LEDGER 2>&1; while [ ! -f /tmp/bs/h_warm.rc ]; do sleep 10; done; sleep 5
-WL=$(/usr/bin/grep -E "  WARM            :" /tmp/bs/h_warm.log | tail -1); log "$WL"
-if /usr/bin/grep -q "Credit balance is too low" /tmp/bs/h_warm.log; then log "STOP: the ping was refused (credits)"; exit 3; fi
-echo "$WL" | /usr/bin/grep -qE "write=[0-9]+ .* rc=0" || { log "STOP: the ping did not succeed: $WL"; exit 3; }
+# THE PING, per arm: it must carry the job's thinking and effort (a ping at adaptive leaves no entry a job at disabled can read)
+ping() { st=$1; idle; rm -f /tmp/bs/h_$st.rc; sh $SC/h_stage.sh $st >> $LEDGER 2>&1; while [ ! -f /tmp/bs/h_$st.rc ]; do sleep 10; done; sleep 5
+  WL=$(/usr/bin/grep -E "  WARM            :" /tmp/bs/h_$st.log | tail -1); log "$WL"
+  if /usr/bin/grep -q "Credit balance is too low" /tmp/bs/h_$st.log; then log "STOP: the ping was refused (credits)"; exit 3; fi
+  echo "$WL" | /usr/bin/grep -qE "write=[0-9]+ .* rc=0" || { log "STOP: the ping did not succeed: $WL"; exit 3; }; }
+# 1. the off-arm ping (the 1h watch-end breakpoint; its system text and thinking are what the preflight compares against)
+ping warm
 # 2. H1 — thinking off: the preflight, the cross-run proof, the within-run assertion
 stage th0 h-th-think0 $B/th0.json || exit 4
 verdict $B/th0.json; rc=$?
 [ $rc -eq 0 ] || { log "STOP: A is red on H1 (rc=$rc) — nothing else fires"; exit 5; }
 mp4 h-th-think0 $B/th0.mp4; cap_or_stop
-# 3. F's second arm: effort low (the API refuses a token budget on this model)
+# 3. F's second arm: effort low (the API refuses a token budget on this model) — its own ping, same thinking/effort
+ping warmlow
 stage thlow h-th-low $B/thlow.json || exit 4
 verdict $B/thlow.json; rc=$?; [ $rc -ne 2 ] || { log "STOP: API refusal on the low arm"; exit 5; }
 mp4 h-th-low $B/thlow.mp4; cap_or_stop

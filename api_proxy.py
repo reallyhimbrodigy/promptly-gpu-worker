@@ -98,6 +98,13 @@ THINKING_BUDGET = int(os.environ.get("API_PROXY_THINKING_BUDGET", "0") or 0)
 # the $1 cold write is paid, and the refusal names the block and the bytes.
 # EXPECT_SYSTEM: the ping's system texts (list[str]) — None disables the check.
 EXPECT_SYSTEM = None
+# THE THINKING PARITY (measured 2026-09-18 on H1 of the Part 3 batch): tools,
+# system and all 25 watch messages identical to the ping's, preflight PASSED,
+# and call 1 still read 0 — the ping ran thinking adaptive, the job disabled,
+# and the API invalidates message-level cache entries when the thinking
+# parameters change (system and tools stay). The ping must carry the job's
+# thinking and effort, and a mismatch is refused here like a system diff.
+EXPECT_FIELDS = None      # {"thinking": ..., "effort": ...} from the ping's request
 PREFLIGHT_DONE = False
 # THE OS LINE, PINNED. The CLI writes "OS Version: <uname release>" into its
 # environment section and Modal's fleet is not one kernel; two containers of
@@ -123,7 +130,7 @@ def pin_os_line(body):
     return (b if changed else body), changed
 
 
-def preflight(body, expect):
+def preflight(body, expect, expect_fields=None):
     """-> (ok, report). Compares the request's non-billing system blocks with the
     ping's. PURE."""
     if expect is None:
@@ -138,6 +145,12 @@ def preflight(body, expect):
             k = next((j for j, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
             return False, {"state": "REFUSED", "block": i, "ping_bytes": len(a), "job_bytes": len(b), "first_diff_at": k,
                            "ping_context": a[max(0, k - 80): k + 80], "job_context": b[max(0, k - 80): k + 80]}
+    if isinstance(expect_fields, dict):
+        mine = {"thinking": body.get("thinking"), "effort": (body.get("output_config") or {}).get("effort")}
+        theirs = {"thinking": expect_fields.get("thinking"), "effort": expect_fields.get("effort")}
+        if mine != theirs:
+            return False, {"state": "REFUSED", "why": "thinking/effort differ from the ping's — the API drops message cache entries on a thinking change",
+                           "ping": theirs, "job": mine}
     return True, {"state": "PASSED", "blocks": len(got)}
 
 
@@ -373,7 +386,7 @@ class H(http.server.BaseHTTPRequestHandler):
                 global PREFLIGHT_DONE
                 if not PREFLIGHT_DONE:
                     PREFLIGHT_DONE = True
-                    ok, rep_ = preflight(body, EXPECT_SYSTEM)
+                    ok, rep_ = preflight(body, EXPECT_SYSTEM, EXPECT_FIELDS)
                     _trace({"phase": "preflight", **rep_})
                     if not ok:
                         # REFUSED BEFORE IT IS PAID FOR: nothing goes upstream

@@ -2729,7 +2729,7 @@ def tile_sheets(entries, out_dir, per_sheet=SHEET_PER, cols=SHEET_COLS,
 
 
 def watch_asset(tok, asset_id, dur_s, out_dir, fps=2.0, per_sheet=20, cols=5,
-                cell_w=180, rpc=None):
+                cell_w=180, rpc=None, fetch=None):
     """Watch an asset THROUGH ChatCut: inspect_asset, dense, native, aligned.
 
     ONE INSTRUMENT FOR SEEING (Zac, 2026-09-17): the references were watched
@@ -2777,7 +2777,9 @@ def watch_asset(tok, asset_id, dur_s, out_dir, fps=2.0, per_sheet=20, cols=5,
         urls += _cr.frame_urls(r)
         if ci == 0:
             tx.append(_cr.transcript_lines(_cr.structured(r)))
-    got, fst = _cr.fetch(urls, out_dir, cap=len(times) + 5)
+    got, ftiming = (fetch or fetch_frames)(urls[:len(times) + 5], out_dir, name="s")
+    fst = "fetched %d of %d in %ss (p50 %ss, max %ss, failed %d)" % (ftiming["got"], ftiming["n"], ftiming["wall_s"], ftiming["p50_s"], ftiming["max_s"], ftiming["failed"])
+    out["fetch"] = ftiming
     if not got:
         out["state"], out["why"] = "ABSENT", "inspect_asset returned %d frame url(s); %s" % (len(urls), fst)
         return out
@@ -3162,6 +3164,37 @@ def _fetch_frames(urls, out_dir, already):
         ("; %d failed: %s" % (len(failed), failed[:2])) if failed else "")
 
 
+FETCH_TIMEOUT_S = 15    # a signed frame URL that has not answered in 15s is ABSENT, not waited on for 60
+
+
+def fetch_frames(urls, out_dir, timeout_s=FETCH_TIMEOUT_S, workers=8, name="f"):
+    """Every URL at once, each bounded. -> (got [(i, path)], timing dict).
+    The serial fetch with a 60s timeout took 121.8s for 40 frames in one
+    rewatch and 137.5s in the source watch (Part 3 batch H1) — the agent
+    placed blind. Per-URL seconds are kept so a slow CDN is named, not
+    inferred."""
+    from concurrent.futures import ThreadPoolExecutor
+    import urllib.request as _ur
+    os.makedirs(out_dir, exist_ok=True)
+    def _get(iu):
+        i, u = iu
+        pth = os.path.join(out_dir, "%s%03d.jpg" % (name, i)); t0 = time.time()
+        try:
+            with _ur.urlopen(u, timeout=timeout_s) as rsp:
+                open(pth, "wb").write(rsp.read())
+            return (i, pth, round(time.time() - t0, 2), None)
+        except Exception as e:                                    # noqa: BLE001
+            return (i, None, round(time.time() - t0, 2), "%s: %s" % (type(e).__name__, str(e)[:60]))
+    t0 = time.time()
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        rows = list(ex.map(_get, list(enumerate(urls))))
+    secs = sorted(r[2] for r in rows)
+    timing = {"n": len(rows), "got": sum(1 for r in rows if r[1]), "failed": sum(1 for r in rows if not r[1]),
+              "wall_s": round(time.time() - t0, 2), "p50_s": (secs[len(secs) // 2] if secs else None), "max_s": (secs[-1] if secs else None),
+              "errors": sorted({r[3] for r in rows if r[3]})[:4], "timeout_s": timeout_s}
+    return [(r[0], r[1]) for r in rows if r[1]], timing
+
+
 def _preview_frames(tok, pid, total_frames, fps=30, density_fps=2.0, mark=None, per_call=9, workers=5, out_dir=None):
     """THE REWATCH INSTRUMENT, PICKED (ruling 5, measured 2026-09-17 on one
     scratch timeline carrying three planted defects, 40 frames each):
@@ -3196,17 +3229,8 @@ def _preview_frames(tok, pid, total_frames, fps=30, density_fps=2.0, mark=None, 
     out_dir = out_dir or ("/work/preview_%d" % int(time.time()))
     os.makedirs(out_dir, exist_ok=True)
 
-    def _get(iu):
-        i, u = iu
-        pth = os.path.join(out_dir, "f%03d.jpg" % i)
-        try:
-            with _ur.urlopen(u, timeout=60) as rsp:
-                open(pth, "wb").write(rsp.read())
-            return (i, pth)
-        except Exception:                                         # noqa: BLE001
-            return (i, None)
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        got = [g for g in ex.map(_get, list(enumerate(urls))) if g[1]]
+    got, ftiming = fetch_frames(urls, out_dir)
+    print("  REWATCH FETCH   : %s" % json.dumps(ftiming), flush=True)
     if mark:
         mark("fetch")
     if not got:
@@ -3787,7 +3811,7 @@ def _says(text, *words):
 
 
 def run_three_turns(invoke, rewatch, first_message, cap=TURN_CAP,
-                    clock=time.time, run_timeout=RUN_TIMEOUT_S):
+                    clock=time.time, run_timeout=RUN_TIMEOUT_S, t0=None):
     """THE THREE STRATEGIC TURNS, THE HARNESS FETCHING BETWEEN THEM. -> tm
 
     Zac's rulings of 2026-09-17: each turn is ONE API call that ends at the
@@ -3801,7 +3825,10 @@ def run_three_turns(invoke, rewatch, first_message, cap=TURN_CAP,
     in,out}, wall, ttft, killed}; `rewatch(n, final)` -> {message, ...}. Both
     are injectable so the machine is driven by a check, not a $ run.
     """
-    t0 = clock()
+    # THE BOUND COUNTS FROM THE JOB'S START when the caller says so: H1 of the
+    # Part 3 batch reached turn 3 at 433s of job wall because this clock began
+    # at turn 1 (159s in). Ruling 3's 300s is the run's, not the machine's.
+    t0 = clock() if t0 is None else t0
     tm = {"turns": [], "terminal": None, "verdict": None, "cap": cap,
           "cold_write": None, "rewatches": []}
     call1 = {}
@@ -4577,12 +4604,10 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
          "watched the ten reference edits; they are the standard.\n\n"
          % (_ids_line, _libn))
         + _base_line + _prior_line +
-        "An edit_item add takes assetId, trackId, fromFrame and "
-        "durationInFrames. A track-bound effect also takes trackBoundFrom "
-        "and trackBoundDurationInFrames. A component's text goes in "
-        "propertyOverrides. Caption edits take the revision "
-        "read_captions returns — Card edits AND track-wide ones "
-        "like set_max_characters.\n\n"
+        # the older sentence here named trackBoundFrom/trackBoundDurationInFrames
+        # and a captions revision; the first add of the Part 3 batch's H1 was
+        # refused for those very fields. The accepted shape is stated once, below.
+        ""
         "Your %d ChatCut tools are loaded and the ChatCut guide is already "
         "in your context.\n\n"
         "THE BRIEF: %s\n\n"
@@ -4734,6 +4759,9 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
             try:
                 _w0 = WARM.get("last") if "last" in WARM else None
                 _px.EXPECT_SYSTEM = _w0.get("system_wire") if isinstance((_w0 or {}).get("system_wire"), list) else None
+                _rf0 = (_w0 or {}).get("request_fields") or {}
+                _px.EXPECT_FIELDS = ({"thinking": _rf0.get("thinking"), "effort": (_rf0.get("output_config") or {}).get("effort")}
+                                     if isinstance(_rf0, dict) and _rf0.get("thinking") is not None else None)
             except Exception:                                     # noqa: BLE001
                 _px.EXPECT_SYSTEM = None
         print("  PREFLIGHT       : %s" % ("armed against the ping's %d system block(s)" % len(_px.EXPECT_SYSTEM) if _px.EXPECT_SYSTEM else "not armed (no ping system text on record, or development shape)"), flush=True)
@@ -4934,8 +4962,8 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
             pass
         return out
 
-    _run_t0 = time.time()
-    _tm = run_three_turns(_invoke, _rewatch, _first_message)
+    _run_t0 = t0                    # the job's own start: every bound counts from it
+    _tm = run_three_turns(_invoke, _rewatch, _first_message, t0=t0)
     mark("agent")
     _tm["whys"] = _shim_whys()
     # THE THINKING ARM, AS SENT (not as named): measured through the proxy
@@ -5650,7 +5678,7 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
 @app.function(image=IMG, timeout=300, cpu=2, memory=4096,
               secrets=[modal.Secret.from_name("chatcut-oauth"),
                        modal.Secret.from_name("anthropic-api-key")])
-def keep_warm(model: str = "claude-sonnet-5", proxy: bool = True, base_url: str = "", prefix_ttl: str = "1h"):
+def keep_warm(model: str = "claude-sonnet-5", proxy: bool = True, base_url: str = "", prefix_ttl: str = "1h", think_tokens: int = 0, effort: str = ""):
     """ONE PING AGAINST THE BYTE-IDENTICAL PREFIX, so the watch stays warm.
 
     Zac, ruling 1 (2026-09-17): one ping per 55 minutes on the 1h TTL. The
@@ -5666,7 +5694,9 @@ def keep_warm(model: str = "claude-sonnet-5", proxy: bool = True, base_url: str 
     tok = _access_token()
     sid = install_watch("/work")
     write_cli_context(tok)
-    env = {"ENABLE_TOOL_SEARCH": "false", "MAX_THINKING_TOKENS": str(DEFAULT_THINK_TOKENS)}
+    # THE PING CARRIES THE JOB'S THINKING AND EFFORT: a ping at adaptive left no
+    # usable entry for a job at disabled (H1, 2026-09-18). Default 0 = the off arm.
+    env = {"ENABLE_TOOL_SEARCH": "false", "MAX_THINKING_TOKENS": "0" if think_tokens == 0 else str(think_tokens if think_tokens > 0 else DEFAULT_THINK_TOKENS)}
     sys.path.insert(0, "/root")
     import turn_clock
     # `proxy`: the same ping THROUGH the recording proxy — the first job run
@@ -5696,7 +5726,7 @@ def keep_warm(model: str = "claude-sonnet-5", proxy: bool = True, base_url: str 
             except Exception:                                     # noqa: BLE001
                 pass
     rc, err, wall, killed = turn_clock.run_timed(
-        cli_command(sid, model) + ["--max-turns", "1"], "/work", "/work/warm_stream.jsonl",
+        cli_command(sid, model, effort=(effort or None)) + ["--max-turns", "1"], "/work", "/work/warm_stream.jsonl",
         "/work/warm_timing.json", RUN_TIMEOUT_S, env=env, stdin_first=json.dumps(msg), on_event=_on)
     u = res.get("usage") or {}
     _cc = u.get("cache_creation") or {}
@@ -5763,10 +5793,10 @@ def keep_warm(model: str = "claude-sonnet-5", proxy: bool = True, base_url: str 
 
 
 @app.local_entrypoint()
-def warm(proxy: bool = True, base_url: str = ""):
+def warm(proxy: bool = True, base_url: str = "", think_tokens: int = 0, effort: str = ""):
     from require_detach import require_detach
     require_detach("the keep-warm ping")
-    print(json.dumps(keep_warm.remote(proxy=proxy, base_url=base_url))[:3000])
+    print(json.dumps(keep_warm.remote(proxy=proxy, base_url=base_url, think_tokens=think_tokens, effort=effort))[:3000])
 
 
 @app.function(image=IMG, timeout=900, cpu=4, memory=8192,

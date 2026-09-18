@@ -14,6 +14,7 @@ import os
 import random
 import sys
 import tempfile
+import time
 import json
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -117,6 +118,15 @@ PROBE_ITEMS = [
   "trackId": "bbb5eeb0-c02e-4d9a-9855-2495e734d115"
  }
 ]
+
+
+def _fake_frame_fetch(urls, out_dir, timeout_s=15, workers=8, name="s"):
+    """the watch legs never touch the network: every URL becomes a tiny jpeg on disk (a different _fake_fetch lives inside main)"""
+    from PIL import Image as _PI
+    os.makedirs(out_dir, exist_ok=True); got = []
+    for i, _u in enumerate(urls):
+        pth = os.path.join(out_dir, "%s%03d.jpg" % (name, i)); _PI.new("RGB", (36, 64), (10, 20, 30)).save(pth, "JPEG"); got.append((i, pth))
+    return got, {"n": len(urls), "got": len(urls), "failed": 0, "wall_s": 0.0, "p50_s": 0.0, "max_s": 0.0, "errors": [], "timeout_s": timeout_s}
 
 
 def main():
@@ -412,7 +422,7 @@ def main():
         return got, "SERVED %d of %d" % (len(got), len(urls))
     _cr.fetch = _fake_fetch
     try:
-        _w = J.watch_asset("t", "asset", 20.362, tempfile.mkdtemp(), rpc=_rpc)
+        _w = J.watch_asset("t", "asset", 20.362, tempfile.mkdtemp(), rpc=_rpc, fetch=_fake_frame_fetch)   # no network: the fetch is injected
     finally:
         _cr.fetch = _fetch0
     check("the source is watched through inspect_asset: 40 exact frames at 2fps in two calls",
@@ -1051,6 +1061,56 @@ def main():
                 _bounds.append((fn.name, ast.unparse(c.args[4])))
     check("every CLI invocation is bounded by the run bound or what is left of it, never a smaller number",
           _bounds and all(b in ("RUN_TIMEOUT_S", "_left") for _f, b in _bounds), "%s" % _bounds)
+
+    # ---- THINKING PARITY: the ping carries the job's thinking/effort, and the preflight refuses a mismatch ----
+    _okF, _rF = PX.preflight({"system": [{"type": "text", "text": "S"}], "thinking": {"type": "disabled"}, "output_config": {"effort": "high"}}, ["S"], {"thinking": {"type": "adaptive"}, "effort": "high"})
+    _okG, _rG = PX.preflight({"system": [{"type": "text", "text": "S"}], "thinking": {"type": "disabled"}, "output_config": {"effort": "high"}}, ["S"], {"thinking": {"type": "disabled"}, "effort": "high"})
+    check("the preflight refuses a job whose thinking differs from the ping's (the API drops message entries on that change) and passes a match",
+          not _okF and "thinking" in _rF.get("why", "") and _okG, "F=%s G=%s" % (_rF, _rG))
+    _kw2 = next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "keep_warm")
+    _kw_args = [a.arg for a in _kw2.args.args]
+    _kw_env = [ast.unparse(n.value) for n in ast.walk(_kw2) if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "env" for t in n.targets)]
+    check("the ping takes think_tokens and effort, sends MAX_THINKING_TOKENS=0 for the off arm, and passes effort to the command",
+          {"think_tokens", "effort"} <= set(_kw_args) and any("'0' if think_tokens == 0" in v for v in _kw_env)
+          and any(isinstance(n, ast.Call) and ast.unparse(n.func) == "cli_command" and any(k.arg == "effort" for k in n.keywords) for n in ast.walk(_kw2)),
+          "args=%s env=%s" % (_kw_args, _kw_env))
+    _ef_asg = [ast.unparse(n.value) for n in ast.walk(_edit_fn) if isinstance(n, ast.Assign) and any(isinstance(t, ast.Attribute) and t.attr == "EXPECT_FIELDS" for t in n.targets)]
+    check("the job arms the preflight with the ping's thinking and effort", any("request_fields" in v or "_rf0" in v for v in _ef_asg), "%s" % _ef_asg)
+    # ---- THE RUN BOUND COUNTS FROM THE JOB'S START ----
+    _late = J.run_three_turns(lambda n, m: {"rc": 1, "tool_calls": [], "text": "", "usage": {}}, lambda n, f: {}, {"type": "user"}, t0=time.time() - 400)
+    check("with the job's t0 400s ago the machine is RUN TIMEOUT before turn 1", (_late.get("terminal") or {}).get("kind") == "RUN TIMEOUT" and not _late["turns"], "%s" % _late.get("terminal"))
+    _t0_kw = [k for n in ast.walk(_edit_fn) if isinstance(n, ast.Call) and ast.unparse(n.func) == "run_three_turns" for k in n.keywords if k.arg == "t0"]
+    check("edit() hands the machine the job's own t0", len(_t0_kw) == 1 and ast.unparse(_t0_kw[0].value) == "t0")
+    # ---- THE FRAME FETCH: parallel, bounded, timed ----
+    import urllib.request as _urq3, time as _tm3
+    _saved_uo3 = _urq3.urlopen
+    class _Slow:
+        def __init__(self, u): self.u = u
+        def read(self): return b"\xff\xd8\xff" + b"x" * 10
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    def _fake_uo(u, timeout=15):
+        if "hang" in u:
+            _tm3.sleep(min(timeout, 0.6)); raise TimeoutError("timed out")
+        return _Slow(u)
+    _fd2 = tempfile.mkdtemp(prefix="ff_")
+    try:
+        _urq3.urlopen = _fake_uo
+        _t0f = _tm3.time(); _got, _tim = J.fetch_frames(["https://x/%d.jpg" % i for i in range(7)] + ["https://x/hang.jpg"], _fd2, timeout_s=0.5); _wf = _tm3.time() - _t0f
+    finally:
+        _urq3.urlopen = _saved_uo3
+    check("fetch_frames fetches every URL at once with a bound per URL, names the failure, and the wall is the bound, not the sum",
+          len(_got) == 7 and _tim["failed"] == 1 and _tim["got"] == 7 and _tim["errors"] and _wf < 2.0 and _tim["timeout_s"] == 0.5, "got=%d timing=%s wall=%.2f" % (len(_got), _tim, _wf))
+    _wa = next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "watch_asset")
+    _wa_calls = {ast.unparse(n.func) for n in ast.walk(_wa) if isinstance(n, ast.Call)}
+    _pf = next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "_preview_frames")
+    _pf_calls = {ast.unparse(n.func) for n in ast.walk(_pf) if isinstance(n, ast.Call)}
+    check("the source watch and the rewatch both fetch through fetch_frames (never the serial 60s fetch)",
+          any("fetch_frames" in c for c in _wa_calls) and "_cr.fetch" not in _wa_calls and "fetch_frames" in _pf_calls, "watch=%s preview=%s" % (sorted(c for c in _wa_calls if "fetch" in c), sorted(c for c in _pf_calls if "fetch" in c)))
+    check("the default fetch bound is 15s, not 60", J.FETCH_TIMEOUT_S == 15)
+    _para_all2 = "".join(n.value for n in ast.walk(_edit_fn) if isinstance(n, ast.Constant) and isinstance(n.value, str))
+    check("the deciding prompt no longer names trackBoundFrom or a captions revision (turn 1's add was refused for them)",
+          "trackBoundFrom" not in _para_all2 and "set_max_characters" not in _para_all2 and "revision" not in _para_all2)
 
     # ---- EVERY RUN-TIME IMPORT IS MOUNTED (the rewatch probe, 2026-09-17) ----
     _tree = ast.parse(src)
