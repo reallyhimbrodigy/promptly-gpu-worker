@@ -887,6 +887,20 @@ def main():
     check("the export is WITHHELD after any terminal (the floor once exported the untouched source after a 400)",
           len(_exp_if) == 1 and "WITHHELD" in ast.unparse(_exp_if[0].body[0]), "export ifs on terminal: %d" % len(_exp_if))
 
+    # ---- TTL BY ENVIRONMENT: 1h injects the watch-end breakpoint; 5m injects nothing ----
+    _ttl_asg = [ast.unparse(n.value) for n in ast.walk(_edit_fn) if isinstance(n, ast.Assign)
+                and any(isinstance(t, ast.Attribute) and t.attr == "RUN_FIRST_TEXT" for t in n.targets)]
+    check("the job hands the proxy its run-first text only at prefix_ttl 1h (development: 5m, no injection)",
+          _ttl_asg == ["RUN_FIRST_TEXT_JOB if prefix_ttl == '1h' else ''"], "assignments: %s" % _ttl_asg)
+    _kw = next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "keep_warm")
+    check("a 5-minute keep-warm ping is refused (the ping exists for the 1h shape only)",
+          any(isinstance(n, ast.Raise) and "1h production shape" in ast.unparse(n) for n in ast.walk(_kw))
+          and any(a.arg == "prefix_ttl" for a in _kw.args.args))
+    _main_fn = next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "main")
+    check("--prefix-ttl reaches edit() from main on both launch paths",
+          any(a.arg == "prefix_ttl" for a in _main_fn.args.args)
+          and sum(1 for n in ast.walk(_main_fn) if isinstance(n, ast.keyword) and n.arg == "prefix_ttl") == 2)
+
     # ---- EVERY RUN-TIME IMPORT IS MOUNTED (the rewatch probe, 2026-09-17) ----
     _tree = ast.parse(src)
     _mounted = set(re.findall(r'"/root/([A-Za-z_][A-Za-z0-9_]*)\.py"', src))

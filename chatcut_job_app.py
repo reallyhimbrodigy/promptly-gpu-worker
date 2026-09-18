@@ -4024,7 +4024,7 @@ RUN_FIRST_TEXT_PING = "ping"
                        modal.Secret.from_name("anthropic-api-key")])
 def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
          run_id: str = "latest", use_hands: bool = False, plan: str = "",
-         think_tokens: int = -1, effort: str = "", prestage_title: str = "",
+         think_tokens: int = -1, effort: str = "", prefix_ttl: str = "1h", prestage_title: str = "",
          prestage_controls: str = "", prestage_titles: str = "",
          transcript: str = "",
          # THE SUBTRACTION EXPERIMENT (2026-09-17). Same paragraph, same
@@ -4575,7 +4575,13 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         _px.FINGERPRINTS = "/work/prefix_calls.jsonl"
         _px.FIRST_BODY = "/work/req_first.json"
         _px.TRACE = "/work/proxy_trace.jsonl"
-        _px.RUN_FIRST_TEXT = RUN_FIRST_TEXT_JOB      # the watch-end breakpoint (ruling 2)
+        # TTL BY ENVIRONMENT (Zac, 2026-09-18): "1h" is the production shape —
+        # the proxy places the watch-end breakpoint at 1h and the hourly ping
+        # keeps it; "5m" is development — no ping, no injection, call 1 writes
+        # and calls 2+ read (the within-run assertion alone).
+        _px.RUN_FIRST_TEXT = RUN_FIRST_TEXT_JOB if prefix_ttl == "1h" else ""
+        print("  PREFIX TTL      : %s — %s" % (prefix_ttl, "watch-end breakpoint at 1h (production shape)" if prefix_ttl == "1h"
+                                                 else "no breakpoint injected; call 1 writes 5m, calls 2+ read (development)"), flush=True)
         _px_port, _px_ca = _px.serve_mitm(0, "/work/mitm")
         _env.update(_px.mitm_env(_px_port, _px_ca))
         print("  API PROXY       : MEASURED  transparent, HTTPS_PROXY=http://127.0.0.1:%d, CA %s"
@@ -4774,6 +4780,7 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     # with NO budget (the review call under "3000" thought 7,976 tokens);
     # --effort sets output_config.effort, default xhigh.
     _wire = [((c.get("fp") or {}).get("request_fields") or {}) for c in _read_prefix_rows()]
+    _tm["prefix_ttl"] = prefix_ttl
     _tm["thinking_arm"] = {"env": {k: v for k, v in _env.items() if k in ("MAX_THINKING_TOKENS",)},
                            "effort_flag": effort or None,
                            "asked": ("thinking {type: disabled}" if _env.get("MAX_THINKING_TOKENS") == "0"
@@ -5447,7 +5454,7 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
 @app.function(image=IMG, timeout=300, cpu=2, memory=4096,
               secrets=[modal.Secret.from_name("chatcut-oauth"),
                        modal.Secret.from_name("anthropic-api-key")])
-def keep_warm(model: str = "claude-sonnet-5", proxy: bool = True, base_url: str = ""):
+def keep_warm(model: str = "claude-sonnet-5", proxy: bool = True, base_url: str = "", prefix_ttl: str = "1h"):
     """ONE PING AGAINST THE BYTE-IDENTICAL PREFIX, so the watch stays warm.
 
     Zac, ruling 1 (2026-09-17): one ping per 55 minutes on the 1h TTL. The
@@ -5473,6 +5480,8 @@ def keep_warm(model: str = "claude-sonnet-5", proxy: bool = True, base_url: str 
     if proxy:
         import api_proxy as _px
         _px.FINGERPRINTS, _px.FIRST_BODY, _px.TRACE = "/work/warm_fp.jsonl", "/work/warm_first.json", "/work/warm_trace.jsonl"
+        if prefix_ttl != "1h":
+            raise RuntimeError("a keep-warm ping only exists for the 1h production shape; development runs carry no ping (prefix_ttl=%r)" % prefix_ttl)
         _px.RUN_FIRST_TEXT = RUN_FIRST_TEXT_PING       # the same watch-end breakpoint the job gets
         _pp, _pca = _px.serve_mitm(0, "/work/mitm")
         env.update(_px.mitm_env(_pp, _pca))
@@ -6671,7 +6680,7 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
          run_id: str = "", wait: bool = False,
          read_ceiling: int = 0,
          model: str = "claude-sonnet-5", use_hands: bool = False,
-         think_tokens: int = -1, effort: str = "",
+         think_tokens: int = -1, effort: str = "", prefix_ttl: str = "1h",
          prestage_title: str = "", prestage_controls: str = "",
          prestage_titles: str = "", transcript_file: str = ""):
     if not clip_url:
@@ -6745,7 +6754,7 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
     if wait:
         print(json.dumps(edit.remote(clip_url, brief, model=model, run_id=rid,
                                      use_hands=use_hands, plan=plan_text,
-                                     think_tokens=think_tokens, effort=effort,
+                                     think_tokens=think_tokens, effort=effort, prefix_ttl=prefix_ttl,
                                      prestage_title=prestage_title,
                       prestage_controls=prestage_controls,
                       prestage_titles=prestage_titles,
@@ -6775,7 +6784,7 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
     require_detach("a spawned ChatCut edit")
     call = edit.spawn(clip_url, brief, model=model, run_id=rid,
                       use_hands=use_hands, plan=plan_text,
-                      think_tokens=think_tokens, effort=effort,
+                      think_tokens=think_tokens, effort=effort, prefix_ttl=prefix_ttl,
                       prestage_title=prestage_title,
                       prestage_controls=prestage_controls,
                       prestage_titles=prestage_titles,
