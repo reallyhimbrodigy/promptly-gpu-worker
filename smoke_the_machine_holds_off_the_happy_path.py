@@ -961,6 +961,20 @@ def main():
           and "r1-mp4" in _Dict.__mro__ and False or ("submit_export" in _calls_seen and "track_export" in _calls_seen and _ex.get("bytes") == 112 and _ex.get("file") == "MEASURED"),
           "export=%s calls=%s" % ({k: v for k, v in _ex.items() if k != "sha256"}, _calls_seen))
 
+    # ---- THE SYSTEM SEGMENT, BLOCK BY BLOCK, AND THE JOB'S CALL 1 AGAINST THE PING'S ----
+    _f_blocks = PX.fingerprint({"model": "m", "tools": [], "system": [{"type": "text", "text": "x-anthropic-billing-header: a"}, {"type": "text", "text": "S1"}, {"type": "text", "text": "S2 dynamic"}], "messages": []})
+    check("the fingerprint names every system block's sha and size (the billing header excluded)",
+          len(_f_blocks["system"]["block_shas"]) == 2 and _f_blocks["system"]["block_shas"][1][2].startswith("S2") and _f_blocks["system"]["billing_header_blocks"] == 1,
+          "%s" % _f_blocks["system"].get("block_shas"))
+    _svp = [n for n in ast.walk(_edit_fn) if isinstance(n, ast.Assign) and any(isinstance(t, ast.Subscript) and ast.unparse(t) == "out['system_vs_ping']" for t in n.targets)]
+    _kw_sw = [n for n in ast.walk(_kw) if isinstance(n, ast.Assign) and any(isinstance(t, ast.Subscript) and ast.unparse(t) == "rec['system_wire']" for t in n.targets)]
+    check("the ping keeps its system segment verbatim and the job diffs its call-1 system against it, block by block",
+          len(_svp) >= 3 and len(_kw_sw) >= 1 and "differing_blocks" in ast.unparse(_edit_fn) and "system_vs_ping" in ast.unparse(_edit_fn),
+          "job assigns=%d ping assigns=%d" % (len(_svp), len(_kw_sw)))
+    _rq = [ast.unparse(n.value) for n in ast.walk(_edit_fn) if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "_req_mb" for t in n.targets)]
+    check("request MB per call is read from the trace file, not from a record field built later (it printed [] on every run)",
+          len(_rq) == 1 and "_read_trace_rows()" in _rq[0], "%s" % _rq)
+
     # ---- EVERY RUN-TIME IMPORT IS MOUNTED (the rewatch probe, 2026-09-17) ----
     _tree = ast.parse(src)
     _mounted = set(re.findall(r'"/root/([A-Za-z_][A-Za-z0-9_]*)\.py"', src))

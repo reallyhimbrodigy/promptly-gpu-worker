@@ -5386,8 +5386,8 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     _ttl_state = "MEASURED" if (_wr1 + _wr5) == _wr else "ABSENT (no TTL split in usage; priced at 1h)"
     _usd = (_rd * 0.30 + _wr5 * 3.75 + (_wr - _wr5) * 6.00 + _in * 3.00 + _ou * 15.00) / 1e6
     _cli_usd = sum(float(_t.get("cost_usd") or 0) for _t in _tm["turns"])
-    _req_mb = [round(float(x.get("req_bytes") or 0) / 1e6, 2) for x in (out.get("proxy_trace") or []) if isinstance(x, dict)
-               and str(x.get("path", "")).split("?")[0] == "/v1/messages" and "req_bytes" in x]
+    _req_mb = [round(float(x.get("req_bytes") or 0) / 1e6, 2) for x in _read_trace_rows() if isinstance(x, dict)
+               and str(x.get("path", "")).split("?")[0] == "/v1/messages" and "req_bytes" in x]   # read from the file: the record's copy is built later
     if any(m > 30.0 for m in _req_mb):
         print("  REQUEST SIZE    : %s MB per call — over 30 MB the CLI prunes old images to stay under the API's 32 MB limit and the prefix is rewritten" % _req_mb, flush=True)
     out["run_line"] = {"model": model, "api_calls": len(_tm["turns"]), "tool_calls_by_kind": _kinds, "request_mb": _req_mb,
@@ -5427,6 +5427,30 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         out["proxy_trace"] = "ABSENT %s" % str(_pte)[:80]
     print("  PROXY TRACE     : %s" % json.dumps([{k: v for k, v in r.items() if k in ("status", "ttfb_s", "done_s", "relayed_bytes", "error", "failed_s", "req_bytes")}
                                                   for r in out["proxy_trace"]] if isinstance(out["proxy_trace"], list) else out["proxy_trace"])[:1200], flush=True)
+    # THE JOB'S CALL-1 SYSTEM SEGMENT AGAINST THE PING'S (cross-run half of A): which block, which bytes.
+    out["system_vs_ping"] = {"state": "ABSENT", "why": "not compared"}
+    try:
+        _fb1 = json.load(open("/work/req_first.json", encoding="utf-8"))
+        _job_sys = [(b.get("text") if isinstance(b, dict) else str(b)) for b in (_fb1.get("system") or [])]
+        out["system_wire"] = _job_sys
+        _warm0 = WARM.get("last") if "last" in WARM else None
+        _ping_sys = (_warm0 or {}).get("system_wire")
+        if not isinstance(_ping_sys, list):
+            out["system_vs_ping"] = {"state": "ABSENT", "why": "the last ping recorded no system_wire"}
+        else:
+            import difflib as _dl
+            _pairs = list(zip(_ping_sys, _job_sys))
+            _diffs = []
+            for _i, (_a, _b) in enumerate(_pairs):
+                if _a != _b and not str(_a).startswith("x-anthropic-billing-header:"):
+                    _ud = list(_dl.unified_diff(str(_a).splitlines(), str(_b).splitlines(), "ping", "job", lineterm="", n=0))
+                    _diffs.append({"block": _i, "ping_bytes": len(str(_a)), "job_bytes": len(str(_b)), "diff": _ud[:30]})
+            out["system_vs_ping"] = {"state": "MEASURED", "blocks_ping": len(_ping_sys), "blocks_job": len(_job_sys),
+                                     "identical": not _diffs and len(_ping_sys) == len(_job_sys), "differing_blocks": _diffs}
+            print("  SYSTEM VS PING  : %s" % ("IDENTICAL (%d blocks)" % len(_job_sys) if out["system_vs_ping"]["identical"]
+                                             else json.dumps(_diffs)[:1500]), flush=True)
+    except Exception as _sve:                                     # noqa: BLE001
+        out["system_vs_ping"] = {"state": "FAILED", "why": str(_sve)[:120]}
     # THE PREFIX, CALL BY CALL, and against the previous run's first call.
     out["prefix_calls"] = []
     try:
@@ -5556,6 +5580,12 @@ def keep_warm(model: str = "claude-sonnet-5", proxy: bool = True, base_url: str 
             rec["fingerprints"] = [json.loads(l) for l in open("/work/warm_fp.jsonl", encoding="utf-8") if l.strip()]
         except Exception as _fe:                                  # noqa: BLE001
             rec["fingerprints"] = "ABSENT %s" % str(_fe)[:80]
+        # THE PING'S SYSTEM SEGMENT, VERBATIM, so a job's call 1 can be diffed against it
+        try:
+            _fb0 = json.load(open("/work/warm_first.json", encoding="utf-8"))
+            rec["system_wire"] = [(b.get("text") if isinstance(b, dict) else str(b)) for b in (_fb0.get("system") or [])]
+        except Exception as _se:                                  # noqa: BLE001
+            rec["system_wire"] = "ABSENT %s" % str(_se)[:80]
         print("  PROXY FP        : %s" % json.dumps(rec["fingerprints"])[:600], flush=True)
         rec["stderr_tail"] = (err or "")[-800:]
         print("  CLI STDERR      : %r" % rec["stderr_tail"][-400:], flush=True)

@@ -219,7 +219,11 @@ def fingerprint(body):
                      "names": [t.get("name") for t in tools][:80]},
            "system": {"sha": _sha(sys_hashed)[0], "bytes": _sha(sys_hashed)[1],
                       "blocks": (len(system) if isinstance(system, list) else 1),
-                      "billing_header_blocks": (sum(1 for b in system if _is_billing(b)) if isinstance(system, list) else 0)},
+                      "billing_header_blocks": (sum(1 for b in system if _is_billing(b)) if isinstance(system, list) else 0),
+                      # BLOCK BY BLOCK, so a cross-run miss names the block (the ping and the job
+                      # differed by 8 bytes of system on 2026-09-18 and the whole watch rewrote)
+                      "block_shas": [(_sha(b)[0], _sha(b)[1], (b.get("text", "")[:60] if isinstance(b, dict) else ""))
+                                     for b in (sys_hashed if isinstance(sys_hashed, list) else [sys_hashed])]},
            "messages": []}
     # WHERE THE CLI PUT ITS BREAKPOINTS. The API caches at cache_control
     # markers and looks back ~20 blocks from each; which message carries a
