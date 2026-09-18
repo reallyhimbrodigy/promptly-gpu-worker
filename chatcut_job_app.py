@@ -2972,7 +2972,7 @@ def _transcript_rows(r, dur_s=None):
     return sorted(out, key=lambda b: b["t_start"])
 
 def pass1_message(plan, beats, inventory_png, source_watch=None,
-                  deciding=False):
+                  deciding=False, face=None, platter=None):
     """WHAT THE AGENT IS SERVED BEFORE IT DECIDES ANYTHING.
 
     In order, in one message:
@@ -2996,6 +2996,11 @@ def pass1_message(plan, beats, inventory_png, source_watch=None,
                        "everything you can place. You never author component "
                        "code and you never look anything up."})
         blocks.append(_img_block(inventory_png, "image/png"))
+        # THE PLATTER rides with the inventory picture (keys the acceptor takes), and the FACE region
+        if platter:
+            blocks.append({"type": "text", "text": platter})
+        if face:
+            blocks.append({"type": "text", "text": "\n".join(face)})
     # ── THE REFERENCES: WHAT I LEARNED FROM WATCHING THEM ──────────────────
     # Zac's ruling, 2026-09-16: "Claude watches all ten itself, through
     # ChatCut... It analyses them itself and writes what it learned. Not a
@@ -3827,6 +3832,11 @@ def run_three_turns(invoke, rewatch, first_message, cap=TURN_CAP,
                 tm["terminal"] = {"kind": "CACHE MISS", "at": n,
                                   "why": "call %d did not read the prefix call 1 established (%s) — the bytes moved" % (n, why)}
                 return None
+        if r.get("api_status") == 409 and "preflight_refused" in str(r.get("api_head") or ""):
+            tm["turns"].append(r)
+            tm["terminal"] = {"kind": "PREFLIGHT REFUSED", "at": n,
+                              "why": "the job's system block differs from the ping's — refused before the cold write: %s" % (r.get("api_head") or "")[:300]}
+            return None
         if isinstance(r.get("api_status"), int) and r["api_status"] >= 400:
             tm["turns"].append(r)
             tm["terminal"] = {"kind": "API ERROR", "at": n,
@@ -3853,6 +3863,11 @@ def run_three_turns(invoke, rewatch, first_message, cap=TURN_CAP,
     if r2 is None:
         return tm
     ops2 = _edit_ops(r2.get("tool_calls"))
+    # ONE REWATCH ON THE COMMON PATH (Zac, Part 3 item E): turn 2 clean -> export.
+    # Turn 3 fires only when turn 2 emitted fixes.
+    if not ops2 and (_says(r2.get("text"), "export", "clean", "ship") or not r2.get("tool_calls")):
+        tm["verdict"] = "export at turn 2 (clean)"
+        return tm
     rw2 = rewatch(2, True)
     tm["rewatches"].append({k: v for k, v in (rw2 or {}).items() if k != "message"})
     r3 = _turn(3, (rw2 or {}).get("message"), "confirm")
@@ -3913,7 +3928,7 @@ def rewatch_message(n, watch, tl_lines, faults, scan_lines=None, final=False, ca
              "call with the fixes, each op carrying its why. This is the last look."
              if final else
              "\n\nFix what is wrong in ONE edit_item call, each op carrying its why — or reply "
-             "with the single word clean. Do not inspect or preview: everything the timeline "
+             "with the single word export. Do not inspect or preview: everything the timeline "
              "holds is above.") + calls_note)
     blocks = [{"type": "text", "text": head + tail}]
     for fp in (_w.get("sheets") or []):
@@ -3981,6 +3996,101 @@ def warm_ttl_minutes(warm_rec):
     if int(warm_rec.get("write_5m") or 0) > 0:
         return 5
     return None
+
+
+# THE PLATTER (Zac, Part 3 ruling 3, 2026-09-18; the Sep-15 ruling restated):
+# every inventory component with the property keys ChatCut ACCEPTS (from the
+# baked registry — type and default as the example), which are required
+# (catalogue), and its usage constraint. H1's agent guessed keys ("the
+# component evidently doesn't accept the keys I'm sending, and I have no way
+# to inspect its real schema") and rendered blank cards; the catalogue's own
+# example_props used keys the components do not have (DropCard: title/steps
+# against accentColor/cardColor/...). The registry is the acceptor's truth.
+FULL_FRAME_END_ONLY = {"EndCard": "END ONLY — an opaque full-frame card; placed anywhere else it blacks out the picture (H1 put it at 10-13s)."}
+FULL_FRAME_CHROME = {"RecordingFrame": "full-frame chrome (frame border + REC label + scan line); the picture stays visible; only when the screen or app is the subject."}
+
+
+def component_platter(registry_path="/craft/chatcut_registry_baked.json", catalogue_path="/craft/chatcut_catalogue.json", names=None):
+    """-> (text, n_components). PURE on its files."""
+    reg = json.load(open(registry_path, encoding="utf-8")); comps = reg.get("components") or reg
+    try:
+        cat = json.load(open(catalogue_path, encoding="utf-8")); cat = cat.get("components") or cat
+    except Exception:                                             # noqa: BLE001
+        cat = {}
+    # keys that nearly every component carries are said once (8,234 tokens
+    # measured with them repeated per component; the timing keys alone were 112 entries)
+    _all = [nm for nm in (comps.keys() if isinstance(comps, dict) else []) if isinstance(comps.get(nm), dict) and not nm.startswith("caption:") and (not names or nm in names)]
+    _count = {}
+    for nm in _all:
+        for pp in (comps[nm].get("properties") or []):
+            if isinstance(pp, dict) and pp.get("key"):
+                _count[pp["key"]] = _count.get(pp["key"], 0) + 1
+    common = sorted(k for k, v in _count.items() if _all and v >= 0.8 * len(_all))
+    lines = ["PROPERTY KEYS, PER COMPONENT — the keys ChatCut accepts, with type and default. Send ONLY these keys in "
+             "propertyOverrides; a key not listed here is refused or ignored and the card renders blank.",
+             "Anything that occludes must stay off the face region listed under FACE.",
+             ("Every component also takes: %s." % ", ".join(common)) if common else ""]
+    n = 0
+    for nm in sorted(comps.keys() if isinstance(comps, dict) else []):
+        if names and nm not in names:
+            continue
+        it = comps[nm] or {}
+        if not isinstance(it, dict) or nm.startswith("caption:"):
+            continue
+        props = it.get("properties") or []
+        keys = ["%s (%s, e.g. %s)" % (p.get("key"), p.get("type"), json.dumps(p.get("defaultValue"))[:24]) for p in props if isinstance(p, dict) and p.get("key") and p.get("key") not in common]
+        c = cat.get(nm) if isinstance(cat, dict) else None
+        req = (c or {}).get("required") or []
+        when = ((c or {}).get("when") or "").strip()
+        band = (c or {}).get("size_band")
+        use = FULL_FRAME_END_ONLY.get(nm) or FULL_FRAME_CHROME.get(nm) or ""
+        parts = ["%s:" % nm, "keys " + ("; ".join(keys) if keys else "(none — no editable properties)")]
+        parts.append("required " + (", ".join(req) if req else "none"))
+        if when: parts.append("use " + when.lower())
+        if band and band != "unlisted": parts.append("size " + str(band).lower())
+        if use: parts.append(use)
+        lines.append(" — ".join(parts))
+        n += 1
+    return "\n".join(lines), n
+
+
+def face_lines(face_traj, dur_s, frame_w=1080.0, frame_h=1920.0):
+    """The face region per second, as data for turn 1 (Zac, Part 3 item C).
+    -> list[str]. face_traj rows: {t, cx, cy, found, confidence} in pixels."""
+    if not face_traj or not dur_s:
+        return ["FACE: ABSENT — no detection to hand over; the harness fault is the only backstop"]
+    out = ["FACE — where the speaker's face is, per second (x,y as fractions of the frame; keep every occluding graphic off it):"]
+    secs = int(dur_s) + (1 if dur_s % 1 else 0)
+    for sec in range(secs):
+        pts = [p for p in face_traj if p.get("found") and sec <= float(p.get("t") or 0) < sec + 1]
+        if not pts:
+            out.append("  %d-%ds: no face found" % (sec, sec + 1)); continue
+        cx = sum(float(p["cx"]) for p in pts) / len(pts) / frame_w; cy = sum(float(p["cy"]) for p in pts) / len(pts) / frame_h
+        band = "top" if cy < 1 / 3 else ("center" if cy < 2 / 3 else "bottom")
+        out.append("  %d-%ds: x%.2f y%.2f (%s band)" % (sec, sec + 1, cx, cy, band))
+    return out
+
+
+def stage_line(marks, wall_s):
+    """The nine-stage line from the marks (Zac, Part 3 item F): 362s of run
+    wall minus 111s of model was a lump. -> (text, dict of stage -> seconds)."""
+    m = dict(marks or {})
+    def d(a, b):
+        return round(m[b] - m[a], 1) if a in m and b in m else None
+    st = {"token": m.get("token"), "preflight": d("token", "preflight"), "download": d("preflight", "download"),
+          "sheet": d("download", "sheet"), "prestage": d("sheet", "prestage"), "source_watch": d("prestage", "turn1.start")}
+    for n in (1, 2, 3, 4):
+        if "turn%d.start" % n in m and "turn%d" % n in m:
+            st["turn%d" % n] = d("turn%d.start" % n, "turn%d" % n)
+        if "rewatch%d.start" % n in m and "rewatch%d.checks" % n in m:
+            st["rewatch%d" % n] = d("rewatch%d.start" % n, "rewatch%d.checks" % n)
+            st["rewatch%d.parts" % n] = {k: d(a, b) for k, a, b in (("readback", "rewatch%d.start" % n, "rewatch%d.readback" % n), ("calls", "rewatch%d.readback" % n, "rewatch%d.calls" % n),
+                                                                    ("fetch", "rewatch%d.calls" % n, "rewatch%d.fetch" % n), ("tile", "rewatch%d.fetch" % n, "rewatch%d.tile" % n),
+                                                                    ("props", "rewatch%d.watch" % n, "rewatch%d.props" % n), ("checks", "rewatch%d.props" % n, "rewatch%d.checks" % n))}
+    if "agent" in m and wall_s is not None:
+        st["export_tail"] = round(float(wall_s) - m["agent"], 1)
+    txt = " | ".join("%s %s" % (k, v) for k, v in st.items() if v is not None and not k.endswith(".parts"))
+    return txt, st
 
 
 def _read_trace_rows(path="/work/proxy_trace.jsonl"):
@@ -4071,7 +4181,9 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     n_tools = pf["n_tools"]
     mark("preflight")
     _cli_ver = cli_version()
-    print("  CLI VERSION     : %s" % _cli_ver, flush=True)
+    import platform as _plat
+    _kernel = _plat.release()
+    print("  CLI VERSION     : %s   kernel: %s" % (_cli_ver, _kernel), flush=True)
 
     os.makedirs("/work", exist_ok=True)
     # -L, AND THEN PROVE IT IS A VIDEO. Without -L an S3 presign against the
@@ -4561,6 +4673,12 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     _watch_sid = None if no_watch else install_watch("/work")
     print("  WATCH           : %s" % ("ABSENT BY DESIGN — no --resume; the prefix is the paragraph, the inventory and the source watch" if no_watch else "resumed %s" % _watch_sid), flush=True)
     _cmd = cli_command(_watch_sid, model, use_hands, agents if use_hands else None, _pm, effort=(effort or None))
+    try:
+        _platter, _n_platter = component_platter()
+    except Exception as _pe:                                      # noqa: BLE001
+        _platter, _n_platter = "PROPERTY KEYS: ABSENT (%s) — every key you send is a guess" % str(_pe)[:80], 0
+    _face_lines = face_lines((_regions.get("face_traj") if isinstance(_regions, dict) else None), _dur_for_detect or 0)
+    print("  PLATTER         : %d component(s), %d chars; FACE lines: %d" % (_n_platter, len(_platter), len(_face_lines)), flush=True)
     # THE THINKING CAP. 267 of 608 seconds — 44% of the wall — was `thinking`
     # blocks on an agent handed a COMPLETE plan. It is executing, not deciding,
     # and it was reasoning as if it were. `MAX_THINKING_TOKENS` is read from the
@@ -4609,8 +4727,20 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         # keeps it; "5m" is development — no ping, no injection, call 1 writes
         # and calls 2+ read (the within-run assertion alone).
         _px.RUN_FIRST_TEXT = RUN_FIRST_TEXT_JOB if (prefix_ttl == "1h" and not no_watch) else ""
-        # the bounded thinking arm is written by the proxy (the CLI sends adaptive for any N>0)
-        _px.THINKING_BUDGET = int(think_tokens) if think_tokens > 0 else 0
+        # THE PREFLIGHT: the ping's system text, if a ping is on record and this
+        # run expects to read its entry (1h, with the watch)
+        _px.EXPECT_SYSTEM = None
+        if prefix_ttl == "1h" and not no_watch:
+            try:
+                _w0 = WARM.get("last") if "last" in WARM else None
+                _px.EXPECT_SYSTEM = _w0.get("system_wire") if isinstance((_w0 or {}).get("system_wire"), list) else None
+            except Exception:                                     # noqa: BLE001
+                _px.EXPECT_SYSTEM = None
+        print("  PREFLIGHT       : %s" % ("armed against the ping's %d system block(s)" % len(_px.EXPECT_SYSTEM) if _px.EXPECT_SYSTEM else "not armed (no ping system text on record, or development shape)"), flush=True)
+        # NO TOKEN BUDGET: the API refuses thinking {type: enabled} on this model
+        # ("Use thinking.type.adaptive and output_config.effort") — measured on the
+        # 2000 arm, 2026-09-18. The dial is --effort; N>0 means adaptive.
+        _px.THINKING_BUDGET = 0
         print("  PREFIX TTL      : %s — %s" % (prefix_ttl, "watch-end breakpoint at 1h (production shape)" if prefix_ttl == "1h"
                                                  else "no breakpoint injected; call 1 writes 5m, calls 2+ read (development)"), flush=True)
         _px_port, _px_ca = _px.serve_mitm(0, "/work/mitm")
@@ -4648,7 +4778,8 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     # the prefix the first established. The stream machine that used to live
     # here — marks, rewatch threads, idle bounds — is gone with it.
     _first_message = pass1_message(prompt, _beats, "/craft/component_sheet.png",
-                                   _watch_box, deciding=not bool(plan))
+                                   _watch_box, deciding=not bool(plan),
+                                   face=_face_lines, platter=_platter)
     out_first = _first_message          # into the record below, in full (section C)
     _turn_recs = []
 
@@ -4707,6 +4838,8 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
             _b = turn_clock.budget(_tj)
             rec["ttft"] = (_b.get("buckets_s") or {}).get("TTFT")
             rec["generating_s"] = (_b.get("buckets_s") or {}).get("GENERATING")
+            rec["tool_s"] = (_b.get("buckets_s") or {}).get("TOOL_MCP")     # the ChatCut round trip, from the stream's own clock
+            rec["waiting_s"] = (_b.get("buckets_s") or {}).get("WAITING")
             _turn_recs.append((_tj, _stream))
         except Exception as _te:                                  # noqa: BLE001
             rec["timing"] = "FAILED: %s" % str(_te)[:100]
@@ -4816,7 +4949,7 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     _tm["thinking_arm"] = {"env": {k: v for k, v in _env.items() if k in ("MAX_THINKING_TOKENS",)},
                            "effort_flag": effort or None,
                            "asked": ("thinking {type: disabled}" if _env.get("MAX_THINKING_TOKENS") == "0"
-                                     else "thinking {type: enabled, budget_tokens: %d} — placed by the proxy; the CLI itself sends adaptive for any N>0" % int(think_tokens if think_tokens > 0 else DEFAULT_THINK_TOKENS)),
+                                     else "thinking {type: adaptive} (no token budget exists for this model); effort %s" % (effort or "high (container default)")),
                            "on_the_wire": [{"thinking": w.get("thinking"), "effort": (w.get("output_config") or {}).get("effort")} for w in _wire]}
     print("  THINKING ARM    : %s" % json.dumps(_tm["thinking_arm"]), flush=True)
     if _tm.get("terminal"):
@@ -5396,12 +5529,19 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                                   "uncached_in": _in, "out": _ou, "ttl_split": _ttl_state},
                        "usd_at_rate": round(_usd, 4), "usd_cli": round(_cli_usd, 4),
                        "rates": "read $0.30/M, write 1h $6/M or 5m $3.75/M by the measured split, in $3/M, out $15/M",
-                       "cli_version": _cli_ver,
+                       "cli_version": _cli_ver, "kernel": _kernel,
                        "marks_s": marks, "wall_s": out["wall_s"], "verdict": _tm.get("verdict"),
                        "terminal": _tm.get("terminal"), "cold_write": _tm.get("cold_write")}
     print("  RUN LINE        : %s | api_calls=%d | tools=%s | tokens read=%d write=%d (1h %d / 5m %d) in=%d out=%d | request MB per call=%s | $%.4f at rate ($%.4f CLI) | wall=%.1fs | cli=%s | marks=%s"
           % (model, len(_tm["turns"]), _kinds, _rd, _wr, _wr1, _wr5, _in, _ou, _req_mb, _usd, _cli_usd, out["wall_s"],
              _cli_ver, json.dumps(marks)), flush=True)
+    _stxt, _st = stage_line(marks, out["wall_s"])
+    out["run_line"]["stages"] = _st
+    print("  STAGES          : %s" % _stxt, flush=True)
+    _split = [{"n": _t.get("n"), "wall": _t.get("wall"), "ttft": _t.get("ttft"), "generation": _t.get("generating_s"), "tool": _t.get("tool_s"), "waiting": _t.get("waiting_s"), "out": (_t.get("usage") or {}).get("out")}
+              for _t in _tm["turns"]]
+    out["run_line"]["call_split"] = _split
+    print("  CALL SPLIT      : %s" % " | ".join("T%s wall %s = ttft %s + gen %s + tool %s (+wait %s), out %s" % (c["n"], c["wall"], c["ttft"], c["generation"], c["tool"], c["waiting"], c["out"]) for c in _split), flush=True)
     if out["wall_s"] > LAW_WALL_S:
         print("  LAW MISS        : %.1fs over the %ds law — stages: %s" % (out["wall_s"], LAW_WALL_S, json.dumps(marks)), flush=True)
     if _tm.get("cold_write", {}).get("cold"):
@@ -5557,7 +5697,7 @@ def keep_warm(model: str = "claude-sonnet-5", proxy: bool = True, base_url: str 
                 pass
     rc, err, wall, killed = turn_clock.run_timed(
         cli_command(sid, model) + ["--max-turns", "1"], "/work", "/work/warm_stream.jsonl",
-        "/work/warm_timing.json", 120, env=env, stdin_first=json.dumps(msg), on_event=_on)
+        "/work/warm_timing.json", RUN_TIMEOUT_S, env=env, stdin_first=json.dumps(msg), on_event=_on)
     u = res.get("usage") or {}
     _cc = u.get("cache_creation") or {}
     # WHAT CAME BACK, in both modes: output volume and the reply's head — the
@@ -5569,7 +5709,7 @@ def keep_warm(model: str = "claude-sonnet-5", proxy: bool = True, base_url: str 
            "out": _out_tok, "thinking": _think, "reply_head": _reply, "result_wall_s": res.get("duration_api_ms"),
            "write": u.get("cache_creation_input_tokens"), "rc": rc, "wall": round(wall, 1),
            "write_1h": _cc.get("ephemeral_1h_input_tokens"), "write_5m": _cc.get("ephemeral_5m_input_tokens"),
-           "cli_version": cli_version(), "proxy": bool(proxy), "subtype": res.get("subtype"), "killed": bool(killed)}
+           "cli_version": cli_version(), "kernel": __import__("platform").release(), "proxy": bool(proxy), "subtype": res.get("subtype"), "killed": bool(killed)}
     if proxy:
         try:
             rec["proxy_trace"] = [json.loads(l) for l in open("/work/warm_trace.jsonl", encoding="utf-8") if l.strip()]
@@ -5718,7 +5858,7 @@ def probe_rewatch(clip_url: str, model: str = "claude-sonnet-5"):
     env = {"ENABLE_TOOL_SEARCH": "false", "MAX_THINKING_TOKENS": str(DEFAULT_THINK_TOKENS)}
     tC = time.time()
     rc, err, wall, killed = turn_clock.run_timed(cli_command(sid, model) + ["--max-turns", "1"], "/work", "/work/probe_review.jsonl",
-                                                 "/work/probe_review_timing.json", 180, env=env, stdin_first=json.dumps(msg), on_event=_on)
+                                                 "/work/probe_review_timing.json", RUN_TIMEOUT_S, env=env, stdin_first=json.dumps(msg), on_event=_on)
     # NAMED = an op touched THAT plant and its `why` says the planted fault.
     # A keyword over the whole reply matched the plants' own labels quoted
     # back (first probe: "3 of 3" for one real). The reply text is kept and

@@ -43,6 +43,7 @@
   "red_proof_truncated_lists",
   "red_proof_visual_vocabulary",
   "red_proof_zoom_unmeasured",
-  "red_proof_no_retired_vocabulary"
+  "red_proof_no_retired_vocabulary",
+  "red_proof_batch_scripts_stop"
  ]
 }

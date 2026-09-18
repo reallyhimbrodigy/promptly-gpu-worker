@@ -686,8 +686,8 @@ def main():
           len(_legs_) == 1 and _legs_[0].get("status") == 200 and "ttfb_s" in _legs_[0] and _legs_[0].get("relayed_bytes") == len(b"".join(_sse))
           and "sk-secret" not in json.dumps(_rows) and "<redacted" in json.dumps(_legs_[0].get("req_headers")),
           "rows=%s" % json.dumps(_rows)[:300])
-    check("the relay traces its phases in order: received, body_read, breakpoint, thinking, upstream_connected, request_sent, response_headers, first_chunk, relaying, upstream_eof, relay_closed",
-          _phases == ["received", "body_read", "breakpoint", "thinking", "upstream_connected", "request_sent", "response_headers", "first_chunk", "relaying", "upstream_eof", "relay_closed"]
+    check("the relay traces its phases in order: received, body_read, preflight, breakpoint, thinking, upstream_connected, request_sent, response_headers, first_chunk, relaying, upstream_eof, relay_closed",
+          _phases == ["received", "body_read", "preflight", "breakpoint", "thinking", "upstream_connected", "request_sent", "response_headers", "first_chunk", "relaying", "upstream_eof", "relay_closed"]
           and next(r for r in _rows if r.get("phase") == "body_read").get("bytes") == len(_body)
           and next(r for r in _rows if r.get("phase") == "upstream_eof").get("relayed") == len(b"".join(_sse)),
           "phases=%s" % _phases)
@@ -912,19 +912,9 @@ def main():
           any(a.arg == "prefix_ttl" for a in _main_fn.args.args)
           and sum(1 for n in ast.walk(_main_fn) if isinstance(n, ast.keyword) and n.arg == "prefix_ttl") == 2)
 
-    # ---- THE BOUNDED THINKING ARM IS WRITTEN BY THE PROXY (the CLI sends adaptive for any N>0) ----
-    _tb, _tn = PX.apply_thinking_budget({"model": "m", "max_tokens": 64000, "thinking": {"type": "adaptive"}}, 2000)
-    _td, _tdn = PX.apply_thinking_budget({"model": "m", "thinking": {"type": "disabled"}}, 2000)
-    _t0, _t0n = PX.apply_thinking_budget({"model": "m", "thinking": {"type": "adaptive"}}, 0)
-    _ts, _tsn = PX.apply_thinking_budget({"model": "m", "max_tokens": 1500, "thinking": {"type": "adaptive"}}, 2000)
-    check("a budget rewrites adaptive thinking to {enabled, budget_tokens}; disabled stays disabled; no budget leaves the body alone; max_tokens is lifted above the budget",
-          _tb["thinking"] == {"type": "enabled", "budget_tokens": 2000} and _tn.get("rewritten") is True and _tb["max_tokens"] == 64000
-          and _td["thinking"] == {"type": "disabled"} and _tdn.get("rewritten") is False
-          and _t0["thinking"] == {"type": "adaptive"} and _t0n.get("rewritten") is False
-          and _ts["thinking"]["budget_tokens"] == 2000 and _ts["max_tokens"] > 2000,
-          "budget=%s disabled=%s none=%s small=%s" % (_tb.get("thinking"), _td.get("thinking"), _t0.get("thinking"), _ts.get("max_tokens")))
-    _tbs = [ast.unparse(n.value) for n in ast.walk(_edit_fn) if isinstance(n, ast.Assign) and any(isinstance(t, ast.Attribute) and t.attr == "THINKING_BUDGET" for t in n.targets)]
-    check("the job hands the proxy think_tokens as the budget (0 stays the off switch)", _tbs == ["int(think_tokens) if think_tokens > 0 else 0"], "%s" % _tbs)
+    # ---- THE TOKEN BUDGET IS GONE: the API refuses thinking.enabled on this model; the dial is --effort ----
+    check("the job never hands the proxy a thinking budget (the 2000 arm was refused with 400)",
+          [ast.unparse(n.value) for n in ast.walk(_edit_fn) if isinstance(n, ast.Assign) and any(isinstance(t, ast.Attribute) and t.attr == "THINKING_BUDGET" for t in n.targets)] == ["0"])
     # ---- THE NO-WATCH RUN: no --resume, no watch-end breakpoint, named ABSENT BY DESIGN ----
     _nw_cmd = J.cli_command(None, "claude-sonnet-5")
     _sid_asg = [ast.unparse(n.value) for n in ast.walk(_edit_fn) if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "_watch_sid" for t in n.targets)]
@@ -974,6 +964,93 @@ def main():
     _rq = [ast.unparse(n.value) for n in ast.walk(_edit_fn) if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "_req_mb" for t in n.targets)]
     check("request MB per call is read from the trace file, not from a record field built later (it printed [] on every run)",
           len(_rq) == 1 and "_read_trace_rows()" in _rq[0], "%s" % _rq)
+
+    # ---- PART 3 A: THE PREFLIGHT refuses before it is paid for, and names the byte ----
+    _sysA = ["x-anthropic-billing-header: a", "S1 text", "S2 env text"]
+    _bodyA = {"system": [{"type": "text", "text": t} for t in _sysA]}
+    _bodyB = {"system": [{"type": "text", "text": t} for t in ["x-anthropic-billing-header: b", "S1 text", "S2 env teXt"]]}
+    _okA, _rA = PX.preflight(_bodyA, _sysA); _okB, _rB = PX.preflight(_bodyB, _sysA); _okN, _rN = PX.preflight(_bodyB, None)
+    check("the preflight passes an identical system (billing header aside), refuses a one-byte difference naming block and offset, and is skipped without a ping",
+          _okA and _rA["state"] == "PASSED" and not _okB and _rB["block"] == 1 and _rB["first_diff_at"] == 9 and _okN and _rN["state"] == "SKIPPED",
+          "A=%s B=%s N=%s" % (_rA, _rB, _rN))
+    _pinned, _chg = PX.pin_os_line({"system": [{"type": "text", "text": "x\n - Platform: linux\n - OS Version: Linux 6.8.0-1015-gcp\n - Shell: sh"}]})
+    check("the OS line is pinned to a constant so the fleet's kernel string cannot vary the prefix",
+          _chg and " - OS Version: pinned\n" in _pinned["system"][0]["text"] and "6.8.0" not in _pinned["system"][0]["text"], _pinned["system"][0]["text"][:80])
+    # the refusal goes through the tunnel: a body whose system differs from EXPECT_SYSTEM gets a 409 and nothing reaches upstream
+    _saved = (PX.CONNECTION, PX.TRACE, PX.FINGERPRINTS, PX.FIRST_BODY, PX.EXPECT_SYSTEM, PX.PREFLIGHT_DONE, PX.RUN_FIRST_TEXT)
+    try:
+        PX.CONNECTION = _FakeConn; PX.TRACE = tempfile.mktemp(suffix=".jsonl"); PX.FINGERPRINTS = tempfile.mktemp(suffix=".jsonl"); PX.FIRST_BODY = tempfile.mktemp(suffix=".json")
+        PX.EXPECT_SYSTEM = ["S1 text", "S2 env text"]; PX.PREFLIGHT_DONE = False; PX.RUN_FIRST_TEXT = ""
+        _FakeConn.last = {}
+        _port4 = PX.serve(0)
+        _req4 = _ur2.Request("http://127.0.0.1:%d/v1/messages" % _port4, data=json.dumps({"model": "m", "tools": [], "system": [{"type": "text", "text": "S1 text"}, {"type": "text", "text": "S2 env teXt"}], "messages": []}).encode(), method="POST", headers={"Content-Type": "application/json"})
+        try:
+            _ur2.urlopen(_req4, timeout=20); _st4 = 200; _body4 = ""
+        except _ur2.HTTPError as _he:
+            _st4 = _he.code; _body4 = _he.read().decode()
+        # the handler thread may still be running after the client has its 409: give a forwarding mutant time to show
+        for _i in range(20):
+            if _FakeConn.last.get("body"):
+                break
+            _tm_.sleep(0.05)
+    finally:
+        PX.CONNECTION, PX.TRACE, PX.FINGERPRINTS, PX.FIRST_BODY, PX.EXPECT_SYSTEM, PX.PREFLIGHT_DONE, PX.RUN_FIRST_TEXT = _saved
+    check("a differing call 1 is answered 409 preflight_refused and never forwarded (no cold write paid)",
+          _st4 == 409 and "preflight_refused" in _body4 and not _FakeConn.last.get("body"), "status=%s forwarded=%s" % (_st4, bool(_FakeConn.last.get("body"))))
+    class _Inv409:
+        def __call__(self, n, message):
+            return {"rc": 1, "subtype": "success", "tool_calls": [], "text": "", "killed": False, "wall": 3.0, "usage": {}, "api_status": 409, "api_head": '{"type":"error","error":{"type":"preflight_refused","message":"system differs"}}'}
+    _tm409 = J.run_three_turns(_Inv409(), lambda n, final: {"message": {}, "sheets": 0}, {"type": "user", "message": {"role": "user", "content": []}})
+    check("a preflight refusal is the terminal PREFLIGHT REFUSED, carrying the diff", (_tm409["terminal"] or {}).get("kind") == "PREFLIGHT REFUSED" and "differs" in _tm409["terminal"]["why"])
+    _exp_asg = [ast.unparse(n.value) for n in ast.walk(_edit_fn) if isinstance(n, ast.Assign) and any(isinstance(t, ast.Attribute) and t.attr == "EXPECT_SYSTEM" for t in n.targets)]
+    check("the job arms the preflight with the ping's stored system text", any("system_wire" in v for v in _exp_asg), "%s" % _exp_asg)
+    # ---- PART 3 E: one rewatch on the common path ----
+    class _InvClean:
+        def __init__(self): self.log = []
+        def __call__(self, n, message):
+            self.log.append(n)
+            ops = [{"name": "mcp__chatcut__edit_item", "input": {"adds": [{"type": "motion-graphic"}]}}] if n == 1 else []
+            # call 1 writes the prefix; call 2 reads it (the gate wants >= 0.95 x (read + write) of call 1)
+            return {"rc": 1, "subtype": "error_max_turns", "tool_calls": ops, "text": "" if n == 1 else "export", "killed": False, "wall": 5.0,
+                    "usage": ({"read": 0, "write": 100} if n == 1 else {"read": 100, "write": 5})}
+    _ic = _InvClean(); _rw_log = []
+    _tmc = J.run_three_turns(_ic, lambda n, final: (_rw_log.append(n) or {"message": {"type": "user", "message": {"role": "user", "content": []}}, "sheets": 0}), {"type": "user", "message": {"role": "user", "content": []}})
+    check("turn 2 saying export with no ops ends the run: one rewatch, two calls, verdict export at turn 2",
+          _tmc.get("verdict") == "export at turn 2 (clean)" and _ic.log == [1, 2] and _rw_log == [1] and not _tmc.get("terminal"), "verdict=%s calls=%s rewatches=%s" % (_tmc.get("verdict"), _ic.log, _rw_log))
+    _rm1 = J.rewatch_message(1, {"frames": 0, "sheets": [], "state": "ABSENT", "why": "x", "times": []}, [], [], [], final=False)
+    check("the first rewatch offers export as the clean reply", "single word export" in _rm1["message"]["content"][0]["text"])
+    # ---- PART 3 B: THE PLATTER from the acceptor's keys ----
+    _pl, _npl = J.component_platter(os.path.join(HERE, "chatcut_registry_baked.json"), os.path.join(HERE, "chatcut_catalogue.json"))
+    _reg = json.load(open(os.path.join(HERE, "chatcut_registry_baked.json"), encoding="utf-8")); _rc_ = _reg.get("components") or _reg
+    _dc_keys = [pp["key"] for pp in _rc_["DropCard"]["properties"]]
+    check("the platter lists every registry component with the keys ChatCut accepts, the shared keys said once, EndCard end-only",
+          _npl >= 25 and all(k in _pl for k in _dc_keys if k not in ("durationMs", "startMs", "enterFrames", "exitFrames")) and "Every component also takes: durationMs, enterFrames, exitFrames, startMs." in _pl
+          and "EndCard:" in _pl and "END ONLY" in _pl and _pl.count("durationMs") == 1,
+          "n=%d durationMs mentions=%d" % (_npl, _pl.count("durationMs")))
+    check("the catalogue's foreign example keys never reach the platter (DropCard 'steps', RecordingFrame 'corner')",
+          "steps (" not in _pl and "corner (" not in _pl)
+    _fl = J.face_lines([{"t": 0.2, "cx": 540, "cy": 600, "found": True}, {"t": 1.4, "cx": 300, "cy": 1500, "found": True}], 2.0)
+    check("face lines give x,y and the band per second", _fl[1].endswith("(top band)") and _fl[2].endswith("(bottom band)") and "x0.50" in _fl[1], "%s" % _fl)
+    _m1p = J.pass1_message(None, [], os.path.join(HERE, "sheet", "INVENTORY.png"), source_watch=None, deciding="x", face=["FACE — f"], platter="PROPERTY KEYS — p")
+    _texts1 = [b.get("text") for b in _m1p["message"]["content"] if b.get("type") == "text"]
+    check("the first message carries the platter and the face lines", any(str(t).startswith("PROPERTY KEYS") for t in _texts1) and any(str(t).startswith("FACE") for t in _texts1))
+    _p1call = next(n for n in ast.walk(_edit_fn) if isinstance(n, ast.Call) and ast.unparse(n.func) == "pass1_message")
+    check("edit() hands them over", {k.arg for k in _p1call.keywords} >= {"face", "platter"})
+    # ---- PART 3 F: the stage line and the call split ----
+    _sl, _sd = J.stage_line({"token": 1.0, "preflight": 3.0, "download": 10.0, "sheet": 11.0, "prestage": 14.0, "turn1.start": 60.0, "turn1": 90.0, "rewatch1.start": 90.0, "rewatch1.readback": 92.0, "rewatch1.calls": 120.0, "rewatch1.fetch": 126.0, "rewatch1.tile": 127.0, "rewatch1.watch": 128.0, "rewatch1.props": 132.0, "rewatch1.checks": 135.0, "agent": 135.0}, 145.0)
+    check("the stage line names source_watch, each turn and rewatch (with parts) and the export tail from the marks",
+          _sd["source_watch"] == 46.0 and _sd["turn1"] == 30.0 and _sd["rewatch1"] == 45.0 and _sd["rewatch1.parts"]["calls"] == 28.0 and _sd["export_tail"] == 10.0 and "source_watch 46.0" in _sl, _sl)
+    _rec_keys = {k.value for n in ast.walk(_inv) if isinstance(n, ast.Subscript) and isinstance(n.slice, ast.Constant) for k in [n.slice]}
+    check("each call records ttft, generation, tool and waiting seconds from the stream clock", {"ttft", "generating_s", "tool_s", "waiting_s"} <= _rec_keys)
+    check("the run line prints STAGES and CALL SPLIT", "STAGES          :" in ast.unparse(_edit_fn) and "CALL SPLIT      :" in ast.unparse(_edit_fn))
+    # ---- PART 3 G: no kill of ours below the run bound ----
+    _bounds = []
+    for fn in [n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef)]:
+        for c in ast.walk(fn):
+            if isinstance(c, ast.Call) and ast.unparse(c.func).endswith("run_timed") and len(c.args) > 4:
+                _bounds.append((fn.name, ast.unparse(c.args[4])))
+    check("every CLI invocation is bounded by the run bound or what is left of it, never a smaller number",
+          _bounds and all(b in ("RUN_TIMEOUT_S", "_left") for _f, b in _bounds), "%s" % _bounds)
 
     # ---- EVERY RUN-TIME IMPORT IS MOUNTED (the rewatch probe, 2026-09-17) ----
     _tree = ast.parse(src)

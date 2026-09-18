@@ -92,6 +92,53 @@ MAX_BREAKPOINTS = 4
 # writes it: thinking {type: enabled, budget_tokens: N}. Recorded per call in
 # the fingerprint's request_fields, so the arm is read from the wire.
 THINKING_BUDGET = int(os.environ.get("API_PROXY_THINKING_BUDGET", "0") or 0)
+# ── THE PREFLIGHT (Zac, Part 3 ruling 2, 2026-09-18) ────────────────────────
+# Before call 1 goes upstream, its system blocks (billing header aside) are
+# compared with the ping's stored text. A difference is refused HERE, before
+# the $1 cold write is paid, and the refusal names the block and the bytes.
+# EXPECT_SYSTEM: the ping's system texts (list[str]) — None disables the check.
+EXPECT_SYSTEM = None
+PREFLIGHT_DONE = False
+# THE OS LINE, PINNED. The CLI writes "OS Version: <uname release>" into its
+# environment section and Modal's fleet is not one kernel; two containers of
+# one image can differ there, and every byte after the system block then
+# rewrites. On a resumed session nothing else in that section moves (measured
+# locally 2026-09-18: R2 == R3 outside the billing header). Pinned to a
+# constant in every request, ping and job alike, so the fleet cannot vary it.
+PIN_OS_LINE = os.environ.get("API_PROXY_PIN_OS_LINE", "1") == "1"
+_OS_RE = re.compile(r"(?m)^( - OS Version: ).*$")
+
+
+def pin_os_line(body):
+    """-> (body, changed). Every system block's 'OS Version' line becomes a constant."""
+    if not PIN_OS_LINE or not isinstance(body.get("system"), list):
+        return body, False
+    changed = False
+    b = json.loads(json.dumps(body))
+    for blk in b["system"]:
+        if isinstance(blk, dict) and isinstance(blk.get("text"), str) and " - OS Version: " in blk["text"]:
+            new = _OS_RE.sub(r"\1pinned", blk["text"])
+            if new != blk["text"]:
+                blk["text"] = new; changed = True
+    return (b if changed else body), changed
+
+
+def preflight(body, expect):
+    """-> (ok, report). Compares the request's non-billing system blocks with the
+    ping's. PURE."""
+    if expect is None:
+        return True, {"state": "SKIPPED", "why": "no ping text to compare with"}
+    got = [(blk.get("text") if isinstance(blk, dict) else str(blk)) for blk in (body.get("system") or [])]
+    got = [t for t in got if not str(t).startswith("x-anthropic-billing-header:")]
+    exp = [t for t in expect if not str(t).startswith("x-anthropic-billing-header:")]
+    if len(got) != len(exp):
+        return False, {"state": "REFUSED", "why": "system has %d non-billing blocks, the ping had %d" % (len(got), len(exp))}
+    for i, (a, b) in enumerate(zip(exp, got)):
+        if a != b:
+            k = next((j for j, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
+            return False, {"state": "REFUSED", "block": i, "ping_bytes": len(a), "job_bytes": len(b), "first_diff_at": k,
+                           "ping_context": a[max(0, k - 80): k + 80], "job_context": b[max(0, k - 80): k + 80]}
+    return True, {"state": "PASSED", "blocks": len(got)}
 
 
 def apply_thinking_budget(body, budget):
@@ -322,9 +369,21 @@ class H(http.server.BaseHTTPRequestHandler):
         if self.path.split("?")[0] == "/v1/messages":
             try:
                 body = json.loads(raw.decode("utf-8"))
+                body, pinned = pin_os_line(body)
+                global PREFLIGHT_DONE
+                if not PREFLIGHT_DONE:
+                    PREFLIGHT_DONE = True
+                    ok, rep_ = preflight(body, EXPECT_SYSTEM)
+                    _trace({"phase": "preflight", **rep_})
+                    if not ok:
+                        # REFUSED BEFORE IT IS PAID FOR: nothing goes upstream
+                        msg = json.dumps({"type": "error", "error": {"type": "preflight_refused", "message": "system differs from the ping: %s" % json.dumps(rep_)[:600]}}).encode()
+                        self.send_response(409); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(msg))); self.end_headers()
+                        self.wfile.write(msg); self.wfile.flush()
+                        return
                 body, inj = inject_watch_breakpoint(body, RUN_FIRST_TEXT)
-                body, thk = apply_thinking_budget(body, THINKING_BUDGET)
-                if inj.get("injected") or thk.get("rewritten"):
+                thk = {"rewritten": False, "why": "no budget: the API refuses thinking.enabled on this model (2026-09-18)"}
+                if inj.get("injected") or pinned:
                     raw = json.dumps(body).encode("utf-8")
                 _trace({"phase": "breakpoint", **inj})
                 _trace({"phase": "thinking", **thk})
