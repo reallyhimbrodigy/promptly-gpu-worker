@@ -1164,6 +1164,12 @@ def main():
           "normalise_properties" in _ro2_calls and "registration_refusal" in _ro2_calls
           and _ro2_calls.index("registration_refusal") < _ro2_calls.index("asset_id_from"), "%s" % [c for c in _ro2_calls if c in ("normalise_properties", "registration_refusal", "asset_id_from")])
 
+    # ---- THE ID READER ON A REAL ACCEPTED REGISTRATION (recorded 2026-09-18) ----
+    _fx = json.load(open(os.path.join(HERE, "smoke_fixtures", "registration_accepted_2026-09-18.json"), encoding="utf-8"))
+    _fx_txt = "".join(x.get("text") or "" for x in (_fx.get("content") or []) if isinstance(x, dict))
+    check("asset_id_from reads the id out of a real accepted registration's content text, and it is not a refusal",
+          J.asset_id_from({"_text": _fx_txt}) == "2610a165-a3ff-44e2-af54-2c448a66c5e4" and J.registration_refusal({"_text": _fx_txt}) is None)
+
     # ---- EVERY RUN-TIME IMPORT IS MOUNTED (the rewatch probe, 2026-09-17) ----
     _tree = ast.parse(src)
     _mounted = set(re.findall(r'"/root/([A-Za-z_][A-Za-z0-9_]*)\.py"', src))

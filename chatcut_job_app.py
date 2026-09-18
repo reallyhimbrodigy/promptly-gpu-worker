@@ -6267,7 +6267,8 @@ def probe_register(name: str = "StatCard"):
     r = mcp_rpc(tok, "tools/call", {"name": "create_motion_graphic_from_code", "arguments": {
         "projectId": pid, "name": name, "code": c.get("code"), "width": 1080, "height": 1920, "durationInSeconds": 5, "properties": normalise_properties(c.get("properties"))}}, 901)
     out = {"name": name, "projectId": pid, "props_n": len(c.get("properties") or []), "code_chars": len(c.get("code") or ""),
-           "properties_head": json.dumps(c.get("properties"))[:600], "response": json.dumps(r)[:3000]}
+           "properties_head": json.dumps(c.get("properties"))[:600], "response": json.dumps(r)[:3000],
+           "response_full": json.dumps(r), "asset_id": asset_id_from({**(r.get("result") or {}), "_text": "".join(x.get("text") or "" for x in ((r.get("result") or {}).get("content") or []) if isinstance(x, dict))})}
     print("  REGPROBE        : %s" % json.dumps(out)[:2800], flush=True)
     RESULTS["regprobe"] = out
     return out

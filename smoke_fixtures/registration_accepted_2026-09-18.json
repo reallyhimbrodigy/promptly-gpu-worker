@@ -1,0 +1,9 @@
+{
+ "content": [
+  {
+   "type": "text",
+   "text": "{\n  \"assetId\": \"2610a165-a3ff-44e2-af54-2c448a66c5e4\",\n  \"assetIdPrefix\": \"2610a165a3\",\n  \"durationInSeconds\": 5,\n  \"height\": 1920,\n  \"name\": \"StatCard\",\n  \"type\": \"motion-graphic\",\n  \"validation\": {\n    \"errors\": [],\n    \"isValid\": true,\n    \"warnings\": [\n      \"Auto-fixed: Injected missing ({item}) prop to satisfy validator contract\"\n    ]\n  },\n  \"width\": 1080\n}"
+  }
+ ],
+ "note": "a real create_motion_graphic_from_code answer after normalise_properties; the id lives in the content text, not in any key of the envelope"
+}
