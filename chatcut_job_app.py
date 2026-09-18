@@ -1080,8 +1080,10 @@ def prestage(access_token, title_text, controls=None, source_path=None,
             _v = _find(_r, "validation") or {}
             if _v.get("errors"):
                 return _n, None, _v["errors"][:2]
-            return _n, ({"assetId": _find(_r, "assetId"), "overrides": _ov}
-                        if _ov else _find(_r, "assetId")), None
+            _aid_ = asset_id_from(_r)
+            if not _aid_:
+                return _n, None, ["registered without an id — the response carried none this reader could find: %s" % str(_r.get("_text") or _r)[:160]]
+            return _n, ({"assetId": _aid_, "overrides": _ov} if _ov else _aid_), None
         except Exception as e:                                    # noqa: BLE001
             return _n, None, [f"{type(e).__name__}: {e}"][:1]
     _reg_items = [(_i, _n, _c) for _i, (_n, _c) in enumerate(sorted(_reg.items()))
@@ -4120,6 +4122,26 @@ def stage_line(marks, wall_s):
     return txt, st
 
 
+def asset_id_from(envelope):
+    """The asset id ChatCut returned, wherever it put it. -> str or None.
+
+    create_motion_graphic_from_code answers JSON THEN PROSE like edit_item
+    does; once the reader took only the leading object, `_find(r, "assetId")`
+    went blind and 28 of 36 inventory components reached the agent as "?"
+    (Part 3 batch, 2026-09-18) while REGISTRY printed "registered". Searched:
+    every nested key named assetId, then the raw text for assetId: <id>, then
+    any id after the word asset.
+    """
+    if not isinstance(envelope, dict):
+        return None
+    v = _deep_find(envelope, "assetId")
+    if isinstance(v, str) and len(v) >= 8:
+        return v
+    txt = str(envelope.get("_text") or "")
+    m = re.search(r"assetId[\"':\s]+([0-9a-fA-F-]{8,})", txt) or re.search(r"[Aa]sset(?: id| ID|Id)?[\"':\s]+([0-9a-f]{10}(?:[0-9a-f-]{26})?)\b", txt)
+    return m.group(1) if m else None
+
+
 def _read_trace_rows(path="/work/proxy_trace.jsonl"):
     """The proxy's trace rows so far. -> list (empty when absent)."""
     try:
@@ -5885,7 +5907,8 @@ def probe_rewatch(clip_url: str, model: str = "claude-sonnet-5"):
             for b in ((ev.get("message") or {}).get("content") or []):
                 if b.get("type") == "text": texts.append(b.get("text") or "")
                 if b.get("type") == "tool_use": calls.append({"name": b.get("name"), "input": b.get("input")})
-    env = {"ENABLE_TOOL_SEARCH": "false", "MAX_THINKING_TOKENS": str(DEFAULT_THINK_TOKENS)}
+    # the probe's review runs the OFF arm like the jobs (thinking disabled on the wire); adaptive thought 199s on an unplanted timeline
+    env = {"ENABLE_TOOL_SEARCH": "false", "MAX_THINKING_TOKENS": "0"}
     tC = time.time()
     rc, err, wall, killed = turn_clock.run_timed(cli_command(sid, model) + ["--max-turns", "1"], "/work", "/work/probe_review.jsonl",
                                                  "/work/probe_review_timing.json", RUN_TIMEOUT_S, env=env, stdin_first=json.dumps(msg), on_event=_on)

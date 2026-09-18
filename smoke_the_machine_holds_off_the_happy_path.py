@@ -1112,6 +1112,18 @@ def main():
     check("the deciding prompt no longer names trackBoundFrom or a captions revision (turn 1's add was refused for them)",
           "trackBoundFrom" not in _para_all2 and "set_max_characters" not in _para_all2 and "revision" not in _para_all2)
 
+    # ---- THE ASSET ID IS READ WHEREVER CHATCUT PUTS IT (28 of 36 components reached the agent as "?") ----
+    check("asset_id_from finds a nested assetId, an assetId in the prose after the JSON, and names nothing when there is none",
+          J.asset_id_from({"validation": {"ok": True}, "_text": '{"validation":{"ok":true}}\n\nCreated motion graphic. assetId: 0f34ce33-1f17-4771-909d-cd496276cceb'}) == "0f34ce33-1f17-4771-909d-cd496276cceb"
+          and J.asset_id_from({"result": {"asset": {"assetId": "abcdef0123"}}}) == "abcdef0123"
+          and J.asset_id_from({"_text": "Created asset 64bf8e14c7 for you"}) == "64bf8e14c7"
+          and J.asset_id_from({"_text": "nothing here"}) is None)
+    _ro = next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "_register_one")
+    # THE GUARD, NOT THE RETURN: `if False:` leaves the return in place and unreachable
+    _guards = [ast.unparse(n.test) for n in ast.walk(_ro) if isinstance(n, ast.If) and any(isinstance(b, ast.Return) and "registered without an id" in ast.unparse(b) for b in n.body)]
+    check("a registration without an id is returned as a refusal, never counted as registered",
+          _guards == ["not _aid_"] and any(isinstance(n, ast.Call) and ast.unparse(n.func) == "asset_id_from" for n in ast.walk(_ro)), "guards=%s" % _guards)
+
     # ---- EVERY RUN-TIME IMPORT IS MOUNTED (the rewatch probe, 2026-09-17) ----
     _tree = ast.parse(src)
     _mounted = set(re.findall(r'"/root/([A-Za-z_][A-Za-z0-9_]*)\.py"', src))
