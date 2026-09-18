@@ -85,6 +85,30 @@ CONNECTION = http.client.HTTPSConnection
 # markers are raised to 1h; the last-message marker stays 5m, after them).
 RUN_FIRST_TEXT = os.environ.get("API_PROXY_RUN_FIRST_TEXT", "")
 MAX_BREAKPOINTS = 4
+# THE THINKING BUDGET, PLACED ON THE WIRE (Zac, 2026-09-18: "MAX_THINKING_TOKENS=2000,
+# recorded on the wire"). Measured: the CLI sends thinking {type: adaptive} with
+# NO budget for any MAX_THINKING_TOKENS > 0 (3000, 2000, 1024 all alike), and
+# {type: disabled} for 0. A bounded arm therefore exists only if the proxy
+# writes it: thinking {type: enabled, budget_tokens: N}. Recorded per call in
+# the fingerprint's request_fields, so the arm is read from the wire.
+THINKING_BUDGET = int(os.environ.get("API_PROXY_THINKING_BUDGET", "0") or 0)
+
+
+def apply_thinking_budget(body, budget):
+    """-> (body, note). A copy with thinking {enabled, budget_tokens} when a
+    budget is set and the request did not disable thinking; otherwise untouched."""
+    if not budget:
+        return body, {"rewritten": False, "why": "no budget"}
+    th = body.get("thinking")
+    if isinstance(th, dict) and th.get("type") == "disabled":
+        return body, {"rewritten": False, "why": "thinking disabled on the wire; a budget does not apply"}
+    b = json.loads(json.dumps(body))
+    budget = max(1024, int(budget))
+    mt = b.get("max_tokens")
+    if isinstance(mt, int) and mt <= budget:
+        b["max_tokens"] = budget + 4096
+    b["thinking"] = {"type": "enabled", "budget_tokens": budget}
+    return b, {"rewritten": True, "budget_tokens": budget, "was": th}
 
 
 def inject_watch_breakpoint(body, run_first_text):
@@ -288,9 +312,11 @@ class H(http.server.BaseHTTPRequestHandler):
             try:
                 body = json.loads(raw.decode("utf-8"))
                 body, inj = inject_watch_breakpoint(body, RUN_FIRST_TEXT)
-                if inj.get("injected"):
+                body, thk = apply_thinking_budget(body, THINKING_BUDGET)
+                if inj.get("injected") or thk.get("rewritten"):
                     raw = json.dumps(body).encode("utf-8")
                 _trace({"phase": "breakpoint", **inj})
+                _trace({"phase": "thinking", **thk})
                 fp = fingerprint(body)
                 fp["breakpoint"] = inj
                 with _LOCK:

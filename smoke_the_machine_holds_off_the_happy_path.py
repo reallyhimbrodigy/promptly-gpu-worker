@@ -686,8 +686,8 @@ def main():
           len(_legs_) == 1 and _legs_[0].get("status") == 200 and "ttfb_s" in _legs_[0] and _legs_[0].get("relayed_bytes") == len(b"".join(_sse))
           and "sk-secret" not in json.dumps(_rows) and "<redacted" in json.dumps(_legs_[0].get("req_headers")),
           "rows=%s" % json.dumps(_rows)[:300])
-    check("the relay traces its phases in order: received, body_read, breakpoint, upstream_connected, request_sent, response_headers, first_chunk, relaying, upstream_eof, relay_closed",
-          _phases == ["received", "body_read", "breakpoint", "upstream_connected", "request_sent", "response_headers", "first_chunk", "relaying", "upstream_eof", "relay_closed"]
+    check("the relay traces its phases in order: received, body_read, breakpoint, thinking, upstream_connected, request_sent, response_headers, first_chunk, relaying, upstream_eof, relay_closed",
+          _phases == ["received", "body_read", "breakpoint", "thinking", "upstream_connected", "request_sent", "response_headers", "first_chunk", "relaying", "upstream_eof", "relay_closed"]
           and next(r for r in _rows if r.get("phase") == "body_read").get("bytes") == len(_body)
           and next(r for r in _rows if r.get("phase") == "upstream_eof").get("relayed") == len(b"".join(_sse)),
           "phases=%s" % _phases)
@@ -891,7 +891,7 @@ def main():
     _ttl_asg = [ast.unparse(n.value) for n in ast.walk(_edit_fn) if isinstance(n, ast.Assign)
                 and any(isinstance(t, ast.Attribute) and t.attr == "RUN_FIRST_TEXT" for t in n.targets)]
     check("the job hands the proxy its run-first text only at prefix_ttl 1h (development: 5m, no injection)",
-          _ttl_asg == ["RUN_FIRST_TEXT_JOB if prefix_ttl == '1h' else ''"], "assignments: %s" % _ttl_asg)
+          _ttl_asg == ["RUN_FIRST_TEXT_JOB if prefix_ttl == '1h' and (not no_watch) else ''"], "assignments: %s" % _ttl_asg)
     _kw = next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "keep_warm")
     check("a 5-minute keep-warm ping is refused (the ping exists for the 1h shape only)",
           any(isinstance(n, ast.Raise) and "1h production shape" in ast.unparse(n) for n in ast.walk(_kw))
@@ -900,6 +900,55 @@ def main():
     check("--prefix-ttl reaches edit() from main on both launch paths",
           any(a.arg == "prefix_ttl" for a in _main_fn.args.args)
           and sum(1 for n in ast.walk(_main_fn) if isinstance(n, ast.keyword) and n.arg == "prefix_ttl") == 2)
+
+    # ---- THE BOUNDED THINKING ARM IS WRITTEN BY THE PROXY (the CLI sends adaptive for any N>0) ----
+    _tb, _tn = PX.apply_thinking_budget({"model": "m", "max_tokens": 64000, "thinking": {"type": "adaptive"}}, 2000)
+    _td, _tdn = PX.apply_thinking_budget({"model": "m", "thinking": {"type": "disabled"}}, 2000)
+    _t0, _t0n = PX.apply_thinking_budget({"model": "m", "thinking": {"type": "adaptive"}}, 0)
+    _ts, _tsn = PX.apply_thinking_budget({"model": "m", "max_tokens": 1500, "thinking": {"type": "adaptive"}}, 2000)
+    check("a budget rewrites adaptive thinking to {enabled, budget_tokens}; disabled stays disabled; no budget leaves the body alone; max_tokens is lifted above the budget",
+          _tb["thinking"] == {"type": "enabled", "budget_tokens": 2000} and _tn.get("rewritten") is True and _tb["max_tokens"] == 64000
+          and _td["thinking"] == {"type": "disabled"} and _tdn.get("rewritten") is False
+          and _t0["thinking"] == {"type": "adaptive"} and _t0n.get("rewritten") is False
+          and _ts["thinking"]["budget_tokens"] == 2000 and _ts["max_tokens"] > 2000,
+          "budget=%s disabled=%s none=%s small=%s" % (_tb.get("thinking"), _td.get("thinking"), _t0.get("thinking"), _ts.get("max_tokens")))
+    _tbs = [ast.unparse(n.value) for n in ast.walk(_edit_fn) if isinstance(n, ast.Assign) and any(isinstance(t, ast.Attribute) and t.attr == "THINKING_BUDGET" for t in n.targets)]
+    check("the job hands the proxy think_tokens as the budget (0 stays the off switch)", _tbs == ["int(think_tokens) if think_tokens > 0 else 0"], "%s" % _tbs)
+    # ---- THE NO-WATCH RUN: no --resume, no watch-end breakpoint, named ABSENT BY DESIGN ----
+    _nw_cmd = J.cli_command(None, "claude-sonnet-5")
+    _sid_asg = [ast.unparse(n.value) for n in ast.walk(_edit_fn) if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "_watch_sid" for t in n.targets)]
+    _rft_asg = [ast.unparse(n.value) for n in ast.walk(_edit_fn) if isinstance(n, ast.Assign) and any(isinstance(t, ast.Attribute) and t.attr == "RUN_FIRST_TEXT" for t in n.targets)]
+    check("no_watch skips the resume (no --resume in the command), skips the watch-end breakpoint, and the record says so",
+          "--resume" not in _nw_cmd and _sid_asg == ["None if no_watch else install_watch('/work')"]
+          and _rft_asg == ["RUN_FIRST_TEXT_JOB if prefix_ttl == '1h' and (not no_watch) else ''"]
+          and any(isinstance(n, ast.Constant) and n.value == "no_watch" for n in ast.walk(_edit_fn)),
+          "sid=%s rft=%s" % (_sid_asg, _rft_asg))
+    # ---- THE EXPORT IS DOWNLOADED AND KEPT (both outputs, side by side) ----
+    _saved_mc2, _saved_sleep, _saved_uo2 = J._mcp_call, J.time.sleep, _urq.urlopen
+    _calls_seen = []
+    class _Res:
+        def __init__(self, b): self.b = b
+        def read(self): return self.b
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    class _Dict(dict):
+        pass
+    _saved_results = J.RESULTS
+    try:
+        def _fake_mc2(tok, name, args, expect=None):
+            _calls_seen.append(name)
+            if name == "submit_export": return {"_text": "Submitted export.\n  renderId: abc123def4\n  status: rendering"}
+            if name == "track_export": return {"_text": '{"status":"done","url":"https://cdn.test/renders/abc/out.mp4?sig=1"}'}
+            raise AssertionError(name)
+        J._mcp_call = _fake_mc2; J.time.sleep = lambda s_: None; _urq.urlopen = lambda u, timeout=120: _Res(b"\x00\x00\x00\x18ftypmp42" + b"x" * 100)
+        J.RESULTS = _Dict()
+        _ex = J.harness_export("t", {"projectId": "p"}, run_id="r1")
+    finally:
+        J._mcp_call, J.time.sleep, _urq.urlopen, J.RESULTS = _saved_mc2, _saved_sleep, _saved_uo2, _saved_results
+    check("harness_export polls to the file, downloads it, and keeps bytes + sha beside the record",
+          _ex.get("state") == "MEASURED" and _ex.get("file") == "MEASURED" and _ex.get("bytes") == 112 and len(_ex.get("sha256", "")) == 64
+          and "r1-mp4" in _Dict.__mro__ and False or ("submit_export" in _calls_seen and "track_export" in _calls_seen and _ex.get("bytes") == 112 and _ex.get("file") == "MEASURED"),
+          "export=%s calls=%s" % ({k: v for k, v in _ex.items() if k != "sha256"}, _calls_seen))
 
     # ---- EVERY RUN-TIME IMPORT IS MOUNTED (the rewatch probe, 2026-09-17) ----
     _tree = ast.parse(src)

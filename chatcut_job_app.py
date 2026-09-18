@@ -2185,7 +2185,7 @@ def gate_b(tok, stage, rulings, spec, source_duration_s=None,
     return rep
 
 
-def harness_export(tok, stage):
+def harness_export(tok, stage, run_id=None):
     """THE EXPORT THE AGENT NO LONGER HAS.
 
     `submit_export` is out of the allowlist, so this is the only path to a
@@ -2212,7 +2212,32 @@ def harness_export(tok, stage):
             return {"state": "FAILED",
                     "why": "submit_export named no renderId anywhere in its "
                            "response: %s" % _blob[:400]}
-        return {"state": "MEASURED", "renderId": _m.group(1)}
+        out = {"state": "MEASURED", "renderId": _m.group(1), "file": "ABSENT", "why": "render still going when the harness left"}
+        # THE FILE ITSELF (Zac, 2026-09-18: save both outputs for a side-by-side
+        # watch). Poll to the finished URL, download, keep sha and size; the
+        # bytes go beside the record under RESULTS[run_id + "-mp4"].
+        url = None
+        for _iv in EXPORT_POLL_SCHEDULE:
+            time.sleep(_iv)
+            st = _mcp_call(tok, "track_export", {"projectId": stage["projectId"], "action": "status", "renderIds": _m.group(1)}, expect=None)
+            b2 = json.dumps(st) + str(st.get("_text") or "")
+            mm = re.search(r'(https://[^\s"\\]+out\.mp4[^\s"\\]*)', b2)
+            if mm:
+                url = mm.group(1)
+                break
+            if re.search(r'"status"\s*:\s*"(failed|error)"', b2):
+                out["file"], out["why"] = "FAILED", "the render reported failure"
+                return out
+        if not url:
+            return out
+        import urllib.request as _ur, hashlib as _hl
+        with _ur.urlopen(url, timeout=120) as rsp:
+            data = rsp.read()
+        if run_id:
+            import base64 as _b64
+            RESULTS[run_id + "-mp4"] = {"b64": _b64.b64encode(data).decode(), "bytes": len(data), "sha256": _hl.sha256(data).hexdigest(), "renderId": _m.group(1)}
+        out.update({"file": "MEASURED", "bytes": len(data), "sha256": _hl.sha256(data).hexdigest(), "why": "downloaded and kept under RESULTS[%s-mp4]" % run_id})
+        return out
     except Exception as e:                                        # noqa: BLE001
         return {"state": "FAILED", "why": str(e)[:200]}
 
@@ -4024,7 +4049,7 @@ RUN_FIRST_TEXT_PING = "ping"
                        modal.Secret.from_name("anthropic-api-key")])
 def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
          run_id: str = "latest", use_hands: bool = False, plan: str = "",
-         think_tokens: int = -1, effort: str = "", prefix_ttl: str = "1h", prestage_title: str = "",
+         think_tokens: int = -1, effort: str = "", prefix_ttl: str = "1h", no_watch: bool = False, prestage_title: str = "",
          prestage_controls: str = "", prestage_titles: str = "",
          transcript: str = "",
          # THE SUBTRACTION EXPERIMENT (2026-09-17). Same paragraph, same
@@ -4530,7 +4555,11 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     # one failure that looks exactly like success: the CLI starts a FRESH
     # session, the edit runs, every gate passes, and the reference layer was
     # never in context.
-    _watch_sid = install_watch("/work")
+    # THE NO-WATCH RUN (Zac, 2026-09-18): the reference watch absent from the
+    # prefix — paragraph + inventory + source watch only. Its own prefix
+    # version, its own cold write. The first measurement of what the watch does.
+    _watch_sid = None if no_watch else install_watch("/work")
+    print("  WATCH           : %s" % ("ABSENT BY DESIGN — no --resume; the prefix is the paragraph, the inventory and the source watch" if no_watch else "resumed %s" % _watch_sid), flush=True)
     _cmd = cli_command(_watch_sid, model, use_hands, agents if use_hands else None, _pm, effort=(effort or None))
     # THE THINKING CAP. 267 of 608 seconds — 44% of the wall — was `thinking`
     # blocks on an agent handed a COMPLETE plan. It is executing, not deciding,
@@ -4579,7 +4608,9 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         # the proxy places the watch-end breakpoint at 1h and the hourly ping
         # keeps it; "5m" is development — no ping, no injection, call 1 writes
         # and calls 2+ read (the within-run assertion alone).
-        _px.RUN_FIRST_TEXT = RUN_FIRST_TEXT_JOB if prefix_ttl == "1h" else ""
+        _px.RUN_FIRST_TEXT = RUN_FIRST_TEXT_JOB if (prefix_ttl == "1h" and not no_watch) else ""
+        # the bounded thinking arm is written by the proxy (the CLI sends adaptive for any N>0)
+        _px.THINKING_BUDGET = int(think_tokens) if think_tokens > 0 else 0
         print("  PREFIX TTL      : %s — %s" % (prefix_ttl, "watch-end breakpoint at 1h (production shape)" if prefix_ttl == "1h"
                                                  else "no breakpoint injected; call 1 writes 5m, calls 2+ read (development)"), flush=True)
         _px_port, _px_ca = _px.serve_mitm(0, "/work/mitm")
@@ -4781,10 +4812,11 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     # --effort sets output_config.effort, default xhigh.
     _wire = [((c.get("fp") or {}).get("request_fields") or {}) for c in _read_prefix_rows()]
     _tm["prefix_ttl"] = prefix_ttl
+    _tm["no_watch"] = bool(no_watch)
     _tm["thinking_arm"] = {"env": {k: v for k, v in _env.items() if k in ("MAX_THINKING_TOKENS",)},
                            "effort_flag": effort or None,
                            "asked": ("thinking {type: disabled}" if _env.get("MAX_THINKING_TOKENS") == "0"
-                                     else "thinking {type: adaptive}, no budget"),
+                                     else "thinking {type: enabled, budget_tokens: %d} — placed by the proxy; the CLI itself sends adaptive for any N>0" % int(think_tokens if think_tokens > 0 else DEFAULT_THINK_TOKENS)),
                            "on_the_wire": [{"thinking": w.get("thinking"), "effort": (w.get("output_config") or {}).get("effort")} for w in _wire]}
     print("  THINKING ARM    : %s" % json.dumps(_tm["thinking_arm"]), flush=True)
     if _tm.get("terminal"):
@@ -5231,7 +5263,7 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         print("  EXPORT          : REFUSED — %s" % out["floor"]["why"],
               flush=True)
     else:
-        _export = harness_export(tok, _stage) if _stage else {
+        _export = harness_export(tok, _stage, run_id=run_id) if _stage else {
             "state": "ABSENT", "why": "no prestage"}
         print("  EXPORT          : %s" % json.dumps(_export), flush=True)
 
@@ -6680,7 +6712,7 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
          run_id: str = "", wait: bool = False,
          read_ceiling: int = 0,
          model: str = "claude-sonnet-5", use_hands: bool = False,
-         think_tokens: int = -1, effort: str = "", prefix_ttl: str = "1h",
+         think_tokens: int = -1, effort: str = "", prefix_ttl: str = "1h", no_watch: bool = False,
          prestage_title: str = "", prestage_controls: str = "",
          prestage_titles: str = "", transcript_file: str = ""):
     if not clip_url:
@@ -6754,7 +6786,7 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
     if wait:
         print(json.dumps(edit.remote(clip_url, brief, model=model, run_id=rid,
                                      use_hands=use_hands, plan=plan_text,
-                                     think_tokens=think_tokens, effort=effort, prefix_ttl=prefix_ttl,
+                                     think_tokens=think_tokens, effort=effort, prefix_ttl=prefix_ttl, no_watch=no_watch,
                                      prestage_title=prestage_title,
                       prestage_controls=prestage_controls,
                       prestage_titles=prestage_titles,
@@ -6784,7 +6816,7 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
     require_detach("a spawned ChatCut edit")
     call = edit.spawn(clip_url, brief, model=model, run_id=rid,
                       use_hands=use_hands, plan=plan_text,
-                      think_tokens=think_tokens, effort=effort, prefix_ttl=prefix_ttl,
+                      think_tokens=think_tokens, effort=effort, prefix_ttl=prefix_ttl, no_watch=no_watch,
                       prestage_title=prestage_title,
                       prestage_controls=prestage_controls,
                       prestage_titles=prestage_titles,
