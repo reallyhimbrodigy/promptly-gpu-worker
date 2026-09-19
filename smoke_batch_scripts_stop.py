@@ -88,7 +88,9 @@ check("a cold write with the watch is still A-red (1)", BV.verdict(rec2(True, Fa
 check("a within-run CACHE MISS on the no-watch arm is still red", BV.verdict(rec2(False, True, "CACHE MISS"))[0] == 1)
 # the reader, driven on five rows: three slots, one unrunnable fixture, one unreadable line, one surplus preset
 d3 = tempfile.mkdtemp(prefix="briefs_")
-rows = ['{"id": "pop-but-calm", "fixture": "talking_head", "kind": "preset+modifier", "brief": "punchy, but keep it calm in the middle", "expect": "HONORED", "means": "at least one zoom placed"}',
+rows = ['{"id": "b2-preset", "fixture": "car_mid", "request_class": "PRESET_PLUS_MODIFIER", "flags": {"negative_constraint": false}, "brief": "Make this a smooth video, add zooms", "asks": [{"n": 1, "expect": "HONORED", "means": "at least one zoom item"}, {"n": 2, "expect": "HONORED"}]}',
+        '{"id": "b2-caps", "fixture": "talking_head", "request_class": "PRESET_PLUS_MODIFIER", "flags": {"negative_constraint": true}, "brief": "under one minute, without captions", "asks": [{"n": 1, "expect": "HONORED", "means": "timeline.duration_s < 60"}]}',
+        '{"id": "pop-but-calm", "fixture": "talking_head", "kind": "preset+modifier", "brief": "punchy, but keep it calm in the middle", "expect": "HONORED", "means": "at least one zoom placed"}',
         '{"id": "no-caps", "fixture": "talking_head", "brief": "Tighten it up. No captions.", "expect": "HONORED", "means": "no caption track on the timeline"}',
         '{"id": "arabic-two-sources", "fixture": "pet_video", "brief": "cut the two clips together", "fixture_note": "second source not staged"}',
         'not json at all',
@@ -97,12 +99,15 @@ rows = ['{"id": "pop-but-calm", "fixture": "talking_head", "kind": "preset+modif
 io.open(os.path.join(d3, "b.jsonl"), "w", encoding="utf-8").write("\n".join(rows) + "\n")
 rb = subprocess.run([sys.executable, os.path.join(HERE, "scripts", "batch_briefs.py"), os.path.join(d3, "b.jsonl"), os.path.join(d3, "out")], capture_output=True, text=True)
 picks = [l.split("\t") for l in rb.stdout.strip().split("\n") if l.strip()]
-check("the reader picks one row per slot, in file order, and exits 0", rb.returncode == 0 and [p[0] for p in picks] == ["pop-but-calm", "no-caps", "structured-1"] and [p[3] for p in picks] == list(BB.SLOTS), rb.stdout[:200])
+check("the reader picks one row per slot, in file order, and exits 0", rb.returncode == 0 and [p[0] for p in picks] == ["b2-preset", "b2-caps", "structured-1"] and [p[3] for p in picks] == list(BB.SLOTS), rb.stdout[:200])
+check("Builder-2's request_class is read, a preset brief carrying 'without captions' fills the constraint slot, and each ask's means travels with the pick",
+      re.search(r"PICKED +b2-caps — no-captions constraint .*class PRESET_PLUS_MODIFIER .*n1 HONORED: timeline.duration_s < 60", rb.stderr) is not None
+      and re.search(r"PICKED +b2-preset — preset\+modifier .*n2 HONORED: UNCHECKED \(no means\)", rb.stderr) is not None, rb.stderr[-500:])
 check("the reader names an unrunnable row UNRUNNABLE by id", re.search(r"UNRUNNABLE +arabic-two-sources .*pet_video.*second source not staged", rb.stderr) is not None, rb.stderr[-300:])
-check("an unreadable line is named by number, and the surplus preset is SKIPPED with the reason", "UNREADABLE line 4" in rb.stderr and re.search(r"SKIPPED +second-preset .*already filled by pop-but-calm", rb.stderr) is not None, rb.stderr[-300:])
+check("an unreadable line is named by number, and the surplus presets are SKIPPED with the reason", "UNREADABLE line 6" in rb.stderr and re.search(r"SKIPPED +second-preset .*already filled by b2-preset", rb.stderr) is not None and re.search(r"SKIPPED +pop-but-calm .*already filled by b2-preset", rb.stderr) is not None, rb.stderr[-300:])
 check("each pick maps its fixture NAME to the staged source key and writes the brief to a file", all(p[1].startswith("ab-sources/reliability-fixtures-v3/") and os.path.exists(p[2]) for p in picks))
 check("a structured brief travels as JSON text the agent receives verbatim", json.loads(io.open(picks[2][2], encoding="utf-8").read()).get("goal") == "a 15s teaser")
-check("a row without `means` is marked UNCHECKED", re.search(r"PICKED +structured-1 .*UNCHECKED", rb.stderr) is not None)
+check("a row without `means` is marked UNCHECKED", re.search(r"PICKED +structured-1 .*UNCHECKED \(no means\)", rb.stderr) is not None)
 rb2 = subprocess.run([sys.executable, os.path.join(HERE, "scripts", "batch_briefs.py"), os.path.join(d3, "none.jsonl"), os.path.join(d3, "out")], capture_output=True, text=True)
 check("a missing fixture file is one UNREADABLE line and zero picks, exit 0 (the batch reports 'no briefs')", rb2.returncode == 0 and rb2.stdout.strip() == "" and "UNREADABLE" in rb2.stderr and "not landed" in rb2.stderr)
 # spend counts both of G's calls

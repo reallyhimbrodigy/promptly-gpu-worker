@@ -10,7 +10,10 @@ Zac's three slots (2026-09-18): a preset+modifier, a "no captions" constraint, o
 runnable row of each slot in file order is picked; a slot with no row stays empty and is reported so.
 The fixture is a NAME (fixtures/README.md); this side maps it to the staged source key. A row whose
 fixture has no staged source here is UNRUNNABLE by name, never silently dropped.
-`means` is recorded beside the pick for the post-run read-back check; a row without one is marked UNCHECKED.
+Builder-2's rows (landed 7abf206) carry `request_class` (PRESET_PLUS_MODIFIER / STRUCTURED_BRIEF), `flags`
+(negative_constraint) and `asks[]` each with `expect` and `means`; the means are recorded beside the pick
+for the post-run read-back check; an ask without one is marked UNCHECKED. A preset brief that carries a
+no-captions phrase fills the CONSTRAINT slot first — that is the slot Zac named.
 """
 import io
 import json
@@ -32,21 +35,30 @@ def _first(row, *keys):
     return None
 
 
+_NO_CAPS = re.compile(r"\b(?:no|without|skip|drop|zero)\s+(?:the\s+|any\s+)?(?:captions?|subtitles?|subs)\b|\bcaption-?free\b", re.I)
+
+
 def slot_of(row, brief):
-    """Which of Zac's three slots a row fills, from its declared kind first and its content second."""
-    kind = str(_first(row, "kind", "category", "class", "type", "slot") or "").lower()
+    """Which of Zac's three slots a row fills: a no-captions phrase claims the constraint slot first
+    (whatever the row's class says), then the declared class (Builder-2's `request_class`, or kind/
+    category/class/type/slot), then the content."""
+    kind = str(_first(row, "request_class", "kind", "category", "class", "type", "slot") or "").lower()
     text = brief if isinstance(brief, str) else json.dumps(brief)
+    if _NO_CAPS.search(text) or "caption" in kind or "constraint" in kind:
+        return SLOTS[1]
     if "preset" in kind or _first(row, "preset") is not None:
         return SLOTS[0]
-    if "caption" in kind or "constraint" in kind:
-        return SLOTS[1]
-    if "structured" in kind or not isinstance(brief, str):
-        return SLOTS[2]
-    if re.search(r"\b(no|without|skip) (captions?|subtitles?)\b", text, re.I):
-        return SLOTS[1]
-    if text.lstrip().startswith("{"):
+    if "structured" in kind or not isinstance(brief, str) or text.lstrip().startswith("{"):
         return SLOTS[2]
     return "other"
+
+
+def means_of(row):
+    """The read-back checks a row asks for: its `asks[]` (n, expect, means) or a row-level means."""
+    asks = row.get("asks")
+    if isinstance(asks, list) and asks:
+        return "; ".join("n%s %s: %s" % (a.get("n"), a.get("expect") or "-", (a.get("means") or "UNCHECKED (no means)")) for a in asks if isinstance(a, dict))
+    return row.get("means") or "UNCHECKED (no means)"
 
 
 def report(status, rid, why=""):
@@ -88,7 +100,7 @@ def main():
         bf = os.path.join(outdir, "brief_%s.txt" % rid)
         io.open(bf, "w", encoding="utf-8").write(text.strip() + "\n")
         picked[slot] = rid
-        report("PICKED", rid, "%s | fixture %s | expect %s | means %s" % (slot, fixture, row.get("expect") or "-", row.get("means") or "UNCHECKED (no means)"))
+        report("PICKED", rid, "%s | fixture %s | class %s | asks %s" % (slot, fixture, _first(row, "request_class", "kind") or "-", means_of(row)[:400]))
         print("\t".join([rid, KEYS[fixture], bf, slot]))
     for sl in SLOTS:
         if sl not in picked:
