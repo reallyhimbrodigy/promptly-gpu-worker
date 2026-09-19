@@ -621,8 +621,15 @@ def main():
           len(_labels) >= 2 and len(_words) >= 9 and not _hits, "labels=%s hits=%s" % (_labels, _hits))
     _acted = next(v for n in ast.walk(_prb) if isinstance(n, ast.Dict) for k, v in zip(n.keys, n.values)
                   if isinstance(k, ast.Constant) and k.value == "named")
+    # THE PROPERTY, not the variable's name: each named plant is gated on the dict DERIVED FROM THE OPS
+    # (the assignment whose value reads `touched.get(...)`), never on the label the probe itself planted
+    _acted_name = next((t.id for n in ast.walk(_prb) if isinstance(n, ast.Assign) and isinstance(n.value, ast.Dict)
+                        and "touched.get(" in ast.unparse(n.value) for t in n.targets if isinstance(t, ast.Name)), None)
     check("a plant counts as named only through an op that touched it",
-          len(_acted.values) == 3 and all("_acted[" in ast.unparse(v) for v in _acted.values), ast.unparse(_acted)[:200])
+          _acted_name is not None and len(_acted.values) == 3
+          and all(isinstance(v, ast.BoolOp) and isinstance(v.op, ast.And) and isinstance(v.values[0], ast.Subscript)
+                  and isinstance(v.values[0].value, ast.Name) and v.values[0].value.id == _acted_name for v in _acted.values),
+          "acted dict=%s named=%s" % (_acted_name, ast.unparse(_acted)[:160]))
     # 6. the CLI version is read where the CLI runs
     import subprocess as _sp
     _saved_run = _sp.run
@@ -1207,6 +1214,180 @@ def main():
           "37 serial registrations were 35s of a 44s prestage")
     check("prestage reports its phases",
           "PRESTAGE PHASES" in pre and "'phases': _pt" in pre)
+
+    # ---- ITEM 6: ZAC'S THREE ADDITIONS (2026-09-18) — the negative control, the density, the itemised tail ----
+    _tree6 = ast.parse(src)
+    _fn6 = lambda name: next(n for n in ast.walk(_tree6) if isinstance(n, ast.FunctionDef) and n.name == name)
+    _calls6 = lambda node, name: sorted((n for n in ast.walk(node) if isinstance(n, ast.Call) and getattr(n.func, "id", "") == name), key=lambda n: (n.lineno, n.col_offset))
+    _prb6 = _fn6("probe_rewatch"); _prb6_src = ast.unparse(_prb6)
+    check("the probe takes a density and hands it to the rewatch instrument",
+          any(a.arg == "density_fps" for a in _prb6.args.args)
+          and any(any(k.arg == "density_fps" and isinstance(k.value, ast.Name) and k.value.id == "density_fps" for k in c.keywords) for c in _calls6(_prb6, "_preview_frames")),
+          "G runs at 2 fps and 1 fps; a fixed density makes the 1 fps arm a lie")
+    # THE CONTROL READS THE CLEAN TIMELINE BEFORE ANY PLANT LANDS (by source position of the calls)
+    _ctl6 = [c.lineno for c in _calls6(_prb6, "_review") if c.args and isinstance(c.args[0], ast.Constant) and c.args[0].value == "control"]
+    _pl6 = [c.lineno for c in _calls6(_prb6, "_plant")]
+    check("the control review runs before the plants land",
+          bool(_ctl6) and bool(_pl6) and min(_ctl6) < min(_pl6), "control at %s, plants at %s" % (_ctl6, _pl6))
+    check("false positives are counted from the control's own ops, not declared",
+          any(any(isinstance(k, ast.Constant) and k.value == "false_positives" and isinstance(v, ast.Call) and getattr(v.func, "id", "") == "len"
+                  for k, v in zip(n.keys, n.values)) for n in ast.walk(_prb6) if isinstance(n, ast.Dict)),
+          "a control that reports 0 without reading anything is the tidy zero")
+    check("the probe reads the ping's entry through the same transparent proxy as a job, on the off arm",
+          "serve_mitm" in _prb6_src and "mitm_env" in _prb6_src and "RUN_FIRST_TEXT" in _prb6_src and "'MAX_THINKING_TOKENS': '0'" in _prb6_src)
+    check("each review carries the job's cold-write rule and the API's own status",
+          "wr > 0.5 * max(1, wr + rd)" in _prb6_src and "_read_trace_rows('/work/probe_trace.jsonl')" in _prb6_src and "'api_status': _api.get('status')" in _prb6_src)
+    check("the probe's two densities are two records, not one overwritten",
+          "'probe-rewatch-%gfps' % density_fps" in _prb6_src)
+    # THE EXPORT TAIL, ITEMISED: four marks, in order, and the parts SUM to the tail (a remainder would be arithmetic saying the model is wrong)
+    _hx6 = _fn6("harness_export")
+    _hx6_marks = [c.args[0].value for c in _calls6(_hx6, "mark") if c.args and isinstance(c.args[0], ast.Constant)]
+    check("harness_export marks submit, render, download, upload in that order",
+          _hx6_marks == ["export.submit", "export.render", "export.download", "export.upload"], str(_hx6_marks))
+    _ed6 = _fn6("edit"); _ed6_src = ast.unparse(_ed6)
+    check("edit() marks the gate before it asks for the render, and passes the marker in",
+          "mark('export.gate')" in _ed6_src and "harness_export(tok, _stage, run_id=run_id, mark=mark)" in _ed6_src
+          and _ed6_src.index("mark('export.gate')") < _ed6_src.index("harness_export(tok, _stage, run_id=run_id, mark=mark)"))
+    _sl6, _sd6 = J.stage_line({"agent": 100.0, "export.gate": 103.0, "export.submit": 103.5, "export.render": 120.0, "export.download": 128.0, "export.upload": 132.6}, 132.6)
+    _parts6 = _sd6.get("export_tail.parts") or {}
+    check("the export tail is itemised: gate + render + download + upload = the tail",
+          _parts6 == {"gate": 3.0, "render": 17.0, "download": 8.0, "upload": 4.6} and abs(sum(_parts6.values()) - _sd6["export_tail"]) < 0.11
+          and "(export tail: gate 3.0, render 17.0, download 8.0, upload 4.6)" in _sl6, "%s %s" % (_parts6, _sl6))
+    _sl6b, _sd6b = J.stage_line({"agent": 100.0}, 110.0)
+    check("a withheld export leaves the tail unitemised, not itemised as empty", "(export tail:" not in _sl6b and _sd6b["export_tail"] == 10.0, _sl6b)
+    # THE REWATCH NAMES ITS DENSITY (the header once said 2fps whatever was rendered)
+    _rm6 = J.rewatch_message(1, {"frames": 20, "sheets": [], "state": "ABSENT", "why": "x", "density_fps": 1.0}, ["  - item"], [])
+    _rt6 = _rm6["message"]["content"][0]["text"]
+    check("the rewatch header names the density it was rendered at", "20 frames at 1fps" in _rt6 and "2fps" not in _rt6, _rt6[:90])
+    _mn6 = _fn6("main"); _mn6_src = ast.unparse(_mn6)
+    check("a job takes --density-fps and edit() hands it to the rewatch instrument and the run line",
+          any(a.arg == "density_fps" for a in _ed6.args.args) and any(a.arg == "density_fps" for a in _mn6.args.args)
+          and any(any(k.arg == "density_fps" and isinstance(k.value, ast.Name) and k.value.id == "density_fps" for k in c.keywords) for c in _calls6(_ed6, "_preview_frames"))
+          and "'density_fps': density_fps" in _ed6_src and "density_fps=density_fps" in _mn6_src)
+    check("a brief can come from a file (quoting-safe for the batch)",
+          any(a.arg == "brief_file" for a in _mn6.args.args) and "brief = open(brief_file" in _mn6_src)
+    check("the run line says whether the run had the watch (the no-watch verdict reads it)", "'no_watch': bool(no_watch)" in _ed6_src)
+
+    # ---- ITEM 7: THE BRIEF'S HARD CONSTRAINTS, ENFORCED (Zac, 2026-09-18) ----
+    _bc = J.brief_constraints
+    _k = lambda b: [(c["kind"], (c.get("value") or {}).get("op"), (c.get("value") or {}).get("seconds")) if c["checkable"] else (c["kind"], "UNCHECKED") for c in _bc(b)]
+    check("a 'no captions' brief is extracted as a checkable constraint",
+          _k("Tighten it up. No captions.") == [("no_captions", None, None)] and _k("Keep it caption-free.") == [("no_captions", None, None)]
+          and _k("No subtitles please, and keep it under 30 seconds") == [("no_captions", None, None), ("duration", "<=", 30.0)], str(_k("Tighten it up. No captions.")))
+    check("no music, no text, and a coordinated 'captions or titles' are read",
+          _k("without music, make it pop") == [("no_music", None, None)] and _k("no on-screen text at all") == [("no_text", None, None)]
+          and _k("Don't add any captions or titles") == [("no_captions", None, None), ("no_text", None, None)] and _k("no graphics") == [("no_text", None, None)])
+    check("durations: under/at least/exactly/about/a 15-second/cut down to, seconds and minutes, word numbers",
+          _k("a 15-second teaser") == [("duration", "~", 15.0)] and _k("exactly one minute") == [("duration", "==", 60.0)]
+          and _k("at least 20 seconds") == [("duration", ">=", 20.0)] and _k("cut it down to 40 seconds") == [("duration", "~", 40.0)]
+          and _k("about 45s, punchy") == [("duration", "~", 45.0)] and _k("under two minutes") == [("duration", "<=", 120.0)])
+    _hr = _bc("blur his face in the second half")
+    check("blur/hide a region is reported UNCHECKED, never passed",
+          len(_hr) == 1 and _hr[0]["kind"] == "hide_region" and _hr[0]["checkable"] is False and "pixel detector" in str(_hr[0]["why"])
+          and _k("hide the license plate") == [("hide_region", "UNCHECKED")]
+          and J.check_constraints(_hr, [], None, {"state": "MEASURED", "cards": 0}, 20.0)[1][0]["state"] == "UNCHECKED"
+          and J.check_constraints(_hr, [], None, {"state": "MEASURED", "cards": 0}, 20.0)[0] == [], str(_hr))
+    _sb = {"goal": "a teaser", "must": ["no captions", "no music"], "duration_s": 20}
+    check("a structured brief (object or its JSON text) yields the same constraints; a taste brief yields none",
+          _k(_sb) == [("no_captions", None, None), ("no_music", None, None), ("duration", "~", 20.0)] and _k(json.dumps(_sb)) == _k(_sb)
+          and _k("captions: false\nmusic: off") == [("no_captions", None, None), ("no_music", None, None)] and _k("just make it pop") == [])
+    # THE RED PROOF ZAC NAMED: a 'no captions' brief against a timeline carrying a caption track
+    _tl = [{"id": "base-1", "itemType": "video", "timelineRange": {"fromFrame": 0, "toFrame": 900}},
+           {"id": "c1d2e3f4-0000", "itemType": "motion-graphic", "asset": {"name": "caption:TwoTone"}, "trackAlias": "V2", "timelineRange": {"fromFrame": 0, "toFrame": 900}}]
+    _f, _rows = J.check_constraints(_bc("no captions"), _tl, "base-1", {"state": "MEASURED", "cards": 0, "why": "x"}, 30.0)
+    check("a 'no captions' brief and a timeline carrying a caption track is a fault naming the track",
+          len(_f) == 1 and "c1d2e3f4" in _f[0] and "caption:TwoTone" in _f[0] and _rows[0]["state"] == "FAIL", str(_f))
+    _f2, _ = J.check_constraints(_bc("no captions"), _tl[:1], "base-1", {"state": "MEASURED", "cards": 12, "why": "from 'cards'"}, 30.0)
+    _f3, _r3 = J.check_constraints(_bc("no captions"), _tl[:1], "base-1", {"state": "MEASURED", "cards": 0, "why": "x"}, 30.0)
+    check("native caption cards are the same fault (cleared with edit_captions); zero cards and no track is a pass",
+          len(_f2) == 1 and "12 native caption card" in _f2[0] and "edit_captions" in _f2[0] and _f3 == [] and _r3[0]["state"] == "PASS", "%s / %s" % (_f2, _r3))
+    _f4, _r4 = J.check_constraints(_bc("no captions"), _tl[:1], "base-1", {"state": "ABSENT", "cards": None, "why": "no card list and no count"}, 30.0)
+    _f5, _r5 = J.check_constraints(_bc("no captions"), _tl[:1], "base-1", {"state": "FAILED", "cards": None, "why": "read_captions FAILED: 500"}, 30.0)
+    check("a caption read that is ABSENT or FAILED is a fault, not a pass",
+          len(_f4) == 1 and "UNVERIFIED" in _f4[0] and _r4[0]["state"] == "ABSENT" and len(_f5) == 1 and _r5[0]["state"] == "FAILED", "%s / %s" % (_f4, _f5))
+    _au = [{"id": "base-1", "itemType": "video", "timelineRange": {"fromFrame": 0, "toFrame": 900}},
+           {"id": "m1", "itemType": "audio", "asset": {"name": "music-upbeat.mp3"}, "timelineRange": {"fromFrame": 0, "toFrame": 900}},
+           {"id": "x1", "itemType": "audio", "asset": {"name": "whoosh"}, "timelineRange": {"fromFrame": 10, "toFrame": 40}}]
+    _fm, _ = J.check_constraints(_bc("no music"), _au, "base-1", {"state": "MEASURED", "cards": 0}, 30.0)
+    _fm2, _rm2 = J.check_constraints(_bc("no music"), [_au[0], _au[2]], "base-1", {"state": "MEASURED", "cards": 0}, 30.0)
+    check("no music: a 30s audio item is a fault; a 1s sound effect is not",
+          len(_fm) == 1 and "m1 music-upbeat.mp3 30.0s" in _fm[0] and _fm2 == [] and _rm2[0]["state"] == "PASS", "%s / %s" % (_fm, _rm2))
+    _tx = [{"id": "base-1", "itemType": "video", "timelineRange": {"fromFrame": 0, "toFrame": 900}},
+           {"id": "s1", "itemType": "motion-graphic", "asset": {"name": "StatCard"}, "timelineRange": {"fromFrame": 30, "toFrame": 180}}]
+    _ft, _ = J.check_constraints(_bc("no text"), _tx, "base-1", {"state": "MEASURED", "cards": 0}, 30.0)
+    _ft2, _ = J.check_constraints(_bc("no text"), _tx, "base-1", {"state": "MEASURED", "cards": 0}, 30.0, text_carriers={"StatCard", "PullQuote"})
+    _ft3, _rt3 = J.check_constraints(_bc("no text"), _tx, "base-1", {"state": "MEASURED", "cards": 0}, 30.0, text_carriers={"PullQuote"})
+    check("no text: a text-carrying overlay is a fault; the component text map decides, and no map counts every overlay",
+          len(_ft) == 1 and "s1 StatCard" in _ft[0] and len(_ft2) == 1 and _ft3 == [] and _rt3[0]["state"] == "PASS", "%s / %s / %s" % (_ft, _ft2, _rt3))
+    _du = lambda b, end: J.check_constraints(_bc(b), _tl[:1], "base-1", {"state": "MEASURED", "cards": 0}, end)
+    check("duration: at or under 30 fails at 35 and passes at 28; about 45 fails at 50 and passes at 47; exactly 60 passes at 60.4",
+          len(_du("under 30 seconds", 35.0)[0]) == 1 and _du("under 30 seconds", 28.0)[0] == [] and len(_du("about 45s", 50.0)[0]) == 1
+          and _du("about 45s", 47.0)[0] == [] and _du("exactly 60 seconds", 60.4)[0] == [] and len(_du("at least 20 seconds", 15.0)[0]) == 1)
+    _fd, _rd = _du("under 30 seconds", None)
+    check("a duration with no timeline end is UNVERIFIED (ABSENT), a fault", len(_fd) == 1 and "UNVERIFIED" in _fd[0] and _rd[0]["state"] == "ABSENT")
+    # THE TURN MACHINE HOLDS THE EXPORT (verify is the hook; injectable, driven here)
+    _U1 = {"read": 0, "write": 300000, "in": 2, "out": 900}; _UN = {"read": 300000, "write": 400, "in": 2, "out": 300}
+    _rwc = lambda n, final: {"message": {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "rw%d" % n}]}}, "sheets": 2, "faults": [], "scan": []}
+    _vlog = []
+    def _mkv(faults_by_n):
+        def _v(n):
+            _vlog.append(n); return list(faults_by_n.get(n) or [])
+        return _v
+    _exp = _mk_invoke(lambda n: (["edit_item"], "", _U1) if n == 1 else ([], "export", _UN))
+    _tmc = J.run_three_turns(_exp, _rwc, {"type": "user", "message": {"role": "user", "content": []}}, verify=_mkv({2: ["no captions (brief): caption track c1"]}))
+    check("a violated constraint at a clean turn 2 goes to the next turn, not the export",
+          len(_tmc["turns"]) == 3 and _tmc["terminal"] is None and _tmc["verdict"] == "export at turn 3 (constraint cleared)"
+          and _tmc.get("constraint_faults") == {2: ["no captions (brief): caption track c1"]} and len(_tmc["rewatches"]) == 2, "%s %s %s" % (len(_tmc["turns"]), _tmc["verdict"], _tmc.get("constraint_faults")))
+    _vlog.clear()
+    _exp2 = _mk_invoke(lambda n: (["edit_item"], "", _U1) if n == 1 else ([], "export", _UN))
+    _tmv = J.run_three_turns(_exp2, _rwc, {"type": "user", "message": {"role": "user", "content": []}}, verify=_mkv({2: ["f"], 3: ["f"], 4: ["f"]}))
+    check("a constraint still violated after the cap is terminal, never exported",
+          len(_tmv["turns"]) == 4 and (_tmv["terminal"] or {}).get("kind") == "CONSTRAINT VIOLATED" and (_tmv["terminal"] or {}).get("at") == 4
+          and _tmv["verdict"] is None and sorted(_tmv.get("constraint_faults") or {}) == [2, 3, 4] and _vlog == [2, 3, 4], "%s %s" % (_tmv["terminal"], _vlog))
+    _vlog.clear()
+    _exp3 = _mk_invoke(lambda n: (["edit_item"], "", _U1) if n == 1 else ([], "export", _UN))
+    _tmo = J.run_three_turns(_exp3, _rwc, {"type": "user", "message": {"role": "user", "content": []}}, verify=_mkv({}))
+    _vlog2 = list(_vlog); _vlog.clear()
+    _fix = _mk_invoke(lambda n: (["edit_item"], "", _U1 if n == 1 else _UN) if n <= 2 else ([], "export", _UN))
+    _tmf = J.run_three_turns(_fix, _rwc, {"type": "user", "message": {"role": "user", "content": []}}, verify=_mkv({}))
+    check("a clean verify leaves the common path alone (export at turn 2), and verify runs only when the agent asks to export",
+          _tmo["verdict"] == "export at turn 2 (clean)" and _vlog2 == [2] and _tmf["verdict"] == "export at turn 3 (one fix pass)" and _vlog == [3], "%s %s / %s %s" % (_tmo["verdict"], _vlog2, _tmf["verdict"], _vlog))
+    # THE SEAM IN edit(): the hook is handed over, the rewatch carries the faults, the agent is told, the record keeps it
+    _ed7 = ast.unparse(next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "edit"))
+    check("edit() hands the constraint check to the turn machine",
+          re.search(r"run_three_turns\(_invoke, _rewatch, _first_message, t0=t0, verify=_verify\)", _ed7) is not None)
+    check("the rewatch hands constraint violations to the next turn as faults",
+          "_constraints_now(_items, _base," in _ed7 and "'BRIEF CONSTRAINT VIOLATED — %s' % f for f in _cf_rw" in _ed7 and "'constraints': _crows_rw" in _ed7)
+    check("the record keeps what was extracted, every read, and the faults by turn",
+          "'constraints': {'extracted': _constraints, 'reads': _constraint_reads, 'faults_by_turn': _tm.get('constraint_faults')" in _ed7 and "constraints=_constraints" in _ed7)
+    # THE MESSAGE THE AGENT RECEIVES, not the function's text (a block under `if False:` still reads as present in the source)
+    _m1c = J.pass1_message(None, [], os.path.join(HERE, "sheet", "INVENTORY.png"), source_watch=None, deciding="x", face=["FACE — f"], platter="PROPERTY KEYS — p", constraints=_bc("no captions"))
+    _t1c = [b.get("text") or "" for b in _m1c["message"]["content"] if b.get("type") == "text"]
+    _ixc = lambda pref: next((i for i, t in enumerate(_t1c) if t.startswith(pref)), None)
+    check("the first message tells the agent the constraints, after the inventory and the face",
+          _ixc("THE COMPONENT INVENTORY") is not None and _ixc("FACE — f") is not None and _ixc("THE BRIEF'S HARD CONSTRAINTS") is not None
+          and _ixc("THE COMPONENT INVENTORY") < _ixc("FACE — f") < _ixc("THE BRIEF'S HARD CONSTRAINTS") and "no captions" in _t1c[_ixc("THE BRIEF'S HARD CONSTRAINTS")],
+          str([t[:28] for t in _t1c]))
+    _cp = J.constraint_prompt(_bc("No captions, under 30 seconds, and blur his face"))
+    check("the prompt names the checkable constraints as checks and the unverifiable as the agent's to honor; none -> empty",
+          "WILL NOT EXPORT" in _cp and "no captions" in _cp and "at or under 30s" in _cp and "blur his face" in _cp and "cannot verify" in _cp and J.constraint_prompt([]) == "")
+    # caption_cards reads the fact from the shapes measured (a list, or the API's own count) and names an absence
+    _saved_mcp = J._mcp_call
+    try:
+        J._mcp_call = lambda tok, name, args, **kw: {"returned": 0, "limit": 100, "offset": 0, "_text": "x"}
+        _cc0 = J.caption_cards("t", {"projectId": "p"})
+        J._mcp_call = lambda tok, name, args, **kw: {"cards": [{"a": 1}, {"a": 2}]}
+        _cc2 = J.caption_cards("t", {"projectId": "p"})
+        J._mcp_call = lambda tok, name, args, **kw: {"_text": "nothing here"}
+        _cca = J.caption_cards("t", {"projectId": "p"})
+        def _boom(*a, **k): raise RuntimeError("500")
+        J._mcp_call = _boom
+        _ccf = J.caption_cards("t", {"projectId": "p"})
+    finally:
+        J._mcp_call = _saved_mcp
+    check("caption_cards: MEASURED from a list or the API's count, ABSENT with the keys, FAILED on an error",
+          _cc0 == {"state": "MEASURED", "cards": 0, "why": "from the API's `returned` count"} and _cc2["state"] == "MEASURED" and _cc2["cards"] == 2
+          and _cca["state"] == "ABSENT" and "_text" in _cca["why"] and _ccf["state"] == "FAILED", "%s %s %s %s" % (_cc0, _cc2, _cca, _ccf))
 
     if FAILS:
         print("\n%d FAILURE(S)" % len(FAILS))

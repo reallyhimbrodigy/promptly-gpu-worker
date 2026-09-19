@@ -2147,6 +2147,26 @@ def caption_band(tok, stage):
                                 if isinstance(cards[0], dict) else "?"))
 
 
+def caption_cards(tok, stage):
+    """{state, cards, why} — how many native caption cards ChatCut holds: the
+    fact the no-captions constraint reads. MEASURED from a card list, or from
+    the API's own `returned` count (H1's read carried keys [..., 'limit',
+    'offset', 'returned'] and no list); ABSENT with the keys otherwise; FAILED
+    on an error. ABSENT and FAILED are not zero."""
+    try:
+        r = _mcp_call(tok, "read_captions", {"projectId": stage["projectId"]})
+    except Exception as e:                                        # noqa: BLE001
+        return {"state": "FAILED", "cards": None, "why": "read_captions FAILED: %s" % str(e)[:160]}
+    if not isinstance(r, dict):
+        return {"state": "ABSENT", "cards": None, "why": "read_captions returned %s" % type(r).__name__}
+    for k in ("cards", "captions", "items"):
+        if isinstance(r.get(k), list):
+            return {"state": "MEASURED", "cards": len(r[k]), "why": "from %r" % k}
+    if isinstance(r.get("returned"), int):
+        return {"state": "MEASURED", "cards": int(r["returned"]), "why": "from the API's `returned` count"}
+    return {"state": "ABSENT", "cards": None, "why": "no card list and no count (keys: %s)" % sorted(r)[:8]}
+
+
 def gate_b(tok, stage, rulings, spec, source_duration_s=None,
            prefetched=None, bands=None, beats=None):
     """Read ChatCut back and check the placements against it. -> report.
@@ -2190,7 +2210,7 @@ def gate_b(tok, stage, rulings, spec, source_duration_s=None,
     return rep
 
 
-def harness_export(tok, stage, run_id=None):
+def harness_export(tok, stage, run_id=None, mark=None):
     """THE EXPORT THE AGENT NO LONGER HAS.
 
     `submit_export` is out of the allowlist, so this is the only path to a
@@ -2222,6 +2242,7 @@ def harness_export(tok, stage, run_id=None):
         # watch). Poll to the finished URL, download, keep sha and size; the
         # bytes go beside the record under RESULTS[run_id + "-mp4"].
         url = None
+        if mark: mark("export.submit")
         for _iv in EXPORT_POLL_SCHEDULE:
             time.sleep(_iv)
             st = _mcp_call(tok, "track_export", {"projectId": stage["projectId"], "action": "status", "renderIds": _m.group(1)}, expect=None)
@@ -2235,12 +2256,15 @@ def harness_export(tok, stage, run_id=None):
                 return out
         if not url:
             return out
+        if mark: mark("export.render")            # ChatCut's render: submit -> file URL
         import urllib.request as _ur, hashlib as _hl
         with _ur.urlopen(url, timeout=120) as rsp:
             data = rsp.read()
+        if mark: mark("export.download")
         if run_id:
             import base64 as _b64
             RESULTS[run_id + "-mp4"] = {"b64": _b64.b64encode(data).decode(), "bytes": len(data), "sha256": _hl.sha256(data).hexdigest(), "renderId": _m.group(1)}
+        if mark: mark("export.upload")            # the bytes into the results store (S3 on the production route)
         out.update({"file": "MEASURED", "bytes": len(data), "sha256": _hl.sha256(data).hexdigest(), "why": "downloaded and kept under RESULTS[%s-mp4]" % run_id})
         return out
     except Exception as e:                                        # noqa: BLE001
@@ -2979,7 +3003,7 @@ def _transcript_rows(r, dur_s=None):
     return sorted(out, key=lambda b: b["t_start"])
 
 def pass1_message(plan, beats, inventory_png, source_watch=None,
-                  deciding=False, face=None, platter=None):
+                  deciding=False, face=None, platter=None, constraints=None):
     """WHAT THE AGENT IS SERVED BEFORE IT DECIDES ANYTHING.
 
     In order, in one message:
@@ -3008,6 +3032,8 @@ def pass1_message(plan, beats, inventory_png, source_watch=None,
             blocks.append({"type": "text", "text": platter})
         if face:
             blocks.append({"type": "text", "text": "\n".join(face)})
+        if constraints and constraint_prompt(constraints):
+            blocks.append({"type": "text", "text": constraint_prompt(constraints)})
     # ── THE REFERENCES: WHAT I LEARNED FROM WATCHING THEM ──────────────────
     # Zac's ruling, 2026-09-16: "Claude watches all ten itself, through
     # ChatCut... It analyses them itself and writes what it learned. Not a
@@ -3816,7 +3842,7 @@ def _says(text, *words):
 
 
 def run_three_turns(invoke, rewatch, first_message, cap=TURN_CAP,
-                    clock=time.time, run_timeout=RUN_TIMEOUT_S, t0=None):
+                    clock=time.time, run_timeout=RUN_TIMEOUT_S, t0=None, verify=None):
     """THE THREE STRATEGIC TURNS, THE HARNESS FETCHING BETWEEN THEM. -> tm
 
     Zac's rulings of 2026-09-17: each turn is ONE API call that ends at the
@@ -3829,6 +3855,11 @@ def run_three_turns(invoke, rewatch, first_message, cap=TURN_CAP,
     `invoke(n, message)` -> {rc, subtype, tool_calls, text, usage{read,write,
     in,out}, wall, ttft, killed}; `rewatch(n, final)` -> {message, ...}. Both
     are injectable so the machine is driven by a check, not a $ run.
+
+    `verify(n)` -> [fault] is THE BRIEF'S CONSTRAINTS AGAINST THE TIMELINE
+    (Zac, 2026-09-18): an export the agent asks for is honored only when it
+    returns nothing; otherwise the faults ride the next rewatch, and after the
+    cap they are terminal — CONSTRAINT VIOLATED, never exported.
     """
     # THE BOUND COUNTS FROM THE JOB'S START when the caller says so: H1 of the
     # Part 3 batch reached turn 3 at 433s of job wall because this clock began
@@ -3837,6 +3868,13 @@ def run_three_turns(invoke, rewatch, first_message, cap=TURN_CAP,
     tm = {"turns": [], "terminal": None, "verdict": None, "cap": cap,
           "cold_write": None, "rewatches": []}
     call1 = {}
+
+    def _hold(n):
+        """the harness's own check before an export is honored: faults -> the next turn, never the export"""
+        f = list(verify(n) or []) if verify else []
+        if f:
+            tm.setdefault("constraint_faults", {})[n] = f
+        return f
 
     def _turn(n, message, kind):
         nonlocal call1
@@ -3897,7 +3935,8 @@ def run_three_turns(invoke, rewatch, first_message, cap=TURN_CAP,
     ops2 = _edit_ops(r2.get("tool_calls"))
     # ONE REWATCH ON THE COMMON PATH (Zac, Part 3 item E): turn 2 clean -> export.
     # Turn 3 fires only when turn 2 emitted fixes.
-    if not ops2 and (_says(r2.get("text"), "export", "clean", "ship") or not r2.get("tool_calls")):
+    _clean2 = not ops2 and (_says(r2.get("text"), "export", "clean", "ship") or not r2.get("tool_calls"))
+    if _clean2 and not _hold(2):
         tm["verdict"] = "export at turn 2 (clean)"
         return tm
     rw2 = rewatch(2, True)
@@ -3907,10 +3946,11 @@ def run_three_turns(invoke, rewatch, first_message, cap=TURN_CAP,
         return tm
     ops3 = _edit_ops(r3.get("tool_calls"))
     if not ops3:
-        tm["verdict"] = ("export at turn 3 (%s)" % ("clean at turn 2" if not ops2 else "one fix pass")
-                         if _says(r3.get("text"), "export", "clean", "ship") or not r3.get("tool_calls")
-                         else "turn 3 ended without ops or export: %s" % str(r3.get("text"))[:120])
-        return tm
+        _says3 = _says(r3.get("text"), "export", "clean", "ship") or not r3.get("tool_calls")
+        if not (_says3 and _hold(3)):          # a constraint still violated -> the contingency turn, not the export
+            tm["verdict"] = ("export at turn 3 (%s)" % ("constraint cleared" if tm.get("constraint_faults") else "clean at turn 2" if not ops2 else "one fix pass")
+                             if _says3 else "turn 3 ended without ops or export: %s" % str(r3.get("text"))[:120])
+            return tm
     rw3 = rewatch(3, True)
     tm["rewatches"].append({k: v for k, v in (rw3 or {}).items() if k != "message"})
     r4 = _turn(4, (rw3 or {}).get("message"), "contingency")
@@ -3919,6 +3959,9 @@ def run_three_turns(invoke, rewatch, first_message, cap=TURN_CAP,
     if _edit_ops(r4.get("tool_calls")):
         tm["terminal"] = {"kind": "TURN CAP", "at": 4,
                           "why": "fix ops at the contingency turn; a fifth turn would be needed — kill, ledger, page"}
+    elif _hold(4):
+        tm["terminal"] = {"kind": "CONSTRAINT VIOLATED", "at": 4,
+                          "why": "the brief's constraint is still violated after the cap — never exported: %s" % "; ".join(tm["constraint_faults"][4])[:300]}
     else:
         tm["verdict"] = "export at turn 4 (contingency used)"
     return tm
@@ -3946,12 +3989,12 @@ def timeline_lines(items, props_by_id=None, base_item_id=None):
 def rewatch_message(n, watch, tl_lines, faults, scan_lines=None, final=False, calls_note=""):
     """The rewatch as ONE message: sheets + the whole timeline + the faults."""
     _w = watch or {}
-    head = ("REWATCH %d — the composed edit as it renders now: %d frames at 2fps on %d "
+    head = ("REWATCH %d — the composed edit as it renders now: %d frames at %gfps on %d "
             "sheet(s), each cell stamped with its timeline time. %s\n\n"
             "THE TIMELINE, every item the harness read back (id, type, track, frames, "
             "source range, asset, properties):\n%s\n\n"
             "WHAT THE HARNESS FOUND against ChatCut's own state (facts, not opinions):\n%s\n%s"
-            % (n, _w.get("frames", 0), len(_w.get("sheets") or []),
+            % (n, _w.get("frames", 0), float(_w.get("density_fps") or 2.0), len(_w.get("sheets") or []),
                ("" if _w.get("sheets") else "THE RENDER COULD NOT BE WATCHED: %s — %s. Judge from the timeline lines." % (_w.get("state"), str(_w.get("why"))[:160])),
                "\n".join(tl_lines or ["  (no items read back)"]),
                "\n".join("  - " + f for f in (faults or [])) or "  - none",
@@ -3988,6 +4031,200 @@ def fault_lines(gate_report, hop6, hop5, items, base_item_id, brief_mode="full_e
     if len(tracks) >= 2:
         out.append("two caption tracks (%s) show the same speech" % ", ".join(sorted(tracks)))
     return out
+
+
+# ---------------------------------------------------------------------------
+# THE BRIEF'S HARD CONSTRAINTS, ENFORCED BY THE HARNESS (Zac, 2026-09-18).
+#
+# The agent receives the brief verbatim; the harness extracts from it what a
+# TIMELINE CAN PROVE and checks the timeline against it at the same seam as
+# the face check: a violation is a fault handed to the next turn, and after
+# the cap it is terminal and never exported. What a timeline cannot prove is
+# reported UNCHECKED, by kind, never silently passed.
+#
+#   checkable   no_captions  no caption component item, no native caption card
+#               no_music     no added audio item of music length (>= 5s)
+#               no_text      no text-carrying overlay item, no captions
+#               duration     the timeline end against the target (<=, >=, ~10%, exactly 0.5s)
+#   UNCHECKED   hide_region  blur/hide/cover a face, logo, plate, screen — needs a
+#                            pixel detector on the composed frames; the read-back
+#                            cannot prove a region is hidden
+# ---------------------------------------------------------------------------
+_NEG = r"(?:no|without|zero|skip|drop|remove|omit|avoid|don'?t\s+(?:add|use|put|want|include)(?:\s+any)?|not?\s+(?:any\s+)?)"
+_CONSTRAINT_RULES = (
+    ("no_captions", True, re.compile(r"\b" + _NEG + r"\s+(?:the\s+)?(?:captions?|subtitles?|subs)\b|\b(?:caption|subtitle)-?(?:free|less)\b|\buncaptioned\b|\bcaptions?\s*[:=]\s*(?:false|off|none|no)\b", re.I)),
+    ("no_music", True, re.compile(r"\b" + _NEG + r"\s+(?:the\s+|any\s+|background\s+)?(?:music|soundtrack|score|bgm|songs?|backing\s+track)\b|\bmusic\s*[:=]\s*(?:false|off|none|no)\b", re.I)),
+    ("no_text", True, re.compile(r"\b" + _NEG + r"\s+(?:the\s+|any\s+)?(?:on-?screen\s+|overlay\s+)?(?:text(?:\s+overlays?)?|titles?|text\s+cards?|words\s+on\s+screen|graphics|overlays)\b"
+                                  r"|\b" + _NEG + r"\s+(?:any\s+)?(?:captions?|subtitles?|music)\s*(?:,|or|and)\s*(?:on-?screen\s+)?(?:titles?|text|graphics)\b|\btext\s*[:=]\s*(?:false|off|none|no)\b", re.I)),
+    ("hide_region", False, re.compile(r"\b(?:blur|hide|cover|mask|obscure|pixelate|censor|black\s+out)\b[^.;\n]{0,40}?\b(?:faces?|logos?|plates?|licen[sc]e|screens?|names?|address(?:es)?|phone|numbers?|badges?|watermarks?|eyes|person|people|kids?|children)\b", re.I)),
+)
+_DUR_UNIT = r"(\d+(?:\.\d+)?)\s*(?:-\s*)?(s|secs?|seconds?|m|mins?|minutes?)\b"
+_DUR_RULES = (
+    ("<=", re.compile(r"\b(?:under|max(?:imum)?(?:\s+of)?|at\s+most|no\s+(?:longer|more)\s+than|not\s+(?:longer|more)\s+than|within|up\s+to|shorter\s+than|less\s+than|cap(?:ped)?\s+at|keep\s+(?:it\s+)?(?:under|to))\s+" + _DUR_UNIT, re.I)),
+    (">=", re.compile(r"\b(?:at\s+least|min(?:imum)?(?:\s+of)?|no\s+(?:shorter|less)\s+than|not\s+(?:shorter|less)\s+than|longer\s+than|more\s+than)\s+" + _DUR_UNIT, re.I)),
+    ("==", re.compile(r"\bexactly\s+" + _DUR_UNIT, re.I)),
+    ("~", re.compile(r"\b(?:about|around|roughly|approx(?:imately)?|circa|target(?:ing)?|aim(?:ing)?\s+for|make\s+it|cut\s+(?:it\s+)?(?:down\s+)?to|down\s+to|trim\s+(?:it\s+)?to)\s+~?" + _DUR_UNIT, re.I)),
+    ("~", re.compile(r"~\s*" + _DUR_UNIT, re.I)),
+    ("~", re.compile(r"\b" + _DUR_UNIT + r"\s+(?:cut|version|edit|clip|video|teaser|spot|reel|piece|ad|promo|trailer)\b", re.I)),
+    ("~", re.compile(r"\b(?:duration|length|runtime|target(?:_s|_seconds)?|duration_s|max_duration_s|length_s)\s*[:=]\s*\"?(\d+(?:\.\d+)?)\s*(s|secs?|seconds?|m|mins?|minutes?)?\b", re.I)),
+)
+_WORD_NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "ten": 10, "fifteen": 15, "twenty": 20, "thirty": 30, "forty": 40, "forty-five": 45, "sixty": 60, "ninety": 90, "half a": 0.5, "a": 1, "an": 1}
+
+
+def _brief_text(brief):
+    """A brief is a string, or a structured object whose every string travels with its key."""
+    if isinstance(brief, str):
+        t = brief.strip()
+        if t.startswith("{") or t.startswith("["):
+            try:
+                return _brief_text(json.loads(t))
+            except Exception:                                     # noqa: BLE001
+                return t
+        return t
+    if isinstance(brief, dict):
+        return "\n".join("%s: %s" % (k, _brief_text(v)) for k, v in brief.items())
+    if isinstance(brief, (list, tuple)):
+        return "\n".join(_brief_text(v) for v in brief)
+    return str(brief) if brief is not None else ""
+
+
+def brief_constraints(brief):
+    """The hard constraints in a brief, as the harness will check them. PURE.
+
+    -> [{kind, checkable, text, value?}] in order of appearance, one per kind
+    (the first phrase wins; a brief that says 'no captions' twice is one
+    constraint). Word-form durations ('one minute', 'thirty seconds') are read;
+    a duration with a key in a structured brief (duration_s: 20) is a target.
+    """
+    text = _brief_text(brief)
+    if not text:
+        return []
+    # word numbers before the unit ("thirty seconds", "one minute") -> digits
+    norm = re.sub(r"\b(" + "|".join(sorted(_WORD_NUM, key=len, reverse=True)) + r")\s+(minutes?|mins?|seconds?|secs?)\b",
+                  lambda m: "%g %s" % (_WORD_NUM[m.group(1).lower()], m.group(2)), text, flags=re.I)
+    found, out = set(), []
+    for kind, checkable, rx in _CONSTRAINT_RULES:
+        m = rx.search(norm)
+        if m and kind not in found:
+            found.add(kind)
+            out.append({"kind": kind, "checkable": checkable, "text": m.group(0).strip(),
+                        "why": None if checkable else "needs a pixel detector on the composed frames; the timeline read-back cannot prove a region is hidden"})
+    for op, rx in _DUR_RULES:
+        m = rx.search(norm)
+        if m and "duration" not in found:
+            n, unit = float(m.group(1)), (m.group(2) or "s").lower()
+            secs = n * 60.0 if unit.startswith("m") else n
+            found.add("duration")
+            out.append({"kind": "duration", "checkable": True, "text": m.group(0).strip(), "value": {"op": op, "seconds": secs}})
+            break
+    return out
+
+
+def check_constraints(constraints, items, base_item_id, captions, end_s, props_by_id=None, text_carriers=None):
+    """The timeline against the brief's checkable constraints. PURE.
+
+    `captions` is the native caption read: {state: MEASURED|ABSENT|FAILED, cards: n, why}.
+    `end_s` is the timeline end in seconds or None (ABSENT). `text_carriers` is
+    the set of component names with a text property; None means every
+    non-caption overlay counts as text (the conservative read, and it says so).
+    -> (faults: [str], rows: [{kind, state: PASS|FAIL|ABSENT|UNCHECKED, read}])
+    A constraint whose read is ABSENT or FAILED is a fault: a check that cannot
+    say what it read is not a pass.
+    """
+    _b = str(base_item_id or "").replace("-", "")[:10]
+    placed = [i for i in (items or []) if str(i.get("id") or "").replace("-", "")[:10] != _b]
+    _name = lambda i: str(((i.get("asset") or {}) if isinstance(i.get("asset"), dict) else {}).get("name") or "")
+    _id8 = lambda i: str(i.get("id") or "").replace("-", "")[:8]
+    _dur = lambda i: (float((i.get("timelineRange") or {}).get("toFrame") or 0) - float((i.get("timelineRange") or {}).get("fromFrame") or 0))
+    cap_items = [i for i in placed if str(i.get("itemType") or "") == "caption" or _name(i).startswith("caption:")]
+    cap = captions or {"state": "ABSENT", "cards": None, "why": "no caption read"}
+    faults, rows = [], []
+    for c in (constraints or []):
+        k = c.get("kind")
+        if not c.get("checkable"):
+            rows.append({"kind": k, "state": "UNCHECKED", "read": c.get("why") or "not checkable from the timeline"})
+            continue
+        if k == "no_captions":
+            if cap_items:
+                read = "caption track item(s) on the timeline: %s" % ", ".join("%s %s" % (_id8(i), _name(i)) for i in cap_items)
+                rows.append({"kind": k, "state": "FAIL", "read": read}); faults.append("no captions (brief): %s" % read)
+            elif cap.get("state") == "MEASURED" and (cap.get("cards") or 0) > 0:
+                read = "read_captions holds %d native caption card(s)" % cap["cards"]
+                rows.append({"kind": k, "state": "FAIL", "read": read}); faults.append("no captions (brief): %s — clear them with edit_captions" % read)
+            elif cap.get("state") == "MEASURED":
+                rows.append({"kind": k, "state": "PASS", "read": "no caption items, 0 native cards"})
+            else:
+                read = "native captions could not be read (%s: %s)" % (cap.get("state"), str(cap.get("why"))[:120])
+                rows.append({"kind": k, "state": cap.get("state") or "ABSENT", "read": read}); faults.append("no captions (brief) UNVERIFIED: %s" % read)
+        elif k == "no_music":
+            fps = 30.0
+            music = [i for i in placed if str(i.get("itemType") or "") == "audio" and _dur(i) >= 5 * fps]
+            if music:
+                read = "added audio of music length: %s" % ", ".join("%s %s %.1fs" % (_id8(i), _name(i), _dur(i) / fps) for i in music)
+                rows.append({"kind": k, "state": "FAIL", "read": read}); faults.append("no music (brief): %s" % read)
+            else:
+                rows.append({"kind": k, "state": "PASS", "read": "no added audio item of 5s or more (%d short sfx allowed)" % sum(1 for i in placed if str(i.get("itemType") or "") == "audio")})
+        elif k == "no_text":
+            over = [i for i in placed if str(i.get("itemType") or "") == "motion-graphic" and not _name(i).startswith("caption:")
+                    and (text_carriers is None or _name(i) in text_carriers)]
+            hits = over + cap_items
+            if hits or (cap.get("state") == "MEASURED" and (cap.get("cards") or 0) > 0):
+                read = "text on screen: %s%s" % (", ".join("%s %s" % (_id8(i), _name(i)) for i in hits),
+                                                 (" + %d native caption card(s)" % cap["cards"]) if cap.get("state") == "MEASURED" and (cap.get("cards") or 0) > 0 else "")
+                rows.append({"kind": k, "state": "FAIL", "read": read}); faults.append("no text (brief): %s" % read)
+            else:
+                rows.append({"kind": k, "state": "PASS", "read": "no text-carrying overlay, no captions%s" % ("" if text_carriers is not None else " (every overlay counted as text: no component text map)")})
+        elif k == "duration":
+            v = c.get("value") or {}; op, tgt = v.get("op"), float(v.get("seconds") or 0)
+            if end_s is None:
+                read = "the timeline end could not be read"
+                rows.append({"kind": k, "state": "ABSENT", "read": read}); faults.append("duration (brief) UNVERIFIED: %s" % read)
+                continue
+            ok = {"<=": end_s <= tgt + 0.5, ">=": end_s >= tgt - 0.5, "==": abs(end_s - tgt) <= 0.5, "~": abs(end_s - tgt) <= max(0.5, 0.10 * tgt)}.get(op, False)
+            read = "timeline ends at %.1fs against %s %.1fs%s" % (end_s, op, tgt, " (within 10%)" if op == "~" else "")
+            rows.append({"kind": k, "state": "PASS" if ok else "FAIL", "read": read})
+            if not ok:
+                faults.append("duration (brief): %s" % read)
+        else:
+            rows.append({"kind": k, "state": "UNCHECKED", "read": "no check for this kind"})
+    return faults, rows
+
+
+def constraint_line(constraints, rows=None):
+    """One printed line: what was extracted, what is checkable, what each read."""
+    if not constraints:
+        return "none extracted from the brief"
+    by = {r["kind"]: r for r in (rows or [])}
+    return " | ".join("%s%s%s" % (c["kind"], (" %s%g" % (c["value"]["op"], c["value"]["seconds"])) if c.get("value") else "",
+                                  (" %s (%s)" % (by[c["kind"]]["state"], by[c["kind"]]["read"][:90])) if c["kind"] in by else (" CHECKABLE" if c.get("checkable") else " UNCHECKED (%s)" % c.get("why")))
+                      for c in constraints)
+
+
+_CONSTRAINT_MEANING = {"no_captions": "no caption track item and no edit_captions cards on the timeline",
+                       "no_music": "no added audio item of 5 seconds or more (short sound effects are not music)",
+                       "no_text": "no text-carrying overlay and no captions",
+                       "duration": "the timeline must end %s"}
+_OP_WORDS = {"<=": "at or under %gs", ">=": "at or over %gs", "==": "at %gs (half a second either way)", "~": "within 10%% of %gs"}
+
+
+def constraint_prompt(constraints):
+    """What the harness will hold the timeline to, told to the agent once. The
+    checkable ones as the checks they are; the rest in the brief's own words,
+    marked as the agent's to honor because the harness cannot read them."""
+    chk = [c for c in (constraints or []) if c.get("checkable")]
+    unc = [c for c in (constraints or []) if not c.get("checkable")]
+    if not chk and not unc:
+        return ""
+    lines = ["THE BRIEF'S HARD CONSTRAINTS — the harness reads the timeline back before any export and WILL NOT EXPORT while one is violated:"]
+    for c in chk:
+        m = _CONSTRAINT_MEANING.get(c["kind"], c["kind"])
+        if c["kind"] == "duration":
+            v = c.get("value") or {}
+            m = m % (_OP_WORDS.get(v.get("op"), "%gs") % float(v.get("seconds") or 0))
+        lines.append("  - %s (\"%s\"): %s" % (c["kind"].replace("_", " "), c.get("text"), m))
+    for c in unc:
+        lines.append("  - \"%s\": the harness cannot verify this from the timeline — it is yours to honor" % c.get("text"))
+    return "\n".join(lines)
 
 
 def write_cli_context(tok):
@@ -4121,7 +4358,12 @@ def stage_line(marks, wall_s):
                                                                     ("props", "rewatch%d.watch" % n, "rewatch%d.props" % n), ("checks", "rewatch%d.props" % n, "rewatch%d.checks" % n))}
     if "agent" in m and wall_s is not None:
         st["export_tail"] = round(float(wall_s) - m["agent"], 1)
+        # ITEMISED (Zac, 2026-09-18): gate · ChatCut render · download · upload into the store
+        st["export_tail.parts"] = {"gate": d("agent", "export.gate"), "render": d("export.gate", "export.render"),
+                                   "download": d("export.render", "export.download"), "upload": d("export.download", "export.upload")}
     txt = " | ".join("%s %s" % (k, v) for k, v in st.items() if v is not None and not k.endswith(".parts"))
+    if any(v is not None for v in (st.get("export_tail.parts") or {}).values()):
+        txt += " (export tail: %s)" % ", ".join("%s %s" % (k, v) for k, v in st["export_tail.parts"].items() if v is not None)
     return txt, st
 
 
@@ -4243,7 +4485,7 @@ RUN_FIRST_TEXT_PING = "KEEP-WARM PING FROM THE HARNESS: reply pong"   # distinct
                        modal.Secret.from_name("anthropic-api-key")])
 def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
          run_id: str = "latest", use_hands: bool = False, plan: str = "",
-         think_tokens: int = -1, effort: str = "", prefix_ttl: str = "1h", no_watch: bool = False, prestage_title: str = "",
+         think_tokens: int = -1, effort: str = "", prefix_ttl: str = "1h", no_watch: bool = False, density_fps: float = 2.0, prestage_title: str = "",
          prestage_controls: str = "", prestage_titles: str = "",
          transcript: str = "",
          # THE SUBTRACTION EXPERIMENT (2026-09-17). Same paragraph, same
@@ -4862,9 +5104,47 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     # checks and serves between them; cap four; every later call must read
     # the prefix the first established. The stream machine that used to live
     # here — marks, rewatch threads, idle bounds — is gone with it.
+    # THE BRIEF'S HARD CONSTRAINTS (Zac, 2026-09-18): extracted here, told once, checked
+    # against the timeline before any export is honored and at every rewatch.
+    _constraints = brief_constraints(brief)
+    _constraint_reads = []
+    try:
+        _regc = json.load(open("/craft/chatcut_registry_baked.json", encoding="utf-8")); _regc = _regc.get("components") or _regc
+        TEXT_CARRIERS = ({n_ for n_, c_ in _regc.items() if any(isinstance(p_, dict) and p_.get("type") == "text" for p_ in (c_.get("properties") or []))}
+                         if isinstance(_regc, dict) else None)
+    except Exception:                                             # noqa: BLE001
+        TEXT_CARRIERS = None
+    print("  CONSTRAINTS     : %s%s" % (constraint_line(_constraints), "" if TEXT_CARRIERS is not None else "  (no component text map: every overlay counts as text)"), flush=True)
+
+    def _constraints_now(items, base, end_s, props=None):
+        """(faults, rows) for the timeline as read; the caption read happens only when a constraint needs it"""
+        if not any(c.get("checkable") for c in _constraints):
+            return [], [{"kind": c["kind"], "state": "UNCHECKED", "read": c.get("why")} for c in _constraints]
+        _cc = (caption_cards(tok, _stage) if any(c["kind"] in ("no_captions", "no_text") for c in _constraints)
+               else {"state": "MEASURED", "cards": 0, "why": "no caption constraint"})
+        return check_constraints(_constraints, items, base, _cc, end_s, props, TEXT_CARRIERS)
+
+    def _verify(n):
+        """the brief's constraints against the timeline AS IT IS NOW — before an export the agent asked for is honored"""
+        if not any(c.get("checkable") for c in _constraints):
+            return []
+        import chatcut_gate as _cgv
+        try:
+            _rbv = read_back(tok, _stage); _iv = _rbv.get("items") or []
+            _bv, _, _ = _cgv.base_track(_iv)
+            _spv, _, _ = _cgv.kept_spans(_iv, _bv, float(_rbv.get("fps") or 30)) if _bv else ([], "ABSENT", "")
+            _ev, _evs, _ = _cgv.timeline_end(_spv)
+            _end_s = (float(_ev) / float(_rbv.get("fps") or 30)) if _evs == "MEASURED" and _ev else None
+            _cf, _rows = _constraints_now(_iv, _stage.get("baseItemId"), _end_s)
+        except Exception as _ve:                                  # noqa: BLE001
+            _cf, _rows = ["constraints UNVERIFIED: the read failed (%s)" % str(_ve)[:100]], [{"kind": "read", "state": "FAILED", "read": str(_ve)[:100]}]
+        _constraint_reads.append({"n": n, "faults": _cf, "rows": _rows})
+        print("  CONSTRAINTS %d   : %s" % (n, constraint_line(_constraints, _rows)), flush=True)
+        return _cf
+
     _first_message = pass1_message(prompt, _beats, "/craft/component_sheet.png",
                                    _watch_box, deciding=not bool(plan),
-                                   face=_face_lines, platter=_platter)
+                                   face=_face_lines, platter=_platter, constraints=_constraints)
     out_first = _first_message          # into the record below, in full (section C)
     _turn_recs = []
 
@@ -4946,10 +5226,10 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         mark("rewatch%d.readback" % n)
         _w = {"state": "ABSENT", "why": "no timeline end (%s)" % (_ewhy or _swhy)[:100], "sheets": [], "frames": 0, "times": []}
         if _est == "MEASURED" and _end:
-            _sheets, _times = _preview_frames(tok, _stage["projectId"], _end, fps=float(_rb.get("fps") or 30),
+            _sheets, _times = _preview_frames(tok, _stage["projectId"], _end, fps=float(_rb.get("fps") or 30), density_fps=density_fps,
                                               mark=lambda k: mark("rewatch%d.%s" % (n, k)))
             _w = {"state": "MEASURED" if _sheets else "ABSENT", "why": "%d sheet(s)" % len(_sheets),
-                  "sheets": _sheets, "frames": len(_times), "times": _times,
+                  "sheets": _sheets, "frames": len(_times), "times": _times, "density_fps": density_fps,
                   "instrument": "preview_timeline x5 parallel (picked 2026-09-17: 47s vs 75s export->upload->inspect; both composite)"}
             # THE SHEETS TRAVEL WITH THE RECORD, so a report can show what the
             # review saw instead of counting it (RESULTS[run_id-sheets]).
@@ -4988,6 +5268,14 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         except Exception as _h6e:                                 # noqa: BLE001
             _h6 = {"state": "ABSENT", "why": "hop6 %s" % str(_h6e)[:80]}
         _faults = fault_lines(_g, _h6, None, _items, _base)
+        # THE BRIEF'S CONSTRAINTS AT THE SAME SEAM AS THE FACE CHECK: a violation is a fault the next turn sees
+        try:
+            _cf_rw, _crows_rw = _constraints_now(_items, _base, (float(_end) / float(_rb.get("fps") or 30)) if _est == "MEASURED" and _end else None, _props)
+        except Exception as _cfe:                                 # noqa: BLE001
+            _cf_rw, _crows_rw = ["constraints UNVERIFIED: %s" % str(_cfe)[:100]], [{"kind": "read", "state": "FAILED", "read": str(_cfe)[:100]}]
+        _faults = _faults + ["BRIEF CONSTRAINT VIOLATED — %s" % f for f in _cf_rw]
+        if _constraints:
+            print("  CONSTRAINTS rw%d : %s" % (n, constraint_line(_constraints, _crows_rw)), flush=True)
         _scan = []
         try:
             if os.path.exists("/work/edit.mp4"):
@@ -5001,7 +5289,7 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         print("  REWATCH %d       : %s — %d item(s), %d fault(s), props for %d"
               % (n, _w["why"], len(_items), len(_faults), len(_props)), flush=True)
         return {"message": _msg, "watch": {k: v for k, v in _w.items() if k != "sheets"}, "sheets": len(_w.get("sheets") or []),
-                "items": len(_items), "faults": _faults, "scan": _scan[:12], "gate_verdict": _g.get("verdict"),
+                "items": len(_items), "faults": _faults, "scan": _scan[:12], "gate_verdict": _g.get("verdict"), "constraints": _crows_rw,
                 "scan_state": "MEASURED" if os.path.exists("/work/edit.mp4") else "ABSENT (no render before the final export; the scan runs on it)",
                 "inspect_item_calls": len(_props)}
 
@@ -5020,7 +5308,7 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         return out
 
     _run_t0 = t0                    # the job's own start: every bound counts from it
-    _tm = run_three_turns(_invoke, _rewatch, _first_message, t0=t0)
+    _tm = run_three_turns(_invoke, _rewatch, _first_message, t0=t0, verify=_verify)
     mark("agent")
     _tm["whys"] = _shim_whys()
     # THE THINKING ARM, AS SENT (not as named): measured through the proxy
@@ -5481,7 +5769,8 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         print("  EXPORT          : REFUSED — %s" % out["floor"]["why"],
               flush=True)
     else:
-        _export = harness_export(tok, _stage, run_id=run_id) if _stage else {
+        mark("export.gate")                       # the floor and the gate, before the render is asked for
+        _export = harness_export(tok, _stage, run_id=run_id, mark=mark) if _stage else {
             "state": "ABSENT", "why": "no prestage"}
         print("  EXPORT          : %s" % json.dumps(_export), flush=True)
 
@@ -5560,8 +5849,10 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         # ceiling and one that merely spent a lot look identical once you are
         # reading the token count alone.
         "ceiling": _state.get("ceiling_hit") or "NOT REACHED",
+        "constraints": {"extracted": _constraints, "reads": _constraint_reads, "faults_by_turn": _tm.get("constraint_faults"),
+                        "text_carriers": sorted(TEXT_CARRIERS) if TEXT_CARRIERS is not None else None},
         "three_turns": {"api_calls": len(_tm["turns"]), "verdict": _tm.get("verdict"),
-                        "terminal": _tm.get("terminal"), "cold_write": _tm.get("cold_write"),
+                        "terminal": _tm.get("terminal"), "cold_write": _tm.get("cold_write"), "constraint_faults": _tm.get("constraint_faults"),
                         "killed": bool(_killed), "kill_reason": _timing.get("kill_reason")},
     }
     print("  TURN MACHINE    : %d batch(es)  rewatch1=%s  rewatch2=%s  "
@@ -5616,7 +5907,8 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                        "rates": "read $0.30/M, write 1h $6/M or 5m $3.75/M by the measured split, in $3/M, out $15/M",
                        "cli_version": _cli_ver, "kernel": _kernel,
                        "marks_s": marks, "wall_s": out["wall_s"], "verdict": _tm.get("verdict"),
-                       "terminal": _tm.get("terminal"), "cold_write": _tm.get("cold_write")}
+                       "terminal": _tm.get("terminal"), "cold_write": _tm.get("cold_write"),
+                       "density_fps": density_fps, "no_watch": bool(no_watch)}
     print("  RUN LINE        : %s | api_calls=%d | tools=%s | tokens read=%d write=%d (1h %d / 5m %d) in=%d out=%d | request MB per call=%s | $%.4f at rate ($%.4f CLI) | wall=%.1fs | cli=%s | marks=%s"
           % (model, len(_tm["turns"]), _kinds, _rd, _wr, _wr1, _wr5, _in, _ou, _req_mb, _usd, _cli_usd, out["wall_s"],
              _cli_ver, json.dumps(marks)), flush=True)
@@ -5859,20 +6151,23 @@ def warm(proxy: bool = True, base_url: str = "", think_tokens: int = 0, effort: 
 @app.function(image=IMG, timeout=900, cpu=4, memory=8192,
               secrets=[modal.Secret.from_name("chatcut-oauth"),
                        modal.Secret.from_name("anthropic-api-key")])
-def probe_rewatch(clip_url: str, model: str = "claude-sonnet-5"):
-    """RULING 5 + THE PLANTED-DEFECT PROOF, on one scratch timeline.
+def probe_rewatch(clip_url: str, model: str = "claude-sonnet-5", density_fps: float = 2.0):
+    """G — THE PLANTED DEFECTS AND THE NEGATIVE CONTROL, at one density.
 
-    Plants three defects the review must name — a card centred on the
-    speaker's face, a second caption track showing the same speech, an
-    overlay at 3x its intended size — then times both rewatch instruments on
-    that same timeline: preview_timeline's viewer (composed pixels, 9 per
-    call) and export -> upload -> inspect_asset (watch_asset). Each is judged
-    on wall AND on whether its frames show the composite. Then ONE review call
-    (--max-turns 1, the real model, the rewatch message exactly as a job
-    sends it) and the record says which of the three it named.
+    Zac, 2026-09-18: "a clean timeline must produce zero named defects" — H1's
+    agent read 16.6-20.1s as black on clean footage, and an invented defect
+    fires a rewatch and a turn for nothing. So this reviews the CLEAN timeline
+    first (control: anything named is a false positive), then plants three
+    defects — a card centred on the face, a second caption track, a 3x
+    overlay — and reviews again; a plant counts as named only through an op
+    that touched it. Both reviews use the production rewatch instrument
+    (_preview_frames at `density_fps`; 2 fps = 40 frames, 1 fps = 20) and go
+    through the transparent proxy on the off arm, so each call reads the
+    ping's 1h entry like a job. Two model calls.
     """
     _t0 = time.time()
-    RESULTS["probe-rewatch"] = {"state": "STARTED", "t0": _t0}
+    _rkey = "probe-rewatch-%gfps" % density_fps          # 2 fps and 1 fps are two records, not one overwritten
+    RESULTS[_rkey] = {"state": "STARTED", "t0": _t0, "density_fps": density_fps}
     os.makedirs("/work", exist_ok=True)
     subprocess.run(["curl", "-fsSL", "-o", "/work/source.mp4", clip_url], check=True, timeout=300)
     tok = _access_token()
@@ -5881,116 +6176,135 @@ def probe_rewatch(clip_url: str, model: str = "claude-sonnet-5"):
     pid = stage["projectId"]
     comps = stage.get("components") or {}
     _aid = lambda n: (comps.get(n) or {}).get("assetId") if isinstance(comps.get(n), dict) else comps.get(n)
-    out = {"state": "RUNNING", "projectId": pid, "components": {k: (_aid(k) or None) for k in ("StatCard", "caption:TwoTone", "PullQuote")}, "planted": []}
-    # the defects: centre band card over the face, two caption tracks, a 3x overlay
-    adds = [{"type": "motion-graphic", "assetId": _aid("StatCard"), "fromFrame": 30, "durationInFrames": 150,
-             # THE LABELS CARRY NO DETECTION WORD. The first probe planted
-             # "ON THE FACE" and "THREE TIMES TOO BIG", the review quoted both
-             # back, and the keyword reader scored 3 of 3 named when it had
-             # named ONE (the duplicate captions) — the other two matched the
-             # plant's own text. Read by eye 2026-09-17.
-             "propertyOverrides": {"label": "REVENUE", "value": "10x", "offsetY": 0}},
-            {"type": "motion-graphic", "assetId": _aid("caption:TwoTone"), "fromFrame": 0, "durationInFrames": 600},
-            {"type": "motion-graphic", "assetId": _aid("caption:TwoTone"), "fromFrame": 0, "durationInFrames": 600},
-            {"type": "motion-graphic", "assetId": _aid("PullQuote"), "fromFrame": 300, "durationInFrames": 150,
-             "propertyOverrides": {"text": "THE PAYOFF", "fontSize": 3 * 64}}]
-    for a in adds:
-        try:
-            r = _mcp_call(tok, "edit_item", {"projectId": pid, "adds": [a]}, expect="adds")
-            _eid = ((r.get("adds") or [{}])[0] or {}).get("id")
-            out["planted"].append({"add": a, "echo": str(r.get("adds"))[:160], "echo_id": _eid})
-        except Exception as e:                                    # noqa: BLE001
-            out["planted"].append({"add": a, "FAILED": str(e)[:200]})
-    rb = read_back(tok, stage); items = rb.get("items") or []
-    out["items_on_timeline"] = len(items)
+    out = {"state": "RUNNING", "projectId": pid, "density_fps": density_fps,
+           "components": {k: (_aid(k) or None) for k in ("StatCard", "caption:TwoTone", "PullQuote")},
+           "components_refused": stage.get("components_refused"), "planted": []}
     sys.path.insert(0, "/root")
-    import chatcut_gate as _cg
-    _bt, _, _ = _cg.base_track(items); _sp, _, _ = _cg.kept_spans(items, _bt, 30.0); _end, _, _ = _cg.timeline_end(_sp)
-    # instrument A: preview_timeline viewer, 9 frames per call, ~40 frames
-    tA = time.time(); a_frames = []; a_calls = 0
-    try:
-        for k in range(0, 40, 9):
-            fr = [int(_end * (k + i + 0.5) / 40) for i in range(9) if k + i < 40]
-            r = _mcp_call(tok, "preview_timeline", {"projectId": pid, "views": ["viewer"], "viewerFrames": fr}, expect=None)
-            a_calls += 1
-            a_frames += _frame_urls(json.dumps(r) + str(r.get("_text") or ""))
-        import chatcut_reference as _cr
-        got, fst = _cr.fetch(a_frames, "/work/probe_preview", cap=45)
-        sheetsA = tile_sheets([("f%d" % i, pth) for i, (_u, pth) in enumerate(got)], "/work/probe_preview/sheets", per_sheet=20, cols=5, cell_w=180)
-        out["preview_timeline"] = {"wall_s": round(time.time() - tA, 1), "calls": a_calls, "frames": len(got), "sheets": len(sheetsA), "fetch": fst}
-    except Exception as e:                                        # noqa: BLE001
-        out["preview_timeline"] = {"wall_s": round(time.time() - tA, 1), "FAILED": str(e)[:200]}; sheetsA = []
-    # instrument B: export -> upload -> inspect_asset
-    tB = time.time(); marksB = {}
-    sheetsB, timesB = _edit_frames(tok, pid, _end, mark=lambda k: marksB.__setitem__(k, round(time.time() - tB, 1)))
-    out["export_upload_inspect"] = {"wall_s": round(time.time() - tB, 1), "marks": marksB, "frames": len(timesB), "sheets": len(sheetsB)}
-    # one review call, the rewatch message exactly as a job sends it, on instrument B's sheets (or A's if B failed)
+    import chatcut_gate as _cg, turn_clock, api_proxy as _px
+    # the same transparent proxy and preflight a job gets; the arm is OFF like the jobs
     sid = install_watch("/work"); write_cli_context(tok)
-    tl = timeline_lines(items, None, stage.get("baseItemId"))
-    msg = rewatch_message(1, {"frames": len(timesB or []), "sheets": sheetsB or sheetsA, "state": "MEASURED"}, tl, [], [], final=False)
-    import turn_clock
-    res = {}; texts = []; calls = []
-
-    def _on(ev, send, close, kill=None):
-        if ev.get("type") == "result":
-            res.update(ev)
-            try:
-                close()
-            except Exception:                                     # noqa: BLE001
-                pass
-        if ev.get("type") == "assistant":
-            for b in ((ev.get("message") or {}).get("content") or []):
-                if b.get("type") == "text": texts.append(b.get("text") or "")
-                if b.get("type") == "tool_use": calls.append({"name": b.get("name"), "input": b.get("input")})
-    # the probe's review runs the OFF arm like the jobs (thinking disabled on the wire); adaptive thought 199s on an unplanted timeline
-    env = {"ENABLE_TOOL_SEARCH": "false", "MAX_THINKING_TOKENS": "0"}
-    tC = time.time()
-    rc, err, wall, killed = turn_clock.run_timed(cli_command(sid, model) + ["--max-turns", "1"], "/work", "/work/probe_review.jsonl",
-                                                 "/work/probe_review_timing.json", RUN_TIMEOUT_S, env=env, stdin_first=json.dumps(msg), on_event=_on)
-    # NAMED = an op touched THAT plant and its `why` says the planted fault.
-    # A keyword over the whole reply matched the plants' own labels quoted
-    # back (first probe: "3 of 3" for one real). The reply text is kept and
-    # reported beside it, never counted.
-    _pid8 = lambda x: str(x or "").replace("-", "")[:8]
-    _plants = {"card": _pid8((out["planted"][0] or {}).get("echo_id")),
-               "captions": [_pid8((out["planted"][i] or {}).get("echo_id")) for i in (1, 2)],
-               "quote": _pid8((out["planted"][3] or {}).get("echo_id"))}
-    _ops = [(k, o) for c in calls if str(c.get("name") or "").endswith("edit_item")
-            for k in ("deletes", "updates") for o in ((c.get("input") or {}).get(k) or [])]
-    _touched = {}
-    for k, o in _ops:
-        _touched.setdefault(_pid8(o.get("id")), []).append("%s: %s" % (k, str(o.get("why") or "")))
-    _why = lambda ids: " ".join(w for i in ids for w in _touched.get(i, [])).lower()
-    _acted = {"card": bool(_touched.get(_plants["card"])), "captions": any(_touched.get(i) for i in _plants["captions"]),
-              "quote": bool(_touched.get(_plants["quote"]))}
-    out["review"] = {"wall_s": round(time.time() - tC, 1), "rc": rc, "subtype": res.get("subtype"),
-                     "usage": res.get("usage"), "text": "\n".join(texts)[:2000], "tool_calls": calls[:6],
-                     "plants": _plants, "acted_on": _acted, "ops_whys": _touched,
-                     "named": {"card_on_face": _acted["card"] and any(w in _why([_plants["card"]]) for w in ("face", "speaker", "cover", "eyes", "head")),
-                               "duplicate_captions": _acted["captions"] and any(w in _why(_plants["captions"]) for w in ("duplicate", "two caption", "second caption", "same", "twice", "both")),
-                               "oversized_overlay": _acted["quote"] and any(w in _why([_plants["quote"]]) for w in ("big", "large", "size", "scale", "font", "huge", "oversized"))}}
+    _px.FINGERPRINTS, _px.FIRST_BODY, _px.TRACE = "/work/probe_fp.jsonl", "/work/probe_first.json", "/work/probe_trace.jsonl"
     try:
+        _w0 = WARM.get("last") if "last" in WARM else None
+        _px.EXPECT_SYSTEM = _w0.get("system_wire") if isinstance((_w0 or {}).get("system_wire"), list) else None
+        _rf0 = (_w0 or {}).get("request_fields") or {}
+        _px.EXPECT_FIELDS = ({"thinking": _rf0.get("thinking"), "effort": (_rf0.get("output_config") or {}).get("effort")}
+                             if isinstance(_rf0, dict) and _rf0.get("thinking") is not None else None)
+    except Exception:                                             # noqa: BLE001
+        _px.EXPECT_SYSTEM, _px.EXPECT_FIELDS = None, None
+    print("  PREFLIGHT       : %s" % ("armed against the ping's %d system block(s)" % len(_px.EXPECT_SYSTEM) if _px.EXPECT_SYSTEM else "not armed (no ping system text on record)"), flush=True)
+    _pp, _pca = _px.serve_mitm(0, "/work/mitm")
+    env = {"ENABLE_TOOL_SEARCH": "false", "MAX_THINKING_TOKENS": "0", **_px.mitm_env(_pp, _pca)}
+
+    def _review(tag, tl, faults):
+        """one rewatch at the density, one review call; -> record"""
+        rb = read_back(tok, stage); items = rb.get("items") or []
+        _bt, _, _ = _cg.base_track(items); _sp, _, _ = _cg.kept_spans(items, _bt, 30.0); _end, _, _ = _cg.timeline_end(_sp)
+        marks = {}; tA = time.time()
+        sheets, times = _preview_frames(tok, pid, _end or 610, fps=30, density_fps=density_fps, mark=lambda k: marks.__setitem__(k, round(time.time() - tA, 1)))
+        msg = rewatch_message(1, {"frames": len(times), "sheets": sheets, "state": "MEASURED" if sheets else "ABSENT", "why": "%d sheet(s)" % len(sheets), "times": times, "density_fps": density_fps}, tl, faults, [], final=False)
+        _first = next((b.get("text") for b in msg["message"]["content"] if b.get("type") == "text"), "") or ""
+        _px.RUN_FIRST_TEXT = _first[:60]
+        _px.PREFLIGHT_DONE = False; _px.PREFLIGHT_REFUSED = None
+        res, texts, calls = {}, [], []
+
+        def _on(ev, send, close, kill=None):
+            if ev.get("type") == "result":
+                res.update(ev)
+                try:
+                    close()
+                except Exception:                                 # noqa: BLE001
+                    pass
+            if ev.get("type") == "assistant":
+                for b in ((ev.get("message") or {}).get("content") or []):
+                    if b.get("type") == "text": texts.append(b.get("text") or "")
+                    if b.get("type") == "tool_use": calls.append({"name": b.get("name"), "input": b.get("input")})
+        tC = time.time()
+        rc, err, wall, killed = turn_clock.run_timed(cli_command(sid, model) + ["--max-turns", "1"], "/work", "/work/probe_%s.jsonl" % tag,
+                                                     "/work/probe_%s_timing.json" % tag, RUN_TIMEOUT_S, env=env, stdin_first=json.dumps(msg), on_event=_on)
+        u = res.get("usage") or {}
+        rd, wr = int(u.get("cache_read_input_tokens") or 0), int(u.get("cache_creation_input_tokens") or 0)
+        # THE API'S OWN ANSWER for this call, from the proxy trace (the last /v1/messages leg is this review's)
+        _legs = [x for x in _read_trace_rows("/work/probe_trace.jsonl") if isinstance(x, dict) and str(x.get("path", "")).split("?")[0] == "/v1/messages" and "status" in x and "req_bytes" in x]
+        _api = _legs[-1] if _legs else {}
         import base64 as _b64
-        out["sheets_b64"] = {"A": [_b64.b64encode(open(x, "rb").read()).decode() for x in (sheetsA or [])],
-                             "B": [_b64.b64encode(open(x, "rb").read()).decode() for x in (sheetsB or [])]}
-    except Exception as _sbe:                                     # noqa: BLE001
-        out["sheets_b64"] = "FAILED %s" % str(_sbe)[:80]
+        return {"tag": tag, "items": len(items), "frames": len(times), "sheets": len(sheets), "rewatch_marks": marks,
+                "wall_s": round(time.time() - tC, 1), "rc": rc, "killed": bool(killed), "subtype": res.get("subtype"),
+                "usage": u, "summary": {"read": rd, "write": wr, "out": u.get("output_tokens")},
+                "cold_write": {"write": wr, "read": rd, "cold": wr > 0.5 * max(1, wr + rd)},   # the job's rule (run_three_turns), on this call
+                "api_status": _api.get("status"), "api_head": str(_api.get("head") or "")[:200], "request_mb": round(float(_api.get("req_bytes") or 0) / 1e6, 1),
+                "text": "\n".join(texts)[:2000], "tool_calls": calls[:6],
+                "sheets_b64": [_b64.b64encode(open(x, "rb").read()).decode() for x in sheets]}
+
+    def _ops_by_id(calls):
+        touched = {}
+        for c in calls:
+            if str(c.get("name") or "").endswith("edit_item"):
+                for k in ("deletes", "updates"):
+                    for o in ((c.get("input") or {}).get(k) or []):
+                        touched.setdefault(str(o.get("id") or "").replace("-", "")[:8], []).append("%s: %s" % (k, str(o.get("why") or "")))
+        return touched
+    _pid8 = lambda x: str(x or "").replace("-", "")[:8]
+    base = stage.get("baseItemId")
+
+    def _plant():
+        """THE PLANTS: a card centred on the face, a second caption track, a 3x
+        overlay. Labels carry no detector word (the first probe scored its own labels)."""
+        adds = [{"type": "motion-graphic", "assetId": _aid("StatCard"), "fromFrame": 30, "durationInFrames": 150,
+                 "propertyOverrides": {"label": "REVENUE", "value": "10x", "offsetY": 0}},
+                {"type": "motion-graphic", "assetId": _aid("caption:TwoTone"), "fromFrame": 0, "durationInFrames": 600},
+                {"type": "motion-graphic", "assetId": _aid("caption:TwoTone"), "fromFrame": 0, "durationInFrames": 600},
+                {"type": "motion-graphic", "assetId": _aid("PullQuote"), "fromFrame": 300, "durationInFrames": 150,
+                 "propertyOverrides": {"text": "THE PAYOFF", "fontSize": 3 * 64}}]
+        for a_ in adds:
+            try:
+                r = _mcp_call(tok, "edit_item", {"projectId": pid, "adds": [a_]}, expect="adds")
+                out["planted"].append({"add": a_, "echo_id": ((r.get("adds") or [{}])[0] or {}).get("id")})
+            except Exception as e:                                # noqa: BLE001
+                out["planted"].append({"add": a_, "FAILED": str(e)[:300]})
+    # ── THE CONTROL: the clean timeline. Anything named or touched is a false positive.
+    rb0 = read_back(tok, stage); tl0 = timeline_lines(rb0.get("items") or [], None, base)
+    ctrl = _review("control", tl0, [])
+    ctrl_ops = _ops_by_id(ctrl["tool_calls"])
+    out["control"] = {**{k: v for k, v in ctrl.items() if k != "sheets_b64"},
+                      "false_positives": len(ctrl_ops), "ops_whys": ctrl_ops,
+                      "said_export": _says(ctrl.get("text"), "export", "clean", "ship") and not ctrl_ops}
+    print("  CONTROL         : %d false positive op(s); said export=%s; wall %.1fs" % (len(ctrl_ops), out["control"]["said_export"], ctrl["wall_s"]), flush=True)
+    # ── THE PLANTS, after the control has read the clean timeline.
+    _plant()
+    plants = {"card": _pid8((out["planted"][0] or {}).get("echo_id")), "captions": [_pid8((out["planted"][i] or {}).get("echo_id")) for i in (1, 2)], "quote": _pid8((out["planted"][3] or {}).get("echo_id"))}
+    out["plants_landed"] = sum(1 for x in out["planted"] if x.get("echo_id"))
+    rb1 = read_back(tok, stage); tl1 = timeline_lines(rb1.get("items") or [], None, base)
+    rev = _review("planted", tl1, [])
+    touched = _ops_by_id(rev["tool_calls"])
+    _why = lambda ids: " ".join(w for i in ids for w in touched.get(i, [])).lower()
+    acted = {"card": bool(plants["card"] and touched.get(plants["card"])), "captions": any(i and touched.get(i) for i in plants["captions"]), "quote": bool(plants["quote"] and touched.get(plants["quote"]))}
+    out["review"] = {**{k: v for k, v in rev.items() if k != "sheets_b64"}, "plants": plants, "acted_on": acted, "ops_whys": touched,
+                     "named": {"card_on_face": acted["card"] and any(w in _why([plants["card"]]) for w in ("face", "speaker", "cover", "eyes", "head")),
+                               "duplicate_captions": acted["captions"] and any(w in _why(plants["captions"]) for w in ("duplicate", "two caption", "second caption", "same", "twice", "both")),
+                               "oversized_overlay": acted["quote"] and any(w in _why([plants["quote"]]) for w in ("big", "large", "size", "scale", "font", "huge", "oversized"))}}
+    out["sheets_b64"] = {"control": ctrl["sheets_b64"], "planted": rev["sheets_b64"]}
+    try:
+        out["proxy_trace"] = [json.loads(l) for l in open("/work/probe_trace.jsonl", encoding="utf-8") if l.strip()]
+        out["prefix_calls"] = [json.loads(l) for l in open("/work/probe_fp.jsonl", encoding="utf-8") if l.strip()]
+    except Exception:                                             # noqa: BLE001
+        pass
     out["wall_s"] = round(time.time() - _t0, 1); out["state"] = "MEASURED"
-    RESULTS["probe-rewatch"] = out
-    print("  PREVIEW_TIMELINE: %s" % json.dumps(out["preview_timeline"]), flush=True)
-    print("  EXPORT+INSPECT  : %s" % json.dumps(out["export_upload_inspect"]), flush=True)
-    print("  REVIEW NAMED    : %s  acted_on=%s (wall %.1fs)" % (out["review"]["named"], out["review"]["acted_on"], out["review"]["wall_s"]), flush=True)
-    return out
+    RESULTS[_rkey] = out
+    print("  G @ %.1ffps     : plants landed %d/4 | named %s | acted_on %s | control false positives %d | review walls control %.1fs planted %.1fs | rewatch marks %s | control call read=%d write=%d cold=%s api=%s | request MB %s/%s"
+          % (density_fps, out["plants_landed"], out["review"]["named"], acted, out["control"]["false_positives"], ctrl["wall_s"], rev["wall_s"], rev["rewatch_marks"],
+             ctrl["summary"]["read"], ctrl["summary"]["write"], ctrl["cold_write"]["cold"], ctrl.get("api_status"), ctrl.get("request_mb"), rev.get("request_mb")), flush=True)
+    return {k: v for k, v in out.items() if k not in ("sheets_b64", "proxy_trace", "prefix_calls")}
 
 
 @app.local_entrypoint()
-def probe_rw(clip_url: str = "", out: str = "/tmp/bs/probe_rewatch.json"):
+def probe_rw(clip_url: str = "", out: str = "/tmp/bs/probe_rewatch.json", density_fps: float = 2.0):
     from require_detach import require_detach
     require_detach("the rewatch-instrument probe")
-    r = probe_rewatch.remote(clip_url)
+    r = probe_rewatch.remote(clip_url, density_fps=density_fps)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     json.dump(r, open(out, "w", encoding="utf-8"), indent=1)
-    print("WROTE %s" % out); print("  preview:", r.get("preview_timeline")); print("  export+inspect:", r.get("export_upload_inspect")); print("  named:", (r.get("review") or {}).get("named"))
+    print("WROTE %s" % out); print("  density:", r.get("density_fps")); print("  control false positives:", (r.get("control") or {}).get("false_positives")); print("  named:", (r.get("review") or {}).get("named"))
 
 @app.function(image=IMG, timeout=1800,
               secrets=[modal.Secret.from_name("chatcut-oauth")])
@@ -6997,11 +7311,17 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
          run_id: str = "", wait: bool = False,
          read_ceiling: int = 0,
          model: str = "claude-sonnet-5", use_hands: bool = False,
-         think_tokens: int = -1, effort: str = "", prefix_ttl: str = "1h", no_watch: bool = False,
+         think_tokens: int = -1, effort: str = "", prefix_ttl: str = "1h", no_watch: bool = False, density_fps: float = 2.0,
          prestage_title: str = "", prestage_controls: str = "",
-         prestage_titles: str = "", transcript_file: str = ""):
+         prestage_titles: str = "", transcript_file: str = "", brief_file: str = ""):
     if not clip_url:
         raise SystemExit("pass --clip-url")
+    if brief_file:
+        # A PRODUCTION BRIEF FROM A FILE (Builder-2's fixture rows): quotes and newlines survive the
+        # batch's `sh -c` launch this way; a brief on the command line would not.
+        brief = open(brief_file, encoding="utf-8").read().strip()
+        if not brief:
+            raise SystemExit("brief file %s is empty" % brief_file)
     # THE PLAN IS READ HERE, ON THE MACHINE THAT OWNS IT, and passed as a
     # value. Mounting it would make the container's copy a second artifact that
     # can drift from the ledger it came from; a string argument cannot.
@@ -7071,7 +7391,7 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
     if wait:
         print(json.dumps(edit.remote(clip_url, brief, model=model, run_id=rid,
                                      use_hands=use_hands, plan=plan_text,
-                                     think_tokens=think_tokens, effort=effort, prefix_ttl=prefix_ttl, no_watch=no_watch,
+                                     think_tokens=think_tokens, effort=effort, prefix_ttl=prefix_ttl, no_watch=no_watch, density_fps=density_fps,
                                      prestage_title=prestage_title,
                       prestage_controls=prestage_controls,
                       prestage_titles=prestage_titles,
@@ -7101,7 +7421,7 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
     require_detach("a spawned ChatCut edit")
     call = edit.spawn(clip_url, brief, model=model, run_id=rid,
                       use_hands=use_hands, plan=plan_text,
-                      think_tokens=think_tokens, effort=effort, prefix_ttl=prefix_ttl, no_watch=no_watch,
+                      think_tokens=think_tokens, effort=effort, prefix_ttl=prefix_ttl, no_watch=no_watch, density_fps=density_fps,
                       prestage_title=prestage_title,
                       prestage_controls=prestage_controls,
                       prestage_titles=prestage_titles,

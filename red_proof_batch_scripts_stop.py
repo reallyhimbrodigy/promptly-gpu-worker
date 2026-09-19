@@ -12,6 +12,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SMOKE = os.path.join(HERE, "smoke_batch_scripts_stop.py")
 VERDICT = os.path.join(HERE, "scripts", "batch_verdict.py")
 BATCH = os.path.join(HERE, "scripts", "h_batch.sh")
+STAGE = os.path.join(HERE, "scripts", "h_stage.sh")
+BRIEFS = os.path.join(HERE, "scripts", "batch_briefs.py")
 
 MUTATIONS = [
     ("an API refusal is no longer a stop", VERDICT,
@@ -19,13 +21,42 @@ MUTATIONS = [
      '    if t in ("PREFLIGHT REFUSED",):\n        return 2, line',
      "API ERROR and PREFLIGHT REFUSED are stops (2)"),
     ("a cold write at call 1 is no longer A-red", VERDICT,
-     '    if t == "CACHE MISS" or cw.get("cold"):',
-     '    if t == "CACHE MISS":',
+     '    if cw.get("cold"):\n        return 1, line',
+     '    if False:\n        return 1, line',
      "a cold write at call 1 is A-red (1) — the cross-run half"),
     ("the batch drops pipefail", BATCH,
      "set -u\nset -o pipefail\n",
      "set -u\n",
      "h_batch.sh sets pipefail"),
+    # ZAC'S BATCH (2026-09-18)
+    ("the ping fires after G", BATCH,
+     "if at ping; then ping warm; fi\n# 2. G at 2 fps with its negative control (the control's call is the first job-shaped call after the ping: a cold write here is the cross-run fault, before H1 spends)\nif at probe2; then\nprobe probe2 || exit 4\nverdict $B/probe2.json; rc=$?; [ $rc -eq 0 ] || { log \"STOP: A is red on G (rc=$rc)\"; exit 5; }\nsheets probe-rewatch-2fps probe2; cap_or_stop\nfi\n",
+     "# 2. G at 2 fps with its negative control (the control's call is the first job-shaped call after the ping: a cold write here is the cross-run fault, before H1 spends)\nif at probe2; then\nprobe probe2 || exit 4\nverdict $B/probe2.json; rc=$?; [ $rc -eq 0 ] || { log \"STOP: A is red on G (rc=$rc)\"; exit 5; }\nsheets probe-rewatch-2fps probe2; cap_or_stop\nfi\nif at ping; then ping warm; fi\n",
+     "the batch runs in Zac's order: ping, G 2fps, G 1fps, H1 off, H1 low, no-speech, Zac's clip, no-watch, briefs"),
+    ("G's control is no longer gated", BATCH,
+     'verdict $B/probe2.json; rc=$?; [ $rc -eq 0 ] || { log "STOP: A is red on G (rc=$rc)"; exit 5; }',
+     'verdict $B/probe2.json; rc=$?',
+     "the batch gates on G's control verdict before H1"),
+    ("a cold control review is waved through", VERDICT,
+     '    if (c.get("cold_write") or {}).get("cold"):\n        return 1, line',
+     '    if False:\n        return 1, line',
+     "a cold write on the probe's control review is A-red (1)"),
+    ("the no-watch cold is red again", VERDICT,
+     '    if cw.get("cold") and rl.get("no_watch"):',
+     '    if False:',
+     "a cold write on the no-watch arm is by design (0), the line says so"),
+    ("the 1 fps arm runs at 2", STAGE,
+     '--out /tmp/bs/probe1.json --density-fps 1"',
+     '--out /tmp/bs/probe1.json --density-fps 2"',
+     "h_stage runs G at 2 fps and at 1 fps into distinct records"),
+    ("an unrunnable row is renamed", BRIEFS,
+     'report("UNRUNNABLE", rid,',
+     'report("SKIPPED", rid,',
+     "the reader names an unrunnable row UNRUNNABLE by id"),
+    ("the surplus preset is picked too", BRIEFS,
+     '        if slot in picked:\n            report("SKIPPED", rid, "slot %s already filled by %s" % (slot, picked[slot])); continue\n',
+     '',
+     "the reader picks one row per slot, in file order, and exits 0"),
 ]
 ORIG = {}
 
@@ -36,7 +67,7 @@ def run():
 
 
 def main():
-    for p in (VERDICT, BATCH):
+    for p in (VERDICT, BATCH, STAGE, BRIEFS):
         ORIG[p] = io.open(p, encoding="utf-8").read()
     rc, out = run()
     if rc != 0:

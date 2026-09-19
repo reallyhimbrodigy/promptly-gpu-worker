@@ -187,9 +187,23 @@ def legs(src=None, prompt=None):
             out.append(("hop2", "HOP 2 runs against a possibly-empty "
                                   "manifest with no ABSENT branch — it prints "
                                   "MEASURED 0 add(s) and asserts nothing"))
-        if "timeline_end" not in _e:
-            out.append(("window", "the review window is not read from the "
-                                  "timeline"))
+        # THE PROPERTY: inside the REWATCH, the window handed to the frame
+        # instrument is bound from a timeline_end(...) call. (The first form
+        # asked whether the word appeared anywhere in edit(); a second,
+        # unrelated timeline_end call — the constraint check's — made the
+        # mutation vacuous. Substring presence over a whole function is not
+        # a property of the rewatch.)
+        _rwf = next((n for n in ast.walk(_edit) if isinstance(n, ast.FunctionDef) and n.name == "_rewatch"), None)
+        _win_from_timeline = False
+        if _rwf is not None:
+            _bound = {t.id for n in ast.walk(_rwf) if isinstance(n, ast.Assign) and isinstance(n.value, ast.Call)
+                      and ast.unparse(n.value.func).endswith("timeline_end") for t in n.targets
+                      for t in ([t] if isinstance(t, ast.Name) else [e for e in getattr(t, "elts", []) if isinstance(e, ast.Name)])}
+            _win_from_timeline = any(isinstance(n, ast.Call) and ast.unparse(n.func).endswith("_preview_frames") and len(n.args) > 2
+                                     and isinstance(n.args[2], ast.Name) and n.args[2].id in _bound for n in ast.walk(_rwf))
+        if not _win_from_timeline:
+            out.append(("window", "the rewatch's review window is not bound from a "
+                                  "timeline_end(...) call on the timeline read back"))
 
     # 8. THE PIXEL HOPS RUN WITHOUT A PLAN, AND BEFORE THE EXPORT.
     # Four of seven hops guarded on `plan`, so removing the plan turned them
