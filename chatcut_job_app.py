@@ -6607,6 +6607,467 @@ def probe_rw(clip_url: str = "", out: str = "/tmp/bs/probe_rewatch.json", densit
     json.dump(r, open(out, "w", encoding="utf-8"), indent=1)
     print("WROTE %s" % out); print("  density:", r.get("density_fps")); print("  control false positives:", (r.get("control") or {}).get("false_positives")); print("  named:", (r.get("review") or {}).get("named"))
 
+def library_ids(env):
+    """Every id in a browse_library envelope, WHEREVER it nests them. PURE. -> (ids, state, why)
+
+    SHAPE-AGNOSTIC BY DESIGN, after guessing the key wrong three times in one afternoon (2026-09-19):
+    a category answers under `groups`, a group answers under `results`, and the first reader looked only
+    for `items`. Each time the miss looked like an empty catalogue rather than a reader that did not know
+    the shape — and the first version recorded it as MEASURED with an empty list, which is an absent read
+    wearing a measurement's clothes. So this does not name keys at all: it walks the envelope for ANY
+    list of objects carrying an id, and REPORTS THE KEY IT USED so the next surprise is visible in the
+    record rather than silent. An empty read is ABSENT with the keys it saw; `total` rides along so a
+    partial page cannot read as the whole catalogue.
+    """
+    if not isinstance(env, dict):
+        return [], "FAILED", "browse_library answered %s, not an object" % type(env).__name__
+    if env.get("isError"):
+        return [], "ABSENT", "the category itself errored: %s" % str(env.get("_text") or env.get("content"))[:160]
+    ID_KEYS = ("id", "assetId", "itemId", "name")
+    found, used = [], []
+
+    def _id_of(x):
+        if isinstance(x, dict):
+            for k in ID_KEYS:
+                v = x.get(k)
+                if isinstance(v, str) and v.strip():
+                    return v
+        return None
+
+    def _walk(node, path):
+        if isinstance(node, list):
+            got = [_id_of(x) for x in node]
+            if any(got):
+                used.append(path or "(root list)")
+                found.extend([g for g in got if g])
+            for i, x in enumerate(node):
+                if isinstance(x, (dict, list)):
+                    _walk(x, "%s[%d]" % (path, i))
+        elif isinstance(node, dict):
+            for k, v in node.items():
+                if k.startswith("_"):
+                    continue
+                _walk(v, "%s.%s" % (path, k) if path else k)
+
+    _walk(env, "")
+    total = env.get("total")
+    seen, ids = set(), []
+    for i in found:
+        if i not in seen:
+            seen.add(i); ids.append(i)
+    if not ids:
+        return [], "ABSENT", ("browse_library returned no id this reader could find — keys %s, total %s"
+                              % (sorted(env)[:10], total))
+    why = "%d id(s) under %s%s" % (len(ids), ", ".join(sorted(set(used))[:3]),
+                                   (" of a stated total of %s" % total) if total is not None else " (no total stated)")
+    return ids, "MEASURED", why
+
+
+@app.function(image=IMG, timeout=600, cpu=2, memory=4096,
+              secrets=[modal.Secret.from_name("chatcut-oauth")])
+def library_read():
+    """WHAT CHATCUT'S LIBRARY ACTUALLY HOLDS. No model, no placement — the catalogue alone, so the
+    mapping table is built against their ids rather than our names."""
+    tok = _access_token()
+    out = {"state": "RUNNING", "categories": {}}
+    for cat in ("sound-effects", "transitions", "effects", "overlays", "zooms", "images", "video"):
+        try:
+            env = _mcp_call(tok, "browse_library", {"category": cat, "limit": 30}, expect=None)
+            ids, st, why = library_ids(env)
+            out["categories"][cat] = {"state": st, "why": why, "n": len(ids), "ids": ids,
+                                      "keys": sorted(env)[:10] if isinstance(env, dict) else None,
+                                      "total": (env or {}).get("total"),
+                                      "text_head": str((env or {}).get("_text") or "")[:400]}
+        except Exception as e:                                    # noqa: BLE001
+            out["categories"][cat] = {"state": "FAILED", "why": str(e)[:240]}
+        c = out["categories"][cat]
+        print("  %-14s %-9s n=%-3s total=%-5s %s" % (cat, c.get("state"), c.get("n"), c.get("total"), str(c.get("why"))[:90]), flush=True)
+        if c.get("ids"):
+            print("      %s" % ", ".join(c["ids"][:14]), flush=True)
+    out["state"] = "MEASURED"
+    RESULTS["library-read"] = out
+    return out
+
+
+@app.function(image=IMG, timeout=900, cpu=2, memory=4096,
+              secrets=[modal.Secret.from_name("chatcut-oauth")])
+def library_detail():
+    """EVERY LIBRARY ITEM'S REAL ID AND USAGE GUIDANCE. No model, no placement.
+
+    Browsing a CATEGORY returns a GROUP OVERVIEW, not items — measured 2026-09-19, when four group names
+    (ui-motion-feedback, transition-emphasis, device-texture, reaction-mood) were read as sound ids. Items
+    come from category+group, and the per-item PARAMETER SCHEMA comes only from `id` mode, which the tool
+    calls usage guidance. A mapping built on names instead of that guidance would be a guess.
+    """
+    tok = _access_token()
+    out = {"state": "RUNNING", "categories": {}}
+    for cat in ("zoom", "transitions", "sound-effects", "effects", "motion-graphics", "luts", "audio-effects"):
+        node = {"groups": {}, "items": [], "detail": {}}
+        try:
+            env = _mcp_call(tok, "browse_library", {"category": cat, "limit": 30}, expect=None)
+            gids, gst, gwhy = library_ids(env)
+            node["group_ids"], node["groups_state"], node["groups_why"] = gids, gst, gwhy
+            node["total"] = (env or {}).get("total")
+        except Exception as e:                                    # noqa: BLE001
+            node["groups_state"], node["groups_why"] = "FAILED", str(e)[:200]
+            gids = []
+        for g in gids:
+            try:
+                genv = _mcp_call(tok, "browse_library", {"category": cat, "group": g, "limit": 30}, expect=None)
+                iids, ist, iwhy = library_ids(genv)
+                node["groups"][g] = {"state": ist, "why": iwhy, "ids": iids}
+                node["items"].extend(iids)
+            except Exception as e:                                # noqa: BLE001
+                node["groups"][g] = {"state": "FAILED", "why": str(e)[:200]}
+        # THE PARAMETER SCHEMA, PER ITEM: `id` mode is the only surface that carries it.
+        for i in node["items"][:40]:
+            try:
+                d = _mcp_call(tok, "browse_library", {"id": i}, expect=None)
+                node["detail"][i] = {"keys": sorted(d)[:12] if isinstance(d, dict) else None,
+                                     "text": str((d or {}).get("_text") or "")[:1200]}
+            except Exception as e:                                # noqa: BLE001
+                node["detail"][i] = {"state": "FAILED", "why": str(e)[:160]}
+        out["categories"][cat] = node
+        print("  %-16s groups=%-3s items=%-4s total=%-5s %s" % (cat, len(node.get("group_ids") or []), len(node["items"]), node.get("total"), str(node.get("groups_why"))[:70]), flush=True)
+        for i in node["items"][:30]:
+            print("      %s" % i, flush=True)
+    out["state"] = "MEASURED"
+    RESULTS["library-detail"] = out
+    return out
+
+
+@app.local_entrypoint()
+def libdetail(out: str = "/tmp/bs/library_detail.json"):
+    from require_detach import require_detach
+    require_detach("the library detail read")
+    r = library_detail.remote()
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    json.dump(r, open(out, "w", encoding="utf-8"), indent=1)
+    print("WROTE %s" % out)
+
+
+@app.local_entrypoint()
+def libread(out: str = "/tmp/bs/library_read.json"):
+    from require_detach import require_detach
+    require_detach("the library read")
+    r = library_read.remote()
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    json.dump(r, open(out, "w", encoding="utf-8"), indent=1)
+    print("WROTE %s" % out)
+
+
+SOURCE_LAYER_CODE = """
+const Component = ({ item }) => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const src = item.props.clip;
+  const scale = Number(item.props.scale) || 1.2;
+  // THE SOURCE OFFSET IS AN INPUT, NOT AN ASSUMPTION. A layer that hardcodes startFrom={0} plays the
+  // opening frame wherever it sits, so a zoom at 12s would show second 0 — worse than no zoom. The
+  // harness knows the item's own fromFrame and the base item's sourceRange, so it passes the offset in.
+  const srcFrom = Math.max(0, Math.round(Number(item.props.srcFrom) || 0));
+  const rootStyle = { position: "absolute", inset: 0, display: "flex",
+    alignItems: "center", justifyContent: "center", overflow: "hidden",
+    boxSizing: "border-box", backgroundColor: "#000000" };
+  if (!src) {
+    return (
+      <div style={rootStyle}>
+        <div style={{ fontFamily: "Anton", fontSize: 64, color: "#FF6A3D" }}>NO CLIP PROP</div>
+      </div>
+    );
+  }
+  return (
+    <div style={rootStyle}>
+      {/* MUTED, ALWAYS. A <Video> layer carries its own audio, so an unmuted one plays the speaker a
+          SECOND time under the base track, offset by the layer's own start. Silent in preview and
+          audible only in the export, which is the worst place to find it. */}
+      <Video src={src} startFrom={srcFrom} muted volume={0}
+             style={{ width: "100%", height: "100%", objectFit: "cover",
+                      transform: `scale(${scale})`, transformOrigin: "50% 50%" }} />
+    </div>
+  );
+};
+"""
+
+@app.function(image=IMG, timeout=1200, cpu=4, memory=8192,
+              secrets=[modal.Secret.from_name("chatcut-oauth")])
+def source_layer_probe(clip_url: str = ""):
+    """CAN A MOTION GRAPHIC RENDER THE SOURCE VIDEO? (Zac, 2026-09-19). No model calls.
+
+    THE QUESTION THIS DECIDES. ChatCut's four zoom presets move at CONSTANT SPEED across the interval
+    (their own description), so a move's PEAK cannot be placed — and our seven zooms are defined by when
+    the peak lands (280ms..770ms). If a component can take the source as a `video` property and render it
+    itself, our zooms and transitions port as OUR components with OUR curves, and the preset mapping
+    becomes a fallback. If it cannot, the mapping is the plan and the curve is lost.
+
+    Trivial by design: the source scaled 1.2x, nothing else. A component that cannot do this cannot do a
+    curve either, and one that can is a path worth building on.
+    """
+    _t0 = time.time()
+    os.makedirs("/work", exist_ok=True)
+    subprocess.run(["curl", "-fsSL", "-o", "/work/source.mp4", clip_url], check=True, timeout=300)
+    tok = _access_token()
+    out = {"state": "RUNNING", "steps": []}
+
+    def step(name, fn):
+        try:
+            v = fn(); out["steps"].append({"step": name, "state": "MEASURED", "got": json.dumps(v, default=str)[:600]})
+            print("  %-22s MEASURED %s" % (name, json.dumps(v, default=str)[:140]), flush=True)
+            return v
+        except Exception as e:                                    # noqa: BLE001
+            out["steps"].append({"step": name, "state": "FAILED", "why": str(e)[:400]})
+            print("  %-22s FAILED   %s" % (name, str(e)[:160]), flush=True)
+            return None
+
+    stage = prestage(tok, "", controls={}, source_path="/work/source.mp4", want_components=set(), titles=[])
+    pid, base, src_asset = stage["projectId"], stage.get("baseItemId"), stage.get("sourceAssetId")
+    out["project"], out["source_asset"] = pid, src_asset
+    print("  PRESTAGE               project=%s source_asset=%s" % (str(pid)[:8], str(src_asset)[:12]), flush=True)
+
+    # WHAT A `video` PROPERTY WANTS: an asset id, or a URL? inspect_asset is the only surface that says.
+    ins = step("inspect_asset(source)", lambda: _mcp_call(tok, "inspect_asset", {"projectId": pid, "assetId": src_asset}, expect=None))
+    url = None
+    for k in ("url", "playbackUrl", "downloadUrl", "src", "signedUrl"):
+        v = _deep_find(ins or {}, k)
+        if isinstance(v, str) and v.startswith("http"):
+            url, out["url_key"] = v, k
+            break
+    out["source_url_found"] = bool(url)
+    print("  SOURCE URL             %s%s" % ("MEASURED via %r" % out.get("url_key") if url else "ABSENT — no http url in inspect_asset",
+                                             "" if url else " (keys: %s)" % sorted(ins or {})[:8]), flush=True)
+
+    asset = step("create_motion_graphic", lambda: _mcp_call(tok, "create_motion_graphic_from_code", {
+        "projectId": pid, "name": "SourceLayerProbe", "code": SOURCE_LAYER_CODE,
+        "width": 1080, "height": 1920, "durationInFrames": 60,
+        "properties": normalise_properties([
+            {"key": "clip", "label": "Clip", "type": "video", "defaultValue": ""},
+            {"key": "scale", "label": "Scale", "type": "number", "defaultValue": 1.2},
+            {"key": "srcFrom", "label": "Source start frame", "type": "number", "defaultValue": 0}])}, expect=None))
+    mg_id = asset_id_from(asset or {})
+    out["mg_asset"] = mg_id
+    if not mg_id:
+        out["state"] = "FAILED"; out["why"] = "the component did not register: %s" % registration_refusal(asset or {})
+        print("  COMPONENT              FAILED — %s" % out["why"][:200], flush=True)
+        RESULTS["source-layer-probe"] = out
+        return out
+    # TWO PLACEMENTS: the asset id as the prop, and the url as the prop. Whichever renders is the answer.
+    # MEASURED 2026-09-19: inspect_asset answers with asset/editorUrl/projectId and NO http url, so the
+    # url arm is ABSENT by fact rather than untried. The asset id is the only value there is to pass.
+    for label, val in (("assetId", src_asset), ("url", url)):
+        if not val:
+            out["steps"].append({"step": "place(%s)" % label, "state": "ABSENT", "why": "no %s to try" % label}); continue
+        r = step("place(%s)" % label, lambda v=val: _mcp_call(tok, "edit_item", {"projectId": pid, "adds": [
+            {"type": "motion-graphic", "assetId": mg_id, "fromFrame": 0, "durationInFrames": 60,
+             "propertyOverrides": {"clip": v, "scale": 1.2}}]}, expect="adds"))
+        if r:
+            out["placed_%s" % label] = ((r.get("adds") or [{}])[0] or {}).get("id")
+    rb = read_back(tok, stage)
+    out["read_back"] = {"count": len(rb.get("items") or []),
+                        "types": [i.get("itemType") for i in (rb.get("items") or [])]}
+    # THE FRAME IS THE JUDGE: a component that renders the source looks like the source, not like a card.
+    try:
+        sheets, times = _preview_frames(tok, pid, 60, fps=30, density_fps=1.0, out_dir="/work/probe_frames")
+        import base64 as _b64
+        out["frames"] = {"n": len(times), "sheets": len(sheets),
+                         "b64": [_b64.b64encode(open(x, "rb").read()).decode() for x in sheets[:2]]}
+        print("  PREVIEW                %d frame(s) on %d sheet(s)" % (len(times), len(sheets)), flush=True)
+    except Exception as e:                                        # noqa: BLE001
+        out["frames"] = {"state": "FAILED", "why": str(e)[:200]}
+        print("  PREVIEW                FAILED %s" % str(e)[:160], flush=True)
+    out["wall_s"] = round(time.time() - _t0, 1); out["state"] = "MEASURED"
+    RESULTS["source-layer-probe"] = out
+    return {k: v for k, v in out.items() if k != "frames"} | {"frames_n": (out.get("frames") or {}).get("n")}
+
+
+@app.function(image=IMG, timeout=600, cpu=2, memory=4096,
+              secrets=[modal.Secret.from_name("chatcut-oauth")])
+def preview_span(project_id: str = "", end_frame: int = 180, density_fps: float = 1.0):
+    """Frames across a span of an EXISTING project. No model, no placement.
+
+    WHY IT EXISTS: a motion graphic on V2 that renders the source looks identical to one that renders
+    NOTHING, because the source is on V1 underneath. The discriminator is the component's own span — a
+    frame INSIDE it against a frame OUTSIDE it, on the same source. Framing that changes at the boundary
+    is the component rendering; framing that does not is V1 showing through a transparent failure.
+    """
+    tok = _access_token()
+    sheets, times = _preview_frames(tok, project_id, int(end_frame), fps=30, density_fps=density_fps,
+                                    out_dir="/work/span")
+    import base64 as _b64
+    out = {"state": "MEASURED" if sheets else "ABSENT", "n": len(times), "times": times,
+           "b64": [_b64.b64encode(open(x, "rb").read()).decode() for x in sheets[:3]]}
+    RESULTS["preview-span"] = out
+    print("  SPAN            : %d frame(s) over %d sheet(s)" % (len(times), len(sheets)), flush=True)
+    return {"n": out["n"], "times": out["times"], "sheets": len(sheets)}
+
+
+@app.local_entrypoint()
+def pvspan(project_id: str = "", end_frame: int = 180, density_fps: float = 1.0):
+    from require_detach import require_detach
+    require_detach("the span preview")
+    print(json.dumps(preview_span.remote(project_id, end_frame, density_fps)))
+
+
+@app.function(image=IMG, timeout=1800, cpu=4, memory=8192,
+              secrets=[modal.Secret.from_name("chatcut-oauth")])
+def layer_sync_audio(clip_url: str = "", at_s: float = 12.0):
+    """THE TWO MECHANICAL PROOFS BEFORE ANY PORT (Zac, 2026-09-19). No model calls.
+
+      SYNC  a layer placed at `at_s` must show the source AT `at_s`, not at zero. Proven by frame:
+            the layer's own frame beside V1's frame at the same instant, same subject or not.
+      AUDIO a <Video> layer carries audio, so an export would play the speaker twice. Proven by
+            measurement: the exported span's audio RMS against the source's own RMS for that span.
+            Doubling a signal against itself is about +6 dB, which an RMS comparison sees.
+    """
+    _t0 = time.time()
+    os.makedirs("/work", exist_ok=True)
+    subprocess.run(["curl", "-fsSL", "-o", "/work/source.mp4", clip_url], check=True, timeout=300)
+    tok = _access_token()
+    out = {"state": "RUNNING", "at_s": at_s}
+    stage = prestage(tok, "", controls={}, source_path="/work/source.mp4", want_components=set(), titles=[])
+    pid, src_asset = stage["projectId"], stage.get("sourceAssetId")
+    out["project"] = pid
+    asset = _mcp_call(tok, "create_motion_graphic_from_code", {
+        "projectId": pid, "name": "SourceLayerSync", "code": SOURCE_LAYER_CODE,
+        "width": 1080, "height": 1920, "durationInFrames": 60,
+        "properties": normalise_properties([
+            {"key": "clip", "label": "Clip", "type": "video", "defaultValue": ""},
+            {"key": "scale", "label": "Scale", "type": "number", "defaultValue": 1.2},
+            {"key": "srcFrom", "label": "Source start frame", "type": "number", "defaultValue": 0}])}, expect=None)
+    mg = asset_id_from(asset or {})
+    out["mg_asset"] = mg
+    if not mg:
+        out["state"] = "FAILED"; out["why"] = registration_refusal(asset or {}); RESULTS["layer-sync"] = out; return out
+    at_f = int(round(at_s * 30))
+    r = _mcp_call(tok, "edit_item", {"projectId": pid, "adds": [
+        {"type": "motion-graphic", "assetId": mg, "fromFrame": at_f, "durationInFrames": 60,
+         "propertyOverrides": {"clip": src_asset, "scale": 1.2, "srcFrom": at_f}}]}, expect="adds")
+    out["placed"] = ((r.get("adds") or [{}])[0] or {}).get("id")
+    print("  PLACED          : %s at frame %d with srcFrom=%d" % (out["placed"], at_f, at_f), flush=True)
+    # ── SYNC, BY FRAME: inside the layer's span, and outside it, on the same source ──
+    sheets, times = _preview_frames(tok, pid, at_f + 150, fps=30, density_fps=0.5, out_dir="/work/sync")
+    import base64 as _b64
+    out["frames"] = {"n": len(times), "times": times,
+                     "b64": [_b64.b64encode(open(x, "rb").read()).decode() for x in sheets[:3]]}
+    print("  SYNC FRAMES     : %d frame(s) spanning %.1fs..%.1fs" % (len(times), min(times or [0]), max(times or [0])), flush=True)
+    # ── AUDIO, BY MEASUREMENT: export the span and compare its RMS against the source's own ──
+    try:
+        ex = _mcp_call(tok, "submit_export", {"projectId": pid, "startFrame": at_f,
+                                              "endFrameExclusive": at_f + 60}, expect=None)
+        _m = re.search(r"renderId[\"':\s]+([0-9a-f-]{8,})", json.dumps(ex) + str(ex.get("_text") or ""))
+        url = None
+        if _m:
+            for _iv in EXPORT_POLL_SCHEDULE:
+                time.sleep(_iv)
+                st = _mcp_call(tok, "track_export", {"projectId": pid, "action": "status", "renderIds": _m.group(1)}, expect=None)
+                u = _deep_find(st, "url") or _deep_find(st, "downloadUrl")
+                if isinstance(u, str) and u.startswith("http"):
+                    url = u; break
+        if url:
+            import urllib.request as _ur
+            with _ur.urlopen(url, timeout=120) as rsp:
+                open("/work/span.mp4", "wb").write(rsp.read())
+            def _rms(path, ss=None, t=None):
+                """-> {state, mean_db, max_db}. `-v info`, NOT `-v error`: volumedetect prints its
+                summary at INFO level, so `-v error` swallowed it and both readings came back null —
+                and the first version still called the result MEASURED. A reading that did not happen
+                is ABSENT, and it says what it looked at."""
+                cmd = ["ffmpeg", "-hide_banner", "-v", "info"] + (["-ss", str(ss)] if ss is not None else []) + \
+                      (["-t", str(t)] if t is not None else []) + ["-i", path, "-af", "volumedetect", "-f", "null", "-"]
+                p_ = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+                m_ = re.search(r"mean_volume:\s*(-?[0-9.]+) dB", p_.stderr or "")
+                n_ = re.search(r"max_volume:\s*(-?[0-9.]+) dB", p_.stderr or "")
+                if not m_:
+                    return {"state": "ABSENT", "mean_db": None, "max_db": None,
+                            "why": "volumedetect printed no mean_volume; ffmpeg said: %s" % (p_.stderr or "")[-220:]}
+                return {"state": "MEASURED", "mean_db": float(m_.group(1)),
+                        "max_db": float(n_.group(1)) if n_ else None}
+            a_export = _rms("/work/span.mp4")
+            a_source = _rms("/work/source.mp4", ss=at_s, t=2.0)
+
+            def _pcm(path, ss=None, t=None, sr=16000):
+                """mono 16k s16le, as a numpy array — the two signals in one comparable form"""
+                import numpy as _np
+                cmd = ["ffmpeg", "-v", "error"] + (["-ss", str(ss)] if ss is not None else []) + \
+                      (["-t", str(t)] if t is not None else []) + \
+                      ["-i", path, "-ac", "1", "-ar", str(sr), "-f", "s16le", "-"]
+                raw = subprocess.run(cmd, capture_output=True, timeout=180).stdout
+                return _np.frombuffer(raw, dtype="<i2").astype("float32")
+
+            def _peak_offset_ms(a, b, sr=16000, max_ms=1500):
+                """Where b best lines up against a, in ms. THE REGRESSION THE +6 dB CHECK CANNOT SEE:
+                a layer that stops being muted plays a SECOND copy starting at its own fromFrame, so the
+                export is not merely louder, it is smeared — and a smear that happens to sit near 0 dB
+                reads as clean on levels alone. A correlation peak away from 0 names it."""
+                import numpy as _np
+                n = min(len(a), len(b))
+                if n < sr // 4:
+                    return {"state": "ABSENT", "why": "under 0.25s of audio to correlate (%d samples)" % n}
+                a = a[:n] - a[:n].mean(); b = b[:n] - b[:n].mean()
+                if not a.any() or not b.any():
+                    return {"state": "ABSENT", "why": "one signal is silent — nothing to align"}
+                k = int(sr * max_ms / 1000)
+                c = _np.correlate(a, b, mode="full")
+                mid = len(c) // 2
+                lo, hi = max(0, mid - k), min(len(c), mid + k + 1)
+                seg = c[lo:hi]
+                peak = int(_np.argmax(_np.abs(seg))) + lo - mid
+                denom = float(_np.sqrt((a * a).sum() * (b * b).sum())) or 1.0
+                return {"state": "MEASURED", "offset_ms": round(1000.0 * peak / sr, 1),
+                        "normalised_peak": round(float(_np.abs(seg).max()) / denom, 3)}
+
+            try:
+                _align = _peak_offset_ms(_pcm("/work/span.mp4"), _pcm("/work/source.mp4", ss=at_s, t=2.0))
+            except Exception as _ae:                              # noqa: BLE001
+                _align = {"state": "FAILED", "why": str(_ae)[:200]}
+            streams = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a",
+                                      "-show_entries", "stream=index,codec_name", "-of", "csv=p=0", "/work/span.mp4"],
+                                     capture_output=True, text=True, timeout=60).stdout.strip()
+            _both = a_export.get("mean_db") is not None and a_source.get("mean_db") is not None
+            _delta = round(a_export["mean_db"] - a_source["mean_db"], 2) if _both else None
+            out["audio"] = {
+                # THE STATE IS THE READING'S, NOT THE STEP'S: an export that happened and a level that
+                # did not read are different things, and a null delta reported as MEASURED is how a
+                # doubled speaker would have shipped.
+                "state": "MEASURED" if _both else "ABSENT",
+                "why": None if _both else "a level did not read — export %s, source %s"
+                       % (a_export.get("state"), a_source.get("state")),
+                "export": a_export, "source_same_span": a_source, "alignment": _align,
+                "audio_streams": [l for l in streams.split("\n") if l.strip()],
+                "delta_db": _delta,
+                "verdict": (None if not _both else
+                            ("MUTED — the export matches the source's own level (%+.2f dB)" % _delta
+                             if abs(_delta) < 3.0 else
+                             "DOUBLED? the export is %+.2f dB against the source; a second copy is about +6" % _delta))}
+        else:
+            out["audio"] = {"state": "ABSENT", "why": "no export url came back"}
+    except Exception as e:                                        # noqa: BLE001
+        out["audio"] = {"state": "FAILED", "why": str(e)[:300]}
+    print("  AUDIO           : %s" % json.dumps(out.get("audio"))[:300], flush=True)
+    out["wall_s"] = round(time.time() - _t0, 1); out["state"] = "MEASURED"
+    RESULTS["layer-sync"] = out
+    return {k: v for k, v in out.items() if k != "frames"} | {"frames_n": (out.get("frames") or {}).get("n")}
+
+
+@app.local_entrypoint()
+def layersync(clip_url: str = "", at_s: float = 12.0, out: str = "/tmp/bs/layer_sync.json"):
+    from require_detach import require_detach
+    require_detach("the layer sync/audio probe")
+    r = layer_sync_audio.remote(clip_url, at_s)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    json.dump(r, open(out, "w", encoding="utf-8"), indent=1)
+    print("WROTE %s" % out); print(json.dumps(r.get("audio")))
+
+
+@app.local_entrypoint()
+def srclayer(clip_url: str = "", out: str = "/tmp/bs/source_layer.json"):
+    from require_detach import require_detach
+    require_detach("the source-layer probe")
+    r = source_layer_probe.remote(clip_url)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    json.dump(r, open(out, "w", encoding="utf-8"), indent=1)
+    print("WROTE %s" % out)
+
+
 @app.function(image=IMG, timeout=1800, cpu=4, memory=8192,
               secrets=[modal.Secret.from_name("chatcut-oauth")])
 def parity_sweep(clip_url: str = ""):
@@ -6637,14 +7098,9 @@ def parity_sweep(clip_url: str = ""):
     for cat in ("sound-effects", "transitions", "effects", "zooms", "overlays"):
         try:
             r = _mcp_call(tok, "browse_library", {"category": cat, "limit": 30}, expect=None)
-            ids, groups = [], (r.get("groups") if isinstance(r, dict) else None)
-            for x in (r.get("items") or []):
-                ids.append(str(x.get("id") or x.get("name") or ""))
-            for g in (groups or []):
-                for x in (g.get("items") or []) if isinstance(g, dict) else []:
-                    ids.append(str(x.get("id") or x.get("name") or ""))
-            out["catalogue"][cat] = {"state": "MEASURED" if (ids or groups is not None) else "ABSENT",
-                                     "ids": ids[:60], "n": len(ids),
+            ids, st, why = library_ids(r)
+            out["catalogue"][cat] = {"state": st, "why": why, "ids": ids[:60], "n": len(ids),
+                                     "total": (r or {}).get("total"),
                                      "keys": sorted(r)[:10] if isinstance(r, dict) else str(type(r).__name__)}
         except Exception as e:                                    # noqa: BLE001
             out["catalogue"][cat] = {"state": "FAILED", "why": str(e)[:200]}

@@ -1614,6 +1614,30 @@ def main():
           "SMOKE_TIMEOUT_S" in RP_SRC and "timeout=SMOKE_TIMEOUT_S" in RP_SRC and "return 124," in RP_SRC
           and "a hang is not a result" in RP_SRC.lower() or "A hang is not a result" in RP_SRC)
 
+    # ---- THE CATALOGUE READER (2026-09-19): an empty read is ABSENT, never MEASURED ----
+    # CONTAINMENT, NOT EQUALITY, and the reason is a property of the envelope rather than a concession:
+    # a category overview's ids ARE the group names, and a group listing's are the items, so a walker
+    # that finds every id in an unknown shape necessarily finds both when both are present. What must
+    # hold is that no real id is missed and that the KEY IT CAME FROM is named, which is what lets the
+    # caller tell a group overview from an item list.
+    _li = lambda env: J.library_ids(env)
+    _flat, _gd, _gl, _deep = (_li({"items": [{"id": "z"}], "total": 1}), _li({"groups": {"A": [{"id": "b"}]}}),
+                              _li({"groups": [{"name": "A", "items": [{"id": "x"}, {"id": "y"}]}]}),
+                              _li({"data": {"page": {"rows": [{"assetId": "deep-1"}]}}, "total": 1}))
+    check("library_ids finds every id however the envelope nests it, and names the key it used",
+          _flat[:2] == (["z"], "MEASURED") and "items" in _flat[2]
+          and _gd[0] == ["b"] and "groups.A" in _gd[2]
+          and set(_gl[0]) >= {"x", "y"} and "groups[0].items" in _gl[2]
+          and _deep[0] == ["deep-1"] and "data.page.rows" in _deep[2]
+          and "stated total" in _li({"items": [{"id": "z"}], "total": 9})[2],
+          "%s | %s | %s | %s" % (_flat[:2], _gd[:2], _gl[:2], _deep[:2]))
+    _empty = J.library_ids({"_links": 1, "_text": "", "category": "x", "groups": {}, "total": 0})
+    check("AN EMPTY CATALOGUE READ IS ABSENT AND NAMES THE KEYS IT SAW — never MEASURED with an empty list",
+          _empty[1] == "ABSENT" and "groups" in _empty[2] and _empty[0] == [], str(_empty))
+    check("an errored category is ABSENT with its message, and a non-object answer is FAILED",
+          J.library_ids({"isError": True, "_text": "unknown category"})[1] == "ABSENT"
+          and J.library_ids("nope")[1] == "FAILED")
+
     if FAILS:
         print("\n%d FAILURE(S)" % len(FAILS))
         for f in FAILS:

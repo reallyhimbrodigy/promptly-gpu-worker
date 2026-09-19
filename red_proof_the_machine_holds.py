@@ -612,6 +612,21 @@ MUTATIONS = [
      '    _lingered = False',
      "a container that outlives its export past the budget is a LEDGERED DEFECT with an owner page",
      '_after_export_s > EXPORT_TO_EXIT_BUDGET_S'),
+    ("an empty catalogue read goes back to reading as MEASURED",
+     '    if not ids:\n        return [], "ABSENT",',
+     '    if not ids:\n        return [], "MEASURED",',
+     "AN EMPTY CATALOGUE READ IS ABSENT AND NAMES THE KEYS IT SAW — never MEASURED with an empty list",
+     'if not ids:'),
+    ("the reader stops walking nested envelopes",
+     '            for k, v in node.items():\n                if k.startswith("_"):\n                    continue\n                _walk(v, "%s.%s" % (path, k) if path else k)',
+     '            for k, v in node.items():\n                if k.startswith("_"):\n                    continue',
+     "library_ids finds every id however the envelope nests it, and names the key it used",
+     'for k, v in node.items():'),
+    ("the reader stops naming the key it used",
+     '    why = "%d id(s) under %s%s" % (len(ids), ", ".join(sorted(set(used))[:3]),',
+     '    why = "%d id(s)%s%s" % (len(ids), "",',
+     "library_ids finds every id however the envelope nests it, and names the key it used",
+     'id(s) under %s%s'),
 ]
 
 

@@ -1544,3 +1544,42 @@ else's laptop. Same rot, one gets looked at.
   tree a number describes. A fix on an unmounted lane is unexercised no matter
   how many rounds have run — "committed" is not "observed", and a ledger from a
   branch you do not own is somebody else's observation.
+
+## The shortest true statement of the whole false-green list (2026-09-19)
+
+- **THE STATE BELONGS TO THE READING, NOT THE STEP. A step succeeding is not
+  evidence that the thing it was supposed to measure exists.** Every instrument
+  defect in this file is an instance: the tool ran, the export downloaded, the
+  function returned, the subprocess exited 0 — and none of that says a NUMBER
+  WAS READ.
+
+  Four found in a single afternoon, each in an instrument built to prevent the
+  class it then exhibited:
+    * `volumedetect` prints its summary at INFO level and the call ran with
+      `-v error`, so both readings came back `null` — and the block still
+      reported `"state": "MEASURED"` with `delta_db: null`. Had the audio
+      layer actually been unmuted, that is the shape in which it would have
+      shipped: a clean-looking result with nothing in it.
+    * `browse_library` was read three times with three guessed key names
+      (`items`, then `groups`, then `results`); each miss was recorded as a
+      category MEASURED WITH AN EMPTY LIST, so an unknown envelope shape read
+      as an empty catalogue. The fix names no keys at all: walk for any list of
+      objects carrying an id, and REPORT THE PATH IT WAS FOUND UNDER, so the
+      next surprise is visible in the record rather than silent.
+    * seven zoom placements returned echo ids and put NOTHING on the timeline;
+      an accept is not a commit, and only the read-back said so.
+    * a `tool_choice` check and a delivered-copy re-hash both passed while
+      DISABLED by `if False:`, because each grepped for an assignment instead
+      of driving the behaviour. Anything a check must exercise is a function
+      the check CALLS with real inputs.
+
+  **And it applies to waiting, too.** An `until` loop keyed on "no `modal run`
+  process exists" blocked for fifty minutes on a day-old orphan from another
+  run, while the probe it was waiting for had finished in 63.9 seconds. Wait on
+  the ARTIFACT, or on the PID you started — never on a process class you do not
+  own.
+
+  The discipline that makes it usable: **when verifying your own instrument,
+  check that the verification can fail.** A `volumedetect` comparison run
+  against a JPEG prints nothing in both arms and proves neither; two arms that
+  agree because both are empty are not a control.
