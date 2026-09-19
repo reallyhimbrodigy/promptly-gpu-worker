@@ -324,13 +324,18 @@ if _mgc is not None:
     ok(len(_out) >= 4 and _out[0] == "MEASURED",
        "mg_conditions does not read the catalogue: %r" % (_r.stdout + _r.stderr)[:200])
     if len(_out) >= 4:
-        ok(int(_out[1]) == 8,
-           "the catalogue's condition headings changed count (%s, expected 8) — "
-           "CARD_CATALOGUE_REACH.md's group-A argument is measured against them"
-           % _out[1])
-        ok(int(_out[2]) >= 26,
-           "fewer components are documented under a condition than the 26 the "
-           "reach census was taken over (%s)" % _out[2])
+        # THE NUMBER MOVES WHEN A COMPONENT GAINS A CONDITION, and that is a correct change — the
+        # picture the agent picks from must equal the registry. What must NOT happen silently is the
+        # census in CARD_CATALOGUE_REACH.md drifting from the catalogue it was measured over, so this
+        # is pinned to the document and both move together. 8 on 2026-09-11; 9 since 2026-09-19, when
+        # EndCard and NamePlate gained "WHEN THE VIDEO ENDS, OR A PERSON IS IDENTIFIED".
+        ok(int(_out[1]) == 9,
+           "the catalogue's condition headings changed count (%s, expected 9) — update "
+           "CARD_CATALOGUE_REACH.md's heading table and this number TOGETHER, or the census "
+           "describes a catalogue that no longer exists" % _out[1])
+        ok(int(_out[2]) >= 28,
+           "fewer components are documented under a condition than the 28 the catalogue now "
+           "carries (%s) — the census was taken over 26 and EndCard and NamePlate joined them" % _out[2])
         ok("DeviceMockup" in _out[3] and "EmojiCard" in _out[3],
            "the undocumented components changed — the reach census names "
            "exactly which have no catalogue entry: %s" % _out[3])
@@ -362,7 +367,8 @@ except Exception:
     _pr = {}
 ok(bool(_pr), "the card-reach probe did not run: %r" % (_probe.stderr or "")[:200])
 if _pr:
-    ok(_pr["n_cond"] == 8, "the condition enum is not 8 wide: %s" % _pr["n_cond"])
+    ok(_pr["n_cond"] == 9, "the condition enum is not 9 wide: %s (it widened when EndCard and "
+       "NamePlate gained a condition; the enum and CARD_CATALOGUE_REACH.md move together)" % _pr["n_cond"])
     ok(len(_pr["lang"]) >= 5,
        "fewer than 5 components are reachable from language alone (%s) — the "
        "catalogue was two wide and the condition field is what widened it"

@@ -26,6 +26,22 @@ import urllib.request
 UPSTREAM = os.environ.get("MCP_SHIM_UPSTREAM", "https://api.chatcut.io/api/external-mcp/mcp")
 TOKEN = os.environ.get("MCP_SHIM_TOKEN", "")
 ALLOW = [t for t in os.environ.get("MCP_SHIM_ALLOW", "").split(",") if t]
+
+# THE FINISH TOOL (Zac, 2026-09-19). EVERY TURN ENDS IN A TOOL CALL, so a turn that has nothing to change
+# still ends in one instead of in prose. It is OURS, not ChatCut's: served here, never forwarded upstream.
+# Why it exists: the machine used to read the word "export" out of free text, so a model that answered in
+# prose (Haiku wrote a complete edit_item payload inside a ```json fence and called nothing) produced a
+# turn with no op and no verdict. With tool_choice "any" on the wire, prose is not a turn the model can end on.
+FINISH_TOOL = {
+    "name": "finish",
+    "description": ("End your turn when there is nothing to change. `clean` means the composed edit is right as it "
+                    "stands; `export` means ship it. Use this instead of replying with words — every turn ends in a "
+                    "tool call, and a reply that is only text is refused."),
+    "inputSchema": {"type": "object", "additionalProperties": False,
+                    "properties": {"verdict": {"type": "string", "enum": ["clean", "export"],
+                                               "description": "clean = nothing to change; export = ship it"},
+                                   "why": {"type": "string", "description": "under 12 words"}},
+                    "required": ["verdict"]}}
 LOG = os.environ.get("MCP_SHIM_LOG", "")
 
 
@@ -131,11 +147,22 @@ def handle(msg):
         up = upstream("tools/list", {}, mid)
         tools = (up.get("result") or {}).get("tools") or []
         kept = [slim_tool(t) for t in tools if not ALLOW or t.get("name") in ALLOW]
+        if not ALLOW or "finish" in ALLOW:
+            kept.append(FINISH_TOOL)          # ours, appended after the upstream's — never fetched from them
         _log("tools/list upstream=%d kept=%d missing=%s" % (
             len(tools), len(kept), sorted(set(ALLOW) - {t.get("name") for t in tools})))
         return {"jsonrpc": "2.0", "id": mid, "result": {"tools": kept}}
     if method == "tools/call":
         name = (params or {}).get("name")
+        if name == "finish":
+            # SERVED HERE. The harness reads the verdict off the tool call in the stream; this answer only
+            # has to close the turn cleanly.
+            _a = (params or {}).get("arguments") or {}
+            _v = str(_a.get("verdict") or "").strip().lower()
+            _log("finish verdict=%r why=%r" % (_v, str(_a.get("why") or "")[:120]))
+            if _v not in ("clean", "export"):
+                return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32602, "message": "finish.verdict must be 'clean' or 'export', got %r" % _v}}
+            return {"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": "noted: %s" % _v}]}}
         if ALLOW and name not in ALLOW:
             return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "tool %r is not offered on this surface" % name}}
         # THE WHY RIDES INSIDE THE OPS (Zac, 2026-09-17). Each add/update/delete

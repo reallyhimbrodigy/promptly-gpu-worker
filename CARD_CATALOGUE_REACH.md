@@ -49,8 +49,11 @@ phrase wants a phrase card — and then has to pick one phrase card, so it picks
 the only one it was told about.
 
 **THE CATALOGUE ALREADY ANSWERS THIS AND THE AGENT HAS NEVER SEEN IT.**
-`knowledge/05_motion_graphics.md` is organised under eight condition headings,
-and every documented component sits under the question it answers:
+`knowledge/05_motion_graphics.md` is organised under **nine** condition headings
+(eight when this census was taken on 2026-09-11; the ninth was added 2026-09-19
+so that EndCard and NamePlate — both of which RENDER — could appear in the
+agent's inventory at all, which is what made the picture equal the registry).
+Every documented component sits under the question it answers:
 
 | condition | group-A components under it |
 |---|---|
@@ -62,6 +65,7 @@ and every documented component sits under the question it answers:
 | WHEN A CLAIM GETS A VERDICT OR STAMP | Stamp |
 | WHEN TIME OR SEQUENCE IS THE STORY | SectionDivider, StepDivider |
 | WHEN A REGION OF THE FRAME NEEDS POINTING AT | — (group C) |
+| WHEN THE VIDEO ENDS, OR A PERSON IS IDENTIFIED | — (added 2026-09-19: EndCard, NamePlate) |
 
 Each group-A component sits under a **different** condition. The discriminator
 is not taste anyone has to invent — it is which question the beat answers, and
@@ -83,7 +87,7 @@ read as "no conditions" rather than "the source changed shape".
 ## What it would take, in order of cost
 
 1. **Group A, 7 components: ONE field on the ruling — the CONDITION, not the
-   component.** Eight conditions, each already carrying its own sentence, is a
+   component.** Nine conditions, each already carrying its own sentence, is a
    smaller and more answerable choice than 29 bare names — and the 29-name enum
    is exactly what failed: *a bare enum is a list of words*, and round 42 read
    "1 distinct of 29 selectable, StatCard=4" because the cached prefix named

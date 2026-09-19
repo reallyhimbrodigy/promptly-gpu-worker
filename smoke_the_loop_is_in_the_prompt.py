@@ -67,7 +67,7 @@ LEGS = [
      and "COMPOSED PICTURE" in s
      and re.search(r"ONE edit_item call", s)),
     ("turn 3 is export or ONE fix, a fourth only for what the fix broke, and no fifth",
-     lambda s: re.search(r"TURN 3 — CONFIRM", s) and "single word: export" in s and "there is no fifth" in s),
+     lambda s: re.search(r"TURN 3 — CONFIRM", s) and re.search(r'finish with verdict .{0,3}export', s) and "there is no fifth" in s),
     ("it is concatenated into the deciding prompt",
      lambda s: re.search(r"\+ TWO_TURN_LOOP\b", s)),
     ("the superseded one-revision prose is gone",
@@ -89,7 +89,9 @@ if __name__ == "__main__":
     reds = [
         ("constant deleted", SRC.replace("TWO_TURN_LOOP = (", "X_UNUSED = (")),
         ("not concatenated", SRC.replace("+ TWO_TURN_LOOP", "+ \"\"")),
-        ("turn 3 no longer ends on export", SRC.replace("single word: export", "single word: done")),
+        # THE RAW SOURCE, where the sentence is split across two literals: a mutation aimed at the JOINED
+        # phrase replaces nothing and proves nothing (vacuous, 2026-09-19).
+        ("turn 3 no longer ends on a finish call", SRC.replace('call finish with ', 'say whatever you like ')),
         # THE MUTATION MUST MATCH THE LEG. This deleted the old wording, which
         # the leg no longer reads — so the RED proof printed 0 red and the
         # batching leg was, for that moment, a check that could not fail.

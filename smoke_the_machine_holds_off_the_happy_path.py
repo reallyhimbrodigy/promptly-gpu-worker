@@ -22,6 +22,7 @@ sys.path.insert(0, HERE)
 os.environ.setdefault("MODAL_IS_INSIDE_CONTAINER", "0")
 import chatcut_job_app as J                                      # noqa: E402
 PX_SRC = io.open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "api_proxy.py"), encoding="utf-8").read()
+RP_SRC = io.open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "red_proof_the_machine_holds.py"), encoding="utf-8").read()
 import chatcut_gate as G                                         # noqa: E402
 
 FAILS = []
@@ -453,36 +454,41 @@ def main():
         def _inv(n, message):
             names, text, usage = script(n)
             log.append((n, len((message or {}).get("message", {}).get("content") or [])))
-            return {"rc": 1, "subtype": "error_max_turns", "tool_calls": [{"name": "mcp__chatcut__" + t, "input": {}} for t in names],
+            # a name of "finish:<verdict>" builds the finish call the machine now reads the verdict from
+            _tc = [{"name": "mcp__chatcut__" + t.split(":")[0],
+                    "input": ({"verdict": t.split(":")[1]} if t.startswith("finish:") else {})} for t in names]
+            return {"rc": 1, "subtype": "error_max_turns", "tool_calls": _tc,
                     "text": text, "usage": usage, "wall": 1.0, "killed": False}
         _inv.log = log
         return _inv
     _rw = lambda n, final: {"message": {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "rw%d" % n}]}}, "sheets": 2, "faults": [], "scan": []}
     U1 = {"read": 0, "write": 300000, "in": 2, "out": 900}; UN = {"read": 300000, "write": 400, "in": 2, "out": 300}
-    happy = _mk_invoke(lambda n: (["edit_item"], "", U1) if n == 1 else ((["edit_item"], "", UN) if n == 2 else ([], "export", UN)))
-    tm = J.run_three_turns(happy, _rw, {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "go"}]}})
-    check("the happy path is three API calls: place, review-fix, export",
-          len(tm["turns"]) == 3 and tm["terminal"] is None and str(tm["verdict"]).startswith("export at turn 3")
-          and [t["kind"] for t in tm["turns"]] == ["place", "review", "confirm"],
+    happy = _mk_invoke(lambda n: (["edit_item"], "", U1) if n == 1 else (["finish:export"], "", UN))
+    tm = J.run_two_calls(happy, _rw, {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "go"}]}})
+    check("the happy path is TWO API calls: place, then fix-or-finish, and the harness's read-back decides",
+          len(tm["turns"]) == 2 and tm["terminal"] is None and str(tm["verdict"]).startswith("export at call 2")
+          and [t["kind"] for t in tm["turns"]] == ["place", "review"],
           "%s / %s / %s" % (len(tm["turns"]), tm["terminal"], tm["verdict"]))
     runaway = _mk_invoke(lambda n: (["edit_item"], "", U1 if n == 1 else UN))
-    tm2 = J.run_three_turns(runaway, _rw, {"type": "user", "message": {"role": "user", "content": []}})
-    check("a forced runaway hits the cap: four calls, the fifth is terminal",
-          len(tm2["turns"]) == 4 and (tm2["terminal"] or {}).get("kind") == "TURN CAP" and len(runaway.log) == 4,
+    tm2 = J.run_two_calls(runaway, _rw, {"type": "user", "message": {"role": "user", "content": []}},
+                          readback=lambda: ["face/text collision: still there"])
+    check("THE CAP IS TWO AND IT IS HARD: a run that keeps editing gets no third call",
+          len(tm2["turns"]) == 2 and (tm2["terminal"] or {}).get("kind") == "READBACK FAILED" and len(runaway.log) == 2,
           "%d calls, terminal=%s" % (len(tm2["turns"]), tm2["terminal"]))
     miss = _mk_invoke(lambda n: (["edit_item"], "", U1) if n == 1 else (["edit_item"], "", {"read": 1000, "write": 299000, "in": 2, "out": 300}))
-    tm3 = J.run_three_turns(miss, _rw, {"type": "user", "message": {"role": "user", "content": []}})
+    tm3 = J.run_two_calls(miss, _rw, {"type": "user", "message": {"role": "user", "content": []}})
     check("a call that does not read the prefix call 1 established is terminal",
           (tm3["terminal"] or {}).get("kind") == "CACHE MISS" and (tm3["terminal"] or {}).get("at") == 2 and len(miss.log) == 2,
           "%s" % (tm3["terminal"],))
-    nop = _mk_invoke(lambda n: ([], "I would rather ask a question", U1))
-    tm4 = J.run_three_turns(nop, _rw, {"type": "user", "message": {"role": "user", "content": []}})
-    check("turn 1 without an edit op is terminal, not a second try",
-          (tm4["terminal"] or {}).get("kind") == "NO PLACEMENT" and len(nop.log) == 1)
+    nop = _mk_invoke(lambda n: (["finish:clean"], "", U1))
+    tm4 = J.run_two_calls(nop, _rw, {"type": "user", "message": {"role": "user", "content": []}})
+    check("turn 1 without an edit op is terminal, not a second try — even when it ends in a proper finish call",
+          (tm4["terminal"] or {}).get("kind") == "NO PLACEMENT" and len(nop.log) == 1, str(tm4.get("terminal"))[:120])
     ok, why = J.cache_gate({"read": 0, "write": 300000}, {"read": 284000})
     ok2, _ = J.cache_gate({"read": 0, "write": 300000}, {"read": 285000})
     check("the cache gate is 0.95 x (call-1 read + write)", ok is False and ok2 is True, why)
-    check("the run bound is 300s and the cap is four", J.RUN_TIMEOUT_S == 300 and J.TURN_CAP == 4 and J.TURN_LAW_S <= 300)
+    check("the run bound is 300s and THE CAP IS TWO, hard", J.RUN_TIMEOUT_S == 300 and J.TURN_CAP == 2 and J.TURN_LAW_S <= 300,
+          "cap=%s bound=%s" % (J.TURN_CAP, J.RUN_TIMEOUT_S))
     _fl = J.fault_lines({"findings": []}, None, None, [{"id": "base-1", "itemType": "video"}], "base-1")
     check("an empty timeline on a full-edit brief is a fault the agent is told",
           any("nothing placed" in f for f in _fl), "%r" % _fl)
@@ -499,7 +505,7 @@ def main():
     check("the CLI command is strict, shimmed, and leaves --max-turns to the caller",
           "--strict-mcp-config" in _cmd and "--max-turns" not in _cmd and "--resume" in _cmd and "/work/mcp.json" in _cmd)
     check("the stream machine is gone from edit()",
-          "_arm_idle" not in d and "_arm_second_rewatch" not in d and "_start_rewatch" not in d and "run_three_turns(" in d,
+          "_arm_idle" not in d and "_arm_second_rewatch" not in d and "_start_rewatch" not in d and "run_two_calls(" in d,
           "one API call per turn, the harness between them")
     check("the keep-warm ping and the rewatch probe exist as functions",
           hasattr(J, "keep_warm") and hasattr(J, "probe_rewatch") and "WARM" in dir(J))
@@ -515,11 +521,11 @@ def main():
     check("the attempt number is read BEFORE prestage uses it", _e3.find("_attempt = ") < _e3.find("_prior_stage"))
     check("the floor asks whether there is a viewable edit", "out['floor']" in _e3 and "'EMPTY'" in _e3)
     check("the ceiling counts per API call inside each invocation",
-          "usage_once(_st, ev)" in _e3 and "ceiling" not in ast.unparse(next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "run_three_turns")).lower())
+          "usage_once(_st, ev)" in _e3 and "ceiling" not in ast.unparse(next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "run_two_calls")).lower())
     _tc = io.open(os.path.join(HERE, "turn_clock.py"), encoding="utf-8").read()
     check("turn_clock exposes the kill and names who used it", "_killed_by_driver" in _tc and '"kill_reason"' in _tc)
     check("every turn and the run are bounded, and the bound is terminal",
-          J.TURN_LAW_S <= 300 and J.RUN_TIMEOUT_S == 300 and "RUN TIMEOUT" in ast.unparse(next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "run_three_turns")))
+          J.TURN_LAW_S <= 300 and J.RUN_TIMEOUT_S == 300 and "RUN TIMEOUT" in ast.unparse(next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "run_two_calls")))
 
     # ---- THE INVOCATION ENDS AT THE RESULT (measured on the first ping) ----
     _inv = next(n for n in ast.walk(edit) if isinstance(n, ast.FunctionDef) and n.name == "_invoke")
@@ -911,7 +917,7 @@ def main():
             return {"rc": 1, "subtype": "success", "tool_calls": [], "text": "Credit balance is too low", "killed": False, "wall": 7.0,
                     "usage": {"read": 0, "write": 0, "in": 0, "out": 0}, "api_status": 400, "api_head": '{"type":"error","error":{"message":"Credit balance is too low"}}'}
     _i400 = _Inv400()
-    _tm400 = J.run_three_turns(_i400, lambda n, final: {"message": {}, "sheets": 0}, {"type": "user", "message": {"role": "user", "content": []}})
+    _tm400 = J.run_two_calls(_i400, lambda n, final: {"message": {}, "sheets": 0}, {"type": "user", "message": {"role": "user", "content": []}})
     check("a 4xx from the API is the terminal API ERROR at that turn, carrying the status and the API's words, and is never retried",
           (_tm400["terminal"] or {}).get("kind") == "API ERROR" and "400" in _tm400["terminal"]["why"] and "Credit balance" in _tm400["terminal"]["why"] and _i400.log == [1],
           "%s log=%s" % (_tm400.get("terminal"), _i400.log))
@@ -1022,7 +1028,7 @@ def main():
     class _Inv409:
         def __call__(self, n, message):
             return {"rc": 1, "subtype": "success", "tool_calls": [], "text": "", "killed": False, "wall": 3.0, "usage": {}, "api_status": 409, "api_head": '{"type":"error","error":{"type":"preflight_refused","message":"system differs"}}'}
-    _tm409 = J.run_three_turns(_Inv409(), lambda n, final: {"message": {}, "sheets": 0}, {"type": "user", "message": {"role": "user", "content": []}})
+    _tm409 = J.run_two_calls(_Inv409(), lambda n, final: {"message": {}, "sheets": 0}, {"type": "user", "message": {"role": "user", "content": []}})
     check("a preflight refusal is the terminal PREFLIGHT REFUSED, carrying the diff", (_tm409["terminal"] or {}).get("kind") == "PREFLIGHT REFUSED" and "differs" in _tm409["terminal"]["why"])
     _exp_asg = [ast.unparse(n.value) for n in ast.walk(_edit_fn) if isinstance(n, ast.Assign) and any(isinstance(t, ast.Attribute) and t.attr == "EXPECT_SYSTEM" for t in n.targets)]
     check("the job arms the preflight with the ping's stored system text", any("system_wire" in v for v in _exp_asg), "%s" % _exp_asg)
@@ -1033,12 +1039,14 @@ def main():
             self.log.append(n)
             ops = [{"name": "mcp__chatcut__edit_item", "input": {"adds": [{"type": "motion-graphic"}]}}] if n == 1 else []
             # call 1 writes the prefix; call 2 reads it (the gate wants >= 0.95 x (read + write) of call 1)
-            return {"rc": 1, "subtype": "error_max_turns", "tool_calls": ops, "text": "" if n == 1 else "export", "killed": False, "wall": 5.0,
+            if n != 1:
+                ops = ops + [{"name": "mcp__chatcut__finish", "input": {"verdict": "export"}}]
+            return {"rc": 1, "subtype": "error_max_turns", "tool_calls": ops, "text": "", "killed": False, "wall": 5.0,
                     "usage": ({"read": 0, "write": 100} if n == 1 else {"read": 100, "write": 5})}
     _ic = _InvClean(); _rw_log = []
-    _tmc = J.run_three_turns(_ic, lambda n, final: (_rw_log.append(n) or {"message": {"type": "user", "message": {"role": "user", "content": []}}, "sheets": 0}), {"type": "user", "message": {"role": "user", "content": []}})
-    check("turn 2 saying export with no ops ends the run: one rewatch, two calls, verdict export at turn 2",
-          _tmc.get("verdict") == "export at turn 2 (clean)" and _ic.log == [1, 2] and _rw_log == [1] and not _tmc.get("terminal"), "verdict=%s calls=%s rewatches=%s" % (_tmc.get("verdict"), _ic.log, _rw_log))
+    _tmc = J.run_two_calls(_ic, lambda n, final: (_rw_log.append(n) or {"message": {"type": "user", "message": {"role": "user", "content": []}}, "sheets": 0}), {"type": "user", "message": {"role": "user", "content": []}})
+    check("call 2 finishing with no ops ends the run: ONE rewatch, two calls, exported",
+          str(_tmc.get("verdict")).startswith("export at call 2") and _ic.log == [1, 2] and _rw_log == [1] and not _tmc.get("terminal"), "verdict=%s calls=%s rewatches=%s" % (_tmc.get("verdict"), _ic.log, _rw_log))
     _rm1 = J.rewatch_message(1, {"frames": 0, "sheets": [], "state": "ABSENT", "why": "x", "times": []}, [], [], [], final=False)
     check("the first rewatch offers export as the clean reply", "single word export" in _rm1["message"]["content"][0]["text"])
     # ---- PART 3 B: THE PLATTER from the acceptor's keys ----
@@ -1089,9 +1097,9 @@ def main():
     _ef_asg = [ast.unparse(n.value) for n in ast.walk(_edit_fn) if isinstance(n, ast.Assign) and any(isinstance(t, ast.Attribute) and t.attr == "EXPECT_FIELDS" for t in n.targets)]
     check("the job arms the preflight with the ping's thinking and effort", any("request_fields" in v or "_rf0" in v for v in _ef_asg), "%s" % _ef_asg)
     # ---- THE RUN BOUND COUNTS FROM THE JOB'S START ----
-    _late = J.run_three_turns(lambda n, m: {"rc": 1, "tool_calls": [], "text": "", "usage": {}}, lambda n, f: {}, {"type": "user"}, t0=time.time() - 400)
+    _late = J.run_two_calls(lambda n, m: {"rc": 1, "tool_calls": [], "text": "", "usage": {}}, lambda n, f: {}, {"type": "user"}, t0=time.time() - 400)
     check("with the job's t0 400s ago the machine is RUN TIMEOUT before turn 1", (_late.get("terminal") or {}).get("kind") == "RUN TIMEOUT" and not _late["turns"], "%s" % _late.get("terminal"))
-    _t0_kw = [k for n in ast.walk(_edit_fn) if isinstance(n, ast.Call) and ast.unparse(n.func) == "run_three_turns" for k in n.keywords if k.arg == "t0"]
+    _t0_kw = [k for n in ast.walk(_edit_fn) if isinstance(n, ast.Call) and ast.unparse(n.func) == "run_two_calls" for k in n.keywords if k.arg == "t0"]
     check("edit() hands the machine the job's own t0", len(_t0_kw) == 1 and ast.unparse(_t0_kw[0].value) == "t0")
     # ---- THE FRAME FETCH: parallel, bounded, timed ----
     import urllib.request as _urq3, time as _tm3
@@ -1338,30 +1346,47 @@ def main():
         def _v(n):
             _vlog.append(n); return list(faults_by_n.get(n) or [])
         return _v
-    _exp = _mk_invoke(lambda n: (["edit_item"], "", _U1) if n == 1 else ([], "export", _UN))
-    _tmc = J.run_three_turns(_exp, _rwc, {"type": "user", "message": {"role": "user", "content": []}}, verify=_mkv({2: ["no captions (brief): caption track c1"]}))
-    check("a violated constraint at a clean turn 2 goes to the next turn, not the export",
-          len(_tmc["turns"]) == 3 and _tmc["terminal"] is None and _tmc["verdict"] == "export at turn 3 (constraint cleared)"
-          and _tmc.get("constraint_faults") == {2: ["no captions (brief): caption track c1"]} and len(_tmc["rewatches"]) == 2, "%s %s %s" % (len(_tmc["turns"]), _tmc["verdict"], _tmc.get("constraint_faults")))
+    _exp = _mk_invoke(lambda n: (["edit_item"], "", _U1) if n == 1 else (["finish:export"], "", _UN))
+    _tmc = J.run_two_calls(_exp, _rwc, {"type": "user", "message": {"role": "user", "content": []}}, verify=_mkv({2: ["no captions (brief): caption track c1"]}))
+    # THE HARNESS'S OWN READ, separately from the brief's constraints: they are two different faults and
+    # a leg that only drives one cannot see the other go missing.
+    _rbv = J.run_two_calls(_mk_invoke(lambda n: (["edit_item"], "", _U1) if n == 1 else (["finish:export"], "", _UN)),
+                           _rwc, {"type": "user", "message": {"role": "user", "content": []}},
+                           readback=lambda: ["face/text collision: slot1 in the centre band"])
+    check("THE HARNESS'S READ-BACK OF THE FINISHED TIMELINE DECIDES: a fault there is terminal and refunded, never exported",
+          (_rbv["terminal"] or {}).get("kind") == "READBACK FAILED" and (_rbv["terminal"] or {}).get("refund") is True
+          and _rbv["verdict"] is None and _rbv.get("readback_faults") == ["face/text collision: slot1 in the centre band"],
+          str(_rbv.get("terminal"))[:140])
+    # AND THE CAP IS STRUCTURAL: the machine calls _turn exactly twice, so there is no third call to cap.
+    _turn_calls = [n for n in ast.walk(next(f for f in ast.walk(ast.parse(src)) if isinstance(f, ast.FunctionDef) and f.name == "run_two_calls"))
+                   if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_turn"]
+    check("THE CAP IS STRUCTURAL: the machine only ever makes two calls, so a third cannot be requested",
+          len(_turn_calls) == 2 and [ast.unparse(c.args[0]) for c in _turn_calls] == ["1", "2"] and J.TURN_CAP == 2,
+          [ast.unparse(c.args[0]) for c in _turn_calls])
+    check("A VIOLATED CONSTRAINT AT CALL 2 IS TERMINAL AND REFUNDED — there is no third call to fix it in",
+          len(_tmc["turns"]) == 2 and (_tmc["terminal"] or {}).get("kind") == "READBACK FAILED"
+          and (_tmc["terminal"] or {}).get("refund") is True and _tmc["verdict"] is None
+          and _tmc.get("constraint_faults") == {2: ["no captions (brief): caption track c1"]}, "%s %s" % (len(_tmc["turns"]), _tmc.get("terminal")))
     _vlog.clear()
-    _exp2 = _mk_invoke(lambda n: (["edit_item"], "", _U1) if n == 1 else ([], "export", _UN))
-    _tmv = J.run_three_turns(_exp2, _rwc, {"type": "user", "message": {"role": "user", "content": []}}, verify=_mkv({2: ["f"], 3: ["f"], 4: ["f"]}))
-    check("a constraint still violated after the cap is terminal, never exported",
-          len(_tmv["turns"]) == 4 and (_tmv["terminal"] or {}).get("kind") == "CONSTRAINT VIOLATED" and (_tmv["terminal"] or {}).get("at") == 4
-          and _tmv["verdict"] is None and sorted(_tmv.get("constraint_faults") or {}) == [2, 3, 4] and _vlog == [2, 3, 4], "%s %s" % (_tmv["terminal"], _vlog))
+    _exp2 = _mk_invoke(lambda n: (["edit_item"], "", _U1) if n == 1 else (["finish:export"], "", _UN))
+    _tmv = J.run_two_calls(_exp2, _rwc, {"type": "user", "message": {"role": "user", "content": []}}, verify=_mkv({2: ["f"], 3: ["f"], 4: ["f"]}))
+    check("the constraint check runs ONCE, at call 2, and its fault is the terminal",
+          len(_tmv["turns"]) == 2 and (_tmv["terminal"] or {}).get("kind") == "READBACK FAILED"
+          and _tmv["verdict"] is None and sorted(_tmv.get("constraint_faults") or {}) == [2] and _vlog == [2], "%s %s" % (_tmv["terminal"], _vlog))
     _vlog.clear()
-    _exp3 = _mk_invoke(lambda n: (["edit_item"], "", _U1) if n == 1 else ([], "export", _UN))
-    _tmo = J.run_three_turns(_exp3, _rwc, {"type": "user", "message": {"role": "user", "content": []}}, verify=_mkv({}))
+    _exp3 = _mk_invoke(lambda n: (["edit_item"], "", _U1) if n == 1 else (["finish:export"], "", _UN))
+    _tmo = J.run_two_calls(_exp3, _rwc, {"type": "user", "message": {"role": "user", "content": []}}, verify=_mkv({}))
     _vlog2 = list(_vlog); _vlog.clear()
-    _fix = _mk_invoke(lambda n: (["edit_item"], "", _U1 if n == 1 else _UN) if n <= 2 else ([], "export", _UN))
-    _tmf = J.run_three_turns(_fix, _rwc, {"type": "user", "message": {"role": "user", "content": []}}, verify=_mkv({}))
-    check("a clean verify leaves the common path alone (export at turn 2), and verify runs only when the agent asks to export",
-          _tmo["verdict"] == "export at turn 2 (clean)" and _vlog2 == [2] and _tmf["verdict"] == "export at turn 3 (one fix pass)" and _vlog == [3], "%s %s / %s %s" % (_tmo["verdict"], _vlog2, _tmf["verdict"], _vlog))
+    _fix = _mk_invoke(lambda n: (["edit_item"], "", _U1 if n == 1 else _UN))
+    _tmf = J.run_two_calls(_fix, _rwc, {"type": "user", "message": {"role": "user", "content": []}}, verify=_mkv({}))
+    check("a clean verify exports at call 2, whether call 2 finished or fixed",
+          str(_tmo["verdict"]).startswith("export at call 2") and _vlog2 == [2]
+          and str(_tmf["verdict"]).startswith("export at call 2") and _vlog == [2], "%s %s / %s %s" % (_tmo["verdict"], _vlog2, _tmf["verdict"], _vlog))
     # THE SEAM IN edit(): the hook is handed over, the rewatch carries the faults, the agent is told, the record keeps it
     _edit_fn7 = next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "edit")
     _ed7 = ast.unparse(_edit_fn7)
     check("edit() hands the constraint check to the turn machine",
-          re.search(r"run_three_turns\(_invoke, _rewatch, _first_message, t0=t0, verify=_verify", _ed7) is not None)
+          re.search(r"run_two_calls\(_invoke, _rewatch, _first_message, t0=t0, verify=_verify", _ed7) is not None)
     check("the rewatch hands constraint violations to the next turn as faults",
           "_constraints_now(_items, _base," in _ed7 and "'BRIEF CONSTRAINT VIOLATED — %s' % f for f in _cf_rw" in _ed7 and "'constraints': _crows_rw" in _ed7)
     # WHERE IN THE RECORD, structurally: the key rides in the dict assigned to out["turn_machine"] (a substring
@@ -1411,7 +1436,7 @@ def main():
 
     # ---- A REUSED STAGE THAT HOLDS ITEMS IS REFUSED BEFORE THE FIRST CALL (H1 of 2026-09-18 inherited last batch's items) ----
     _ed9 = ast.unparse(next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "edit"))
-    _i_refuse = _ed9.find("'kind': 'CONTAMINATED ARM'"); _i_first = _ed9.find("run_three_turns(_invoke, _rewatch, _first_message")
+    _i_refuse = _ed9.find("'kind': 'CONTAMINATED ARM'"); _i_first = _ed9.find("run_two_calls(_invoke, _rewatch, _first_message")
     check("a reused stage whose timeline holds items, or cannot be read, is a CONTAMINATED ARM terminal before any model call",
           "if _stage.get('priorItems') is None or len(_stage.get('priorItems') or []) > 0:" in _ed9 and _i_refuse > 0 and _i_refuse < _i_first
           and "'export': {'state': 'WITHHELD'" in _ed9[_i_refuse:_i_refuse + 900] and "_stage['priorItems'] = None" in _ed9)
@@ -1431,7 +1456,8 @@ def main():
           not (_named & _BUILTINS), "named builtins: %s" % sorted(_named & _BUILTINS))
     check("THE GATE: no read tool is named on any turn — the harness reads the timeline back and serves it",
           not (_named & _READS), "named reads: %s" % sorted(_named & _READS))
-    check("the agent's surface is exactly the edit ops", _named == {"mcp__chatcut__edit_item", "mcp__chatcut__edit_captions"}, str(sorted(_named)))
+    check("the agent's surface is exactly the edit ops and the turn-ender",
+          _named == {"mcp__chatcut__edit_item", "mcp__chatcut__edit_captions", "mcp__chatcut__finish"}, str(sorted(_named)))
     check("the shim is told the same list, so tools/list cannot re-advertise what the flags removed",
           "'MCP_SHIM_ALLOW': ','.join(AGENT_TOOLS)" in ast.unparse(next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "write_cli_context")))
     # THE CAP: derived, applied on the wire, and terminal rather than silent
@@ -1449,10 +1475,10 @@ def main():
     def _capped(n, message):
         return {"rc": 1, "subtype": None, "tool_calls": [{"name": "mcp__chatcut__edit_item", "input": {"adds": [{"id": "x"}]}}],
                 "text": "", "usage": _U1c, "wall": 1.0, "killed": False, "stop_reason": "max_tokens"}
-    _tmcap = J.run_three_turns(_capped, lambda n, final: {"message": {}, "sheets": 0}, {"type": "user", "message": {"role": "user", "content": []}})
+    _tmcap = J.run_two_calls(_capped, lambda n, final: {"message": {}, "sheets": 0}, {"type": "user", "message": {"role": "user", "content": []}})
     check("a turn that hits the cap is a NAMED terminal and its truncated tool call is never applied",
           (_tmcap["terminal"] or {}).get("kind") == "OUTPUT CAP" and (_tmcap["terminal"] or {}).get("at") == 1
-          and str(J.OUTPUT_CAP_TOKENS) in (_tmcap["terminal"] or {}).get("why", "") and _tmcap["verdict"] is None, str(_tmcap.get("terminal")))
+          and "TRUNCATED" in (_tmcap["terminal"] or {}).get("why", "") and _tmcap["verdict"] is None, str(_tmcap.get("terminal")))
     # THE DIET, in the paragraph the agent actually receives
     # THE PARAGRAPH edit() COMPOSES (pass1_message receives it as `plan`; driving the builder with
     # plan=None reads a message that never carried it — the leg would test its own argument).
@@ -1475,6 +1501,118 @@ def main():
     check("the tool block is proven identical across calls from the proxy's own hash, not from the flags",
           "'tools_identical': _tools_same" in _ed11 and "_shas = {x['sha'] for x in _tools_by_call if x.get('sha')}" in _ed11
           and "every later call is a cold write" in _ed11)
+
+    # ---- EVERY TURN ENDS IN A TOOL CALL (Zac, 2026-09-19), and the canonical Sonnet arm ----
+    import mcp_shim as MS2
+    _saved_allow = MS2.ALLOW
+    try:
+        MS2.ALLOW = ["edit_item", "edit_captions", "finish"]
+        _ok = MS2.handle({"id": 1, "method": "tools/call", "params": {"name": "finish", "arguments": {"verdict": "export", "why": "ships"}}})
+        _bad = MS2.handle({"id": 2, "method": "tools/call", "params": {"name": "finish", "arguments": {"verdict": "ship"}}})
+        # AND IT MUST BE ADVERTISED: a tool the model is never shown cannot be called, so the leg drives
+        # tools/list too (upstream stubbed — the point is whether OUR tool is appended).
+        _up = MS2.upstream
+        try:
+            MS2.upstream = lambda method, params, mid: {"result": {"tools": []}}
+            _listed = [t.get("name") for t in ((MS2.handle({"id": 3, "method": "tools/list", "params": {}}) or {}).get("result") or {}).get("tools", [])]
+        finally:
+            MS2.upstream = _up
+    finally:
+        MS2.ALLOW = _saved_allow
+    check("the shim ADVERTISES `finish` and serves it itself, refusing a verdict that is not clean or export",
+          _listed == ["finish"] and "result" in _ok and "noted: export" in json.dumps(_ok)
+          and (_bad.get("error") or {}).get("code") == -32602
+          and MS2.FINISH_TOOL["inputSchema"]["properties"]["verdict"]["enum"] == ["clean", "export"],
+          "listed=%s bad=%s" % (_listed, json.dumps(_bad)[:90]))
+    check("`finish` is on the agent's surface beside the edit ops", J.AGENT_TOOLS == ["edit_item", "edit_captions", "finish"], str(J.AGENT_TOOLS))
+    # DRIVEN, NOT GREPPED: a presence check reads the same under `if False:`. The proxy's own function is
+    # called with a body and the result inspected.
+    _pxb = {"model": "m", "tools": [{"name": "edit_item"}], "messages": []}
+    _saved_tc = PX.TOOL_CHOICE_ANY
+    try:
+        PX.TOOL_CHOICE_ANY = True
+        _b_on = PX.apply_tool_choice(json.loads(json.dumps(_pxb)))
+        PX.TOOL_CHOICE_ANY = False
+        _b_off = PX.apply_tool_choice(json.loads(json.dumps(_pxb)))
+        _b_none = PX.apply_tool_choice({"model": "m", "messages": []})
+    finally:
+        PX.TOOL_CHOICE_ANY = _saved_tc
+    check("the proxy sets tool_choice any on a body that has tools, leaves one without tools alone, and only when armed",
+          _b_on.get("tool_choice") == {"type": "any"} and _b_off.get("tool_choice") is None and _b_none.get("tool_choice") is None
+          and "'tool_choice': body.get('tool_choice')" in ast.unparse(ast.parse(PX_SRC))
+          and "_px.TOOL_CHOICE_ANY = True" in ast.unparse(next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "edit")),
+          "on=%s off=%s none=%s" % (_b_on.get("tool_choice"), _b_off.get("tool_choice"), _b_none.get("tool_choice")))
+    check("the verdict is the CALL, never a word in prose",
+          J._finish_verdict([{"name": "mcp__chatcut__finish", "input": {"verdict": "export"}}]) == "export"
+          and J._finish_verdict([{"name": "mcp__chatcut__finish", "input": {"verdict": "ship"}}]) is None
+          and J._finish_verdict([]) is None and J._finish_verdict([{"name": "mcp__chatcut__edit_item", "input": {}}]) is None)
+    _U1f = {"read": 0, "write": 300000, "in": 2, "out": 900}; _UNf = {"read": 300000, "write": 400, "in": 2, "out": 300}
+    _rwf = lambda n, final: {"message": {}, "sheets": 0}
+    def _prose(n, message):
+        return {"rc": 1, "subtype": None, "tool_calls": [], "text": "```json\n{\"adds\": [{\"type\": \"motion-graphic\"}]}\n```",
+                "usage": _U1f if n == 1 else _UNf, "wall": 1.0, "killed": False}
+    _tmp = J.run_two_calls(_prose, _rwf, {"type": "user", "message": {"role": "user", "content": []}})
+    check("a 4xx is named API ERROR, never TEXT ONLY — the API's own verdict is read before the model's behaviour",
+          (J.run_two_calls(lambda n, m: {"rc": 1, "tool_calls": [], "text": "Credit balance is too low", "usage": {}, "wall": 1.0,
+                                         "killed": False, "api_status": 400, "api_head": "credit"},
+                           lambda n, f: {}, {"type": "user"})["terminal"] or {}).get("kind") == "API ERROR")
+    check("A TURN THAT RETURNS TEXT ONLY IS REFUSED BEFORE ANYTHING IS APPLIED (Haiku wrote its edit inside a ```json fence and called nothing)",
+          (_tmp["terminal"] or {}).get("kind") == "TEXT ONLY" and (_tmp["terminal"] or {}).get("at") == 1
+          and _tmp["verdict"] is None and len(_tmp["turns"]) == 1, str(_tmp.get("terminal"))[:140])
+    def _finisher(n, message):
+        return {"rc": 1, "subtype": None,
+                "tool_calls": ([{"name": "mcp__chatcut__edit_item", "input": {"adds": [{"id": "a"}]}}] if n == 1
+                               else [{"name": "mcp__chatcut__finish", "input": {"verdict": "export", "why": "right as it stands"}}]),
+                "text": "", "usage": _U1f if n == 1 else _UNf, "wall": 1.0, "killed": False}
+    _tmf = J.run_two_calls(_finisher, _rwf, {"type": "user", "message": {"role": "user", "content": []}})
+    # THE CASE WHERE THE VERDICT READ STILL DECIDES: a call 2 that uses SOME tool (so the TEXT ONLY
+    # guard does not fire) but neither edits nor finishes, while saying "export" in its text.
+    def _otherTool(n, message):
+        return {"rc": 1, "subtype": None,
+                "tool_calls": ([{"name": "mcp__chatcut__edit_item", "input": {"adds": [{"id": "a"}]}}] if n == 1
+                               else [{"name": "mcp__chatcut__preview_timeline", "input": {}}]),
+                "text": "" if n == 1 else "export — it looks right to me", "usage": _U1f if n == 1 else _UNf,
+                "wall": 1.0, "killed": False}
+    _tmo2 = J.run_two_calls(_otherTool, _rwf, {"type": "user", "message": {"role": "user", "content": []}}, readback=lambda: [])
+    check("a call 2 that calls some other tool and SAYS export is NO VERDICT, not an export",
+          (_tmo2["terminal"] or {}).get("kind") == "NO VERDICT" and _tmo2["verdict"] is None, str(_tmo2.get("terminal"))[:130])
+    check("a finish call at call 2 ends the run the way the word used to", str(_tmf["verdict"]).startswith("export at call 2") and _tmf["terminal"] is None, str(_tmf.get("verdict")))
+    # THE WHOLE PREFIX TEXT, not just edit()'s own constants: the loop paragraph is a module-level
+    # constant that edit() concatenates in, so a leg reading only edit() cannot see it.
+    _allsrc = src + J.TWO_TURN_LOOP + J.CRAFT_CONTEXT
+    check("the paragraph says every turn ends in a tool call and names finish",
+          "EVERY TURN ENDS IN A TOOL CALL" in _allsrc and "call finish" in _allsrc and "single word: export" not in _allsrc,
+          [k for k in ("EVERY TURN ENDS IN A TOOL CALL", "call finish") if k not in _allsrc])
+    # THE CANONICAL ARM IS THE DEFAULT, not a flag the caller must remember
+    check("Sonnet canonical — thinking disabled, effort low — is the DEFAULT for a job, and the ping carries the same pair",
+          J.CANONICAL_THINK_TOKENS == 0 and J.CANONICAL_EFFORT == "low"
+          and all(d == {"think_tokens": "CANONICAL_THINK_TOKENS", "effort": "CANONICAL_EFFORT"}
+                  for d in [{a.arg: ast.unparse(v) for a, v in zip(f.args.args[-len(f.args.defaults):], f.args.defaults) if a.arg in ("think_tokens", "effort")}
+                            for f in ast.walk(ast.parse(src)) if isinstance(f, ast.FunctionDef) and f.name in ("edit", "main", "warm", "keep_warm")]))
+
+    # ---- THE CONTAINER'S OWN CLOCK (Zac, 2026-09-19): the check for the class the thread fix closed ----
+    check("the proxy's server marks its connection threads as daemons, so a tunnel cannot outlive the process",
+          "srv.daemon_threads = True" in PX_SRC and getattr(__import__("http.server", fromlist=["ThreadingHTTPServer"]), "ThreadingHTTPServer") is not None)
+    _pxsrv = None
+    try:
+        import http.server as _hs
+        _cd = tempfile.mkdtemp(prefix="daemon_")
+        _p, _ca = PX.serve_mitm(0, _cd)
+        _pxsrv = _p
+    except Exception as _se:                                      # noqa: BLE001
+        _pxsrv = "FAILED %s" % str(_se)[:60]
+    check("serve_mitm still starts and returns a port with daemon threads set", isinstance(_pxsrv, int) and _pxsrv > 0, str(_pxsrv))
+    _ed12 = ast.unparse(next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "edit"))
+    check("the run line carries the container's process clock beside the run wall, and the setup gap between them",
+          "'container_process_s'" in _ed12 and "'run_wall_s'" in _ed12 and "_CONTAINER_T0" in src
+          and "setup before our clock" in _ed12)
+    check("a container that outlives its export past the budget is a LEDGERED DEFECT with an owner page",
+          J.EXPORT_TO_EXIT_BUDGET_S == 30 and "'kind': 'CONTAINER LINGERED'" in _ed12
+          and "OWNER PAGE      : CONTAINER LINGERED" in _ed12 and "out.setdefault('defects', [])" in _ed12
+          and "_lingered = _after_export_s is not None and _after_export_s > EXPORT_TO_EXIT_BUDGET_S" in _ed12)
+    check("the red proof BOUNDS every smoke it runs, and a hang is a harness failure with its own code",
+          "SMOKE_TIMEOUT_S" in RP_SRC and "timeout=SMOKE_TIMEOUT_S" in RP_SRC and "return 124," in RP_SRC
+          and "a hang is not a result" in RP_SRC.lower() or "A hang is not a result" in RP_SRC)
 
     if FAILS:
         print("\n%d FAILURE(S)" % len(FAILS))

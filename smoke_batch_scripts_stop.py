@@ -160,5 +160,44 @@ check("with no record anywhere the bytes are written and the line SAYS provenanc
 _line, _exists = _mp4("nofetch", None, {"export": {"state": "MEASURED", "sha256": _sha}})
 check("a fetch that returned nothing is ABSENT, not a pass", not _exists and "no fetched bytes" in _line, _line)
 
+# ---- DELIVERY: a verified export lands in Promptly Reports, named by run, never a tmp path ----
+d6 = tempfile.mkdtemp(prefix="deliver_")
+_dd = os.path.join(d6, "2026-09-19 — WINDOW")
+_env = dict(os.environ, DELIVER_DIR=_dd)
+
+
+def _deliver(stage, payload, record):
+    out = os.path.join(d6, stage + ".mp4")
+    json.dump(payload, io.open(out + ".json", "w", encoding="utf-8"))
+    json.dump(record, io.open(os.path.join(d6, stage + ".json"), "w", encoding="utf-8"))
+    r = subprocess.run([sys.executable, MP4, out, os.path.join(d6, stage + ".json")], capture_output=True, text=True, env=_env)
+    return r.stdout.strip(), os.path.exists(os.path.join(_dd, stage + ".mp4"))
+
+
+_b = b"DELIVERABLE BYTES"
+_s = hashlib.sha256(_b).hexdigest()
+_pay2 = {"b64": base64.b64encode(_b).decode(), "bytes": len(_b), "sha256": _s}
+_line, _there = _deliver("th0low", _pay2, {"export": {"state": "MEASURED", "sha256": _s}})
+# DRIVEN: the re-hash is a function, so the check can hand it a file that does NOT match and see it say so.
+import importlib.util as _ilu
+_spec = _ilu.spec_from_file_location("bm", MP4); _BM = _ilu.module_from_spec(_spec); _spec.loader.exec_module(_BM)
+_good = os.path.join(d6, "good.bin"); io.open(_good, "wb").write(b"ABC")
+_badf = os.path.join(d6, "bad.bin"); io.open(_badf, "wb").write(b"XYZ")
+_sha_abc = hashlib.sha256(b"ABC").hexdigest()
+check("the delivered copy is re-hashed: a file that does not match is refused, and a missing one too",
+      _BM.copy_is_sound(_good, _sha_abc) is True and _BM.copy_is_sound(_badf, _sha_abc) is False
+      and _BM.copy_is_sound(os.path.join(d6, "nope.bin"), _sha_abc) is False)
+check("a verified export is delivered to the Reports folder, named by run, and re-hashed after writing",
+      _there and "DELIVERED" in _line and "re-hashed after writing: matches" in _line
+      and hashlib.sha256(open(os.path.join(_dd, "th0low.mp4"), "rb").read()).hexdigest() == _s, _line)
+_line, _there = _deliver("withheld2", _pay2, {"export": {"state": "WITHHELD", "why": "terminal"}})
+check("a withheld export delivers NOTHING to the Reports folder", not _there and "ABSENT" in _line, _line)
+io.open(os.path.join(_dd, "stale2.mp4"), "wb").write(b"SOMEBODY ELSE'S FILE")
+_line, _there = _deliver("stale2", _pay2, {"export": {"state": "MEASURED", "sha256": "f" * 64}})
+check("a refusal REMOVES a stale file already sitting in the Reports folder", not _there and "ABSENT" in _line, _line)
+check("the delivery directory is set by the launchers to a dated Promptly Reports subfolder, never tmp",
+      all('DELIVER_DIR="${DELIVER_DIR:-/Users/zaclibman/Desktop/Promptly Reports/' in io.open(os.path.join(HERE, "scripts", f), encoding="utf-8").read()
+          for f in ("h_window.sh", "h_batch.sh")))
+
 print("%d failure(s)" % len(bad) if bad else "all legs green")
 sys.exit(1 if bad else 0)

@@ -92,6 +92,21 @@
    "evidence": "5.885% px @f48, bbox (0, 431, 882, 921)"
   },
   {
+   "name": "EndCard",
+   "frame": "EndCard.jpg",
+   "when": "WHEN THE VIDEO ENDS, OR A PERSON IS IDENTIFIED",
+   "size": "LARGE",
+   "claim": "This is the last thing you see.",
+   "what": "the closing card: a headline, an optional line of support and an optional logo, held on a clean ground while the video finishes",
+   "props": [
+    [
+     "",
+     "{ \"kind\"?: \"cta\"|\"logo_sting\"|\"social\"|\"echo\", \"logoUrl\": \"...\", \"durationMs\"?: 4000 }"
+    ]
+   ],
+   "evidence": "3.469% px @f18, bbox (160, 640, 728, 936)"
+  },
+  {
    "name": "IMessageBubble",
    "frame": "IMessageBubble.jpg",
    "when": "WHEN SOCIAL PROOF OR A MESSAGE IS QUOTED",
@@ -135,6 +150,21 @@
     ]
    ],
    "evidence": "1.585% px @f38, bbox (584, 814, 882, 915)"
+  },
+  {
+   "name": "NamePlate",
+   "frame": "NamePlate.jpg",
+   "when": "WHEN THE VIDEO ENDS, OR A PERSON IS IDENTIFIED",
+   "size": "SMALL",
+   "claim": "This is who is speaking.",
+   "what": "a lower-third name tag: the person's name with an optional role beneath it, on an accent-keyed backdrop",
+   "props": [
+    [
+     "",
+     "{ \"name\": \"...\", \"anchor\"?: \"lower_third_safe\"|\"upper_third_safe\", \"accentColor\"?: \"#F5A11E\", \"durationMs\"?: 4000 }"
+    ]
+   ],
+   "evidence": "3.545% px @f16, bbox (0, 1128, 447, 1239)"
   },
   {
    "name": "Notification",
@@ -486,8 +516,5 @@
    "evidence": "0.351% px @f8, bbox (239, 1168, 384, 1231)"
   }
  ],
- "rendered_but_unconditioned": [
-  "EndCard",
-  "NamePlate"
- ]
+ "rendered_but_unconditioned": []
 }

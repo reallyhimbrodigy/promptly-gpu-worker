@@ -105,11 +105,11 @@ MUTATIONS = [
     # `if n > cap` guard is defensive and a mutation there is vacuous (NOT RED
     # the first time). The cap that fires on a runaway is the contingency
     # turn's own branch: fix ops at turn 4 are terminal.
-    ("the contingency turn's fix ops stop being terminal",
-     '    if _edit_ops(r4.get("tool_calls")):\n        tm["terminal"] = {"kind": "TURN CAP", "at": 4,',
-     '    if False:\n        tm["terminal"] = {"kind": "TURN CAP", "at": 4,',
-     "a forced runaway hits the cap: four calls, the fifth is terminal",
-     'if _edit_ops(r4.get("tool_calls")):'),
+    ("a third call is added to the machine",
+     '    r2 = _turn(2, (rw1 or {}).get("message"), "review")',
+     '    r2 = _turn(2, (rw1 or {}).get("message"), "review")\n    _turn(3, None, "extra")',
+     "THE CAP IS STRUCTURAL: the machine only ever makes two calls, so a third cannot be requested",
+     '_turn(2, (rw1 or {}).get("message"), "review")'),
     ("the cache gate accepts any read",
      '    return r >= fraction * prefix, "read %d against %.2f x %d" % (r, fraction, prefix)',
      '    return True, "read %d against %.2f x %d" % (r, fraction, prefix)',
@@ -121,9 +121,9 @@ MUTATIONS = [
      "an empty timeline on a full-edit brief is a fault the agent is told",
      'if not placed and brief_mode == "full_edit":'),
     ("a placement-less turn 1 gets a second try",
-     '    if not _edit_ops(r1.get("tool_calls")):\n        tm["terminal"] = {"kind": "NO PLACEMENT", "at": 1,',
-     '    if False:\n        tm["terminal"] = {"kind": "NO PLACEMENT", "at": 1,',
-     "turn 1 without an edit op is terminal, not a second try",
+     '    if not _edit_ops(r1.get("tool_calls")):\n        # TERMINAL AND LEDGERED',
+     '    if False:\n        # TERMINAL AND LEDGERED',
+     "turn 1 without an edit op is terminal, not a second try — even when it ends in a proper finish call",
      'tm["terminal"] = {"kind": "NO PLACEMENT", "at": 1,'),
     ("the invocation waits for a next message that never comes",
      '                _res.update(ev)\n                # THE TURN IS OVER WHEN THE RESULT ARRIVES.',
@@ -335,11 +335,11 @@ MUTATIONS = [
      '            new = blk["text"]',
      "the OS line is pinned to a constant so the fleet's kernel string cannot vary the prefix",
      '_OS_RE.sub(r"\\1pinned"'),
-    ("a clean turn 2 still goes to a second rewatch and a third call",
-     '    if _clean2 and not _hold(2):\n        tm["verdict"] = "export at turn 2 (clean)"\n        return tm',
-     '    if False:\n        tm["verdict"] = "export at turn 2 (clean)"\n        return tm',
-     "turn 2 saying export with no ops ends the run: one rewatch, two calls, verdict export at turn 2",
-     '"export at turn 2 (clean)"'),
+    ("call 2 exports without the harness reading the timeline back",
+     '    rb = list(readback() or []) if readback else []',
+     '    rb = []',
+     "THE HARNESS'S READ-BACK OF THE FINISHED TIMELINE DECIDES: a fault there is terminal and refunded, never exported",
+     'rb = list(readback() or []) if readback else []'),
     ("the platter repeats the shared keys per component",
      '        keys = ["%s (%s, e.g. %s)" % (p.get("key"), p.get("type"), json.dumps(p.get("defaultValue"))[:24]) for p in props if isinstance(p, dict) and p.get("key") and p.get("key") not in common]',
      '        keys = ["%s (%s, e.g. %s)" % (p.get("key"), p.get("type"), json.dumps(p.get("defaultValue"))[:24]) for p in props if isinstance(p, dict) and p.get("key")]',
@@ -366,10 +366,10 @@ MUTATIONS = [
      "the ping takes think_tokens and effort, sends MAX_THINKING_TOKENS=0 for the off arm, and passes effort to the command",
      '"0" if think_tokens == 0 else'),
     ("the machine's clock starts at turn 1 again",
-     "    _tm = run_three_turns(_invoke, _rewatch, _first_message, t0=t0, verify=_verify, run_timeout=_bound_s)",
-     "    _tm = run_three_turns(_invoke, _rewatch, _first_message, verify=_verify, run_timeout=_bound_s)",
+     "    _tm = run_two_calls(_invoke, _rewatch, _first_message, t0=t0, verify=_verify,",
+     "    _tm = run_two_calls(_invoke, _rewatch, _first_message, verify=_verify,",
      "edit() hands the machine the job's own t0",
-     "run_three_turns(_invoke, _rewatch, _first_message, t0=t0, verify=_verify, run_timeout=_bound_s)"),
+     "run_two_calls(_invoke, _rewatch, _first_message, t0=t0, verify=_verify,"),
     ("the source watch goes back to the serial 60s fetch",
      '    got, ftiming = (fetch or fetch_frames)(urls[:len(times) + 5], out_dir, name="s")',
      '    got, fst0 = _cr.fetch(urls, out_dir, cap=len(times) + 5); ftiming = {"got": len(got), "n": len(urls), "wall_s": 0, "p50_s": 0, "max_s": 0, "failed": 0}',
@@ -488,25 +488,25 @@ MUTATIONS = [
      "blur/hide a region is reported UNCHECKED, never passed",
      '("hide_region", False'),
     ("the export is honored over a violated constraint",
-     '    if _clean2 and not _hold(2):',
-     '    if _clean2:',
-     "a violated constraint at a clean turn 2 goes to the next turn, not the export",
-     '_clean2 and not _hold(2)'),
-    ("the cap exports anyway",
-     '    elif _hold(4):\n        tm["terminal"] = {"kind": "CONSTRAINT VIOLATED", "at": 4,',
-     '    elif False:\n        tm["terminal"] = {"kind": "CONSTRAINT VIOLATED", "at": 4,',
-     "a constraint still violated after the cap is terminal, never exported",
-     'elif _hold(4):'),
+     '    cf = _hold(2)',
+     '    cf = []',
+     "the constraint check runs ONCE, at call 2, and its fault is the terminal",
+     'cf = _hold(2)'),
+    ("a failed read-back exports anyway",
+     '    if cf or rb:\n        tm["terminal"] = {"kind": "READBACK FAILED", "at": 2,',
+     '    if False:\n        tm["terminal"] = {"kind": "READBACK FAILED", "at": 2,',
+     "A VIOLATED CONSTRAINT AT CALL 2 IS TERMINAL AND REFUNDED — there is no third call to fix it in",
+     'if cf or rb:'),
     ("the rewatch drops the constraint faults",
      '        _faults = _faults + ["BRIEF CONSTRAINT VIOLATED — %s" % f for f in _cf_rw]',
      '        _faults = _faults',
      "the rewatch hands constraint violations to the next turn as faults",
      '"BRIEF CONSTRAINT VIOLATED — %s" % f for f in _cf_rw'),
     ("the machine runs without the verify hook",
-     '    _tm = run_three_turns(_invoke, _rewatch, _first_message, t0=t0, verify=_verify, run_timeout=_bound_s)',
-     '    _tm = run_three_turns(_invoke, _rewatch, _first_message, t0=t0, run_timeout=_bound_s)',
+     '    _tm = run_two_calls(_invoke, _rewatch, _first_message, t0=t0, verify=_verify,',
+     '    _tm = run_two_calls(_invoke, _rewatch, _first_message, t0=t0,',
      "edit() hands the constraint check to the turn machine",
-     'verify=_verify, run_timeout=_bound_s'),
+     'verify=_verify,'),
     ("the agent is not told",
      '        if constraints and constraint_prompt(constraints):\n            blocks.append({"type": "text", "text": constraint_prompt(constraints)})',
      '        if False:\n            blocks.append({"type": "text", "text": constraint_prompt(constraints)})',
@@ -533,10 +533,10 @@ MUTATIONS = [
      "THE GATE: no builtin is named on any turn — Bash above all (a Bash call to load a disallowed skill killed a run, 2026-09-18)",
      '"--allowedTools", _sel,'),
     ("the read tools come back into the agent's tool list",
-     'AGENT_TOOLS = ["edit_item", "edit_captions"]',
-     'AGENT_TOOLS = ["edit_item", "edit_captions", "read_project"]',
+     'AGENT_TOOLS = ["edit_item", "edit_captions", "finish"]',
+     'AGENT_TOOLS = ["edit_item", "edit_captions", "finish", "read_project"]',
      "THE GATE: no read tool is named on any turn — the harness reads the timeline back and serves it",
-     'AGENT_TOOLS = ["edit_item", "edit_captions"]'),
+     'AGENT_TOOLS = ["edit_item", "edit_captions", "finish"]'),
     ("the shim re-advertises what the flags removed",
      '"MCP_SHIM_ALLOW": ",".join(AGENT_TOOLS),',
      '"MCP_SHIM_ALLOW": ",".join(NEEDED_TOOLS),',
@@ -577,11 +577,57 @@ MUTATIONS = [
      '                _think_by_call[str(_rs.get("turn"))] = {"deltas": 0,',
      "the response's thinking blocks are read per call and reported beside the output they are billed inside",
      '"deltas": _rs.get("thinking_deltas")'),
+    ("a text-only turn is applied instead of refused",
+     '        if not r.get("killed") and not (r.get("tool_calls") or []) and (r.get("text") or "").strip():',
+     '        if False:',
+     "A TURN THAT RETURNS TEXT ONLY IS REFUSED BEFORE ANYTHING IS APPLIED (Haiku wrote its edit inside a ```json fence and called nothing)",
+     'not (r.get("tool_calls") or []) and (r.get("text") or "").strip()'),
+    ("the verdict goes back to being a word in prose",
+     '    fin2 = _finish_verdict(r2.get("tool_calls"))',
+     '    fin2 = "export" if _says(r2.get("text"), "export", "clean", "ship") else None',
+     "a call 2 that calls some other tool and SAYS export is NO VERDICT, not an export",
+     'fin2 = _finish_verdict(r2.get("tool_calls"))'),
+    ("the proxy stops forcing a tool call",
+     '    if TOOL_CHOICE_ANY and body.get("tools"):\n        body["tool_choice"] = {"type": "any"}',
+     '    if False:\n        body["tool_choice"] = {"type": "any"}',
+     "the proxy sets tool_choice any on a body that has tools, leaves one without tools alone, and only when armed",
+     'if TOOL_CHOICE_ANY and body.get("tools"):'),
+    ("the shim stops serving finish",
+     '        if not ALLOW or "finish" in ALLOW:\n            kept.append(FINISH_TOOL)',
+     '        if False:\n            kept.append(FINISH_TOOL)',
+     "the shim ADVERTISES `finish` and serves it itself, refusing a verdict that is not clean or export",
+     'kept.append(FINISH_TOOL)'),
+    ("the canonical arm stops being the default",
+     'CANONICAL_EFFORT = "low"',
+     'CANONICAL_EFFORT = "high"',
+     "Sonnet canonical — thinking disabled, effort low — is the DEFAULT for a job, and the ping carries the same pair",
+     'CANONICAL_EFFORT = "low"'),
+    ("the proxy's connection threads stop being daemons",
+     '    srv.daemon_threads = True',
+     '    srv.daemon_threads = False',
+     "the proxy's server marks its connection threads as daemons, so a tunnel cannot outlive the process",
+     'srv.daemon_threads = True'),
+    ("a lingering container stops being a defect",
+     '    _lingered = _after_export_s is not None and _after_export_s > EXPORT_TO_EXIT_BUDGET_S',
+     '    _lingered = False',
+     "a container that outlives its export past the budget is a LEDGERED DEFECT with an owner page",
+     '_after_export_s > EXPORT_TO_EXIT_BUDGET_S'),
 ]
 
 
+SMOKE_TIMEOUT_S = 180
+
+
 def run_smoke():
-    r = subprocess.run([sys.executable, SMOKE], capture_output=True, text=True)
+    """-> (rc, output). A HANG IS A HARNESS FAILURE, NOT A RED. Without this bound one mutant ran for
+    2h20m and produced nothing (2026-09-19): a lingering proxy connection thread kept the smoke alive
+    after it had printed its verdict, and `subprocess.run` waited on it. rc 124 is reserved for the
+    timeout so a caller cannot read it as the smoke's own exit code."""
+    try:
+        r = subprocess.run([sys.executable, SMOKE], capture_output=True, text=True, timeout=SMOKE_TIMEOUT_S)
+    except subprocess.TimeoutExpired as e:                        # noqa: PERF203
+        out = (e.stdout or b"").decode("utf-8", "replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
+        return 124, out + "\n*** HARNESS: the smoke did not exit within %ds — killed. A hang is not a result." % SMOKE_TIMEOUT_S
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
@@ -594,8 +640,8 @@ def main():
 
     rc, out = run_smoke()
     if rc != 0:
-        print("HARNESS FAILURE: the unmutated smoke is not green (rc=%d)\n%s"
-              % (rc, out[-1200:]))
+        print("HARNESS FAILURE: the unmutated smoke is %s (rc=%d)\n%s"
+              % ("HUNG" if rc == 124 else "not green", rc, out[-1200:]))
         sys.exit(2)
 
     red, bad = 0, []

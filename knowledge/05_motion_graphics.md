@@ -166,3 +166,11 @@ Also answers here: MouseDrag (see WHEN THE SCREEN OR APP IS THE SUBJECT).
 Every instrument here is an equal — the moment picks. Reading the footage fresh means the moment-type finds you before the component does.
 
 ═══════════════════════════════════════════════════════════════════════════
+
+── WHEN THE VIDEO ENDS, OR A PERSON IS IDENTIFIED ──
+
+**EndCard** (LARGE) — the closing card: a headline, an optional line of support and an optional logo, held on a clean ground while the video finishes. Claim: "This is the last thing you see." Use on the FINAL beat, when the speaker has landed the point and the video needs somewhere to end — a call to action, a handle, a sign-off. Never mid-video: it reads as an ending wherever it is placed. A mid-video section break → SectionDivider. **FITS:** product-launch, corporate, viral — any edit that closes on an ask. **FIGHTS:** story, cinematic — an ending card interrupts a narrative that should breathe out.
+Props: {{ "kind"?: "cta"|"logo_sting"|"social"|"echo", "logoUrl": "...", "durationMs"?: 4000 }}
+
+**NamePlate** (SMALL) — a lower-third name tag: the person's name with an optional role beneath it, on an accent-keyed backdrop. Claim: "This is who is speaking." Use the FIRST time a person appears or is named, and once only — an introduction repeated is a distraction. A quoted person who never appears → TweetBubble or InstagramComment; a status conferred on a thing → Stamp. **FITS:** corporate, product, interview, story. **FIGHTS:** viral, punchy — a name tag slows a fast cut and the audience rarely needs it.
+Props: {{ "name": "...", "anchor"?: "lower_third_safe"|"upper_third_safe", "accentColor"?: "#F5A11E", "durationMs"?: 4000 }}

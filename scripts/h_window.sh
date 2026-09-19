@@ -12,10 +12,16 @@
 # Every exit code is read bare (pipefail, verdict from a file) and Modal runs stay serial.
 set -u
 set -o pipefail
-D=$(cd "$(dirname "$0")/.." && pwd); SC=$D/scripts
+D=$(cd "$(dirname "$0")/.." && pwd)
+# SC is where the SIBLING scripts live: the run-unique copy when started through run_from_copy.sh, so a
+# mid-run edit to the tree cannot reach this run; the tree otherwise.
+SC=${SC_DIR:-$D/scripts}
 B=/tmp/window; mkdir -p $B; LEDGER=$B/ledger.txt; T0=$(date +%s)
 export RUNSFX=${RUNSFX:--w$(date +%H%M)}
 export BOUND=${BOUND:-600}
+# EVERY EXPORT LANDS ON ZAC'S DESK, not in /tmp (ruling 2026-09-19): a dated subfolder of
+# Promptly Reports, named by run, each copy sha-checked against its own record by batch_mp4.py.
+export DELIVER_DIR="${DELIVER_DIR:-/Users/zaclibman/Desktop/Promptly Reports/$(date +%Y-%m-%d) — WINDOW}"
 export TTL=${TTL:-5m}              # each Sonnet cell writes its own prefix; no ping stands behind it
 : > $LEDGER
 log() { echo "$*" >> $LEDGER; echo "$*"; }

@@ -160,15 +160,17 @@ def legs(src=None, prompt=None):
         out.append(("author", "the agent cannot place anything at all"))
 
     # 3. THE REWATCH FOLLOWS THE PLACING TURN, IN THE LOOP (2026-09-17).
-    # The DONE-mark machine and rewatch_decision are gone; run_three_turns
+    # The DONE-mark machine and rewatch_decision are gone; run_two_calls
     # serves rewatch 1 after turn 1's ops and rewatch 2 after turn 2. Asked of
     # the loop's own source, and driven in smoke_the_machine_holds_off_the_happy_path.
     _edit = _fn(src, "edit")
-    _loop = _fn(src, "run_three_turns")
-    if _edit is None or "run_three_turns(" not in ast.unparse(_edit):
+    _loop = _fn(src, "run_two_calls")
+    if _edit is None or "run_two_calls(" not in ast.unparse(_edit):
         out.append(("trigger", "edit() does not run the three-turn loop"))
-    if _loop is None or "rewatch(1, False)" not in ast.unparse(_loop) or "rewatch(2, True)" not in ast.unparse(_loop):
-        out.append(("trigger", "the loop does not serve a rewatch after the placing turn and the review turn"))
+    # TWO CALLS (Zac, 2026-09-19): ONE rewatch, after the placing call, and it is the final one — there is
+    # no second review turn to serve.
+    if _loop is None or "rewatch(1, True)" not in ast.unparse(_loop) or "rewatch(2," in ast.unparse(_loop):
+        out.append(("trigger", "the loop does not serve exactly one rewatch, after the placing call"))
     # 4. THE REVIEW WINDOW COMES FROM THE TIMELINE
     if _edit is not None:
         _e = ast.unparse(_edit)

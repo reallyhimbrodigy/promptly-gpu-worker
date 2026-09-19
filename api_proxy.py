@@ -91,6 +91,22 @@ MAX_BREAKPOINTS = 4
 # that hits the cap comes back stop_reason "max_tokens" and the harness ends the run on a NAMED
 # terminal — a truncated tool call must never be mistaken for an edit.
 MAX_OUTPUT_TOKENS = int(os.environ.get("API_PROXY_MAX_OUTPUT_TOKENS", "0") or 0)
+# EVERY TURN ENDS IN A TOOL CALL (Zac, 2026-09-19). The CLI offers no tool_choice flag, so the body gets it
+# here, for every model. "any" = the model must call one of the tools it was given; with `finish` among them
+# there is always one to call. Measured cause: Haiku answered with a complete edit_item payload inside a
+# ```json fence and called nothing, so the turn carried no op and the run died at NO PLACEMENT.
+TOOL_CHOICE_ANY = os.environ.get("API_PROXY_TOOL_CHOICE_ANY", "0") == "1"
+
+
+def apply_tool_choice(body):
+    """-> body, with tool_choice set when armed and the body offers tools. PURE-ish (mutates and returns).
+
+    A FUNCTION RATHER THAN AN INLINE `if`, because a check has to be able to DRIVE it: the inline form
+    could only be grepped, and a grep reads the same under `if False:` (measured — the mutation that
+    disarmed it passed, 2026-09-19)."""
+    if TOOL_CHOICE_ANY and body.get("tools"):
+        body["tool_choice"] = {"type": "any"}
+    return body
 # THE THINKING BUDGET, PLACED ON THE WIRE (Zac, 2026-09-18: "MAX_THINKING_TOKENS=2000,
 # recorded on the wire"). Measured: the CLI sends thinking {type: adaptive} with
 # NO budget for any MAX_THINKING_TOKENS > 0 (3000, 2000, 1024 all alike), and
@@ -315,6 +331,7 @@ def fingerprint(body):
     # is read from the wire, never from the env that asked for it — the
     # "thinking removed" run streamed a thinking block (h-th-think0, 2026-09-17).
     row["request_fields"] = {"thinking": body.get("thinking"), "output_config": body.get("output_config"),
+                             "tool_choice": body.get("tool_choice"),
                              "max_tokens": body.get("max_tokens"), "stream": body.get("stream")}
     return row
 
@@ -409,6 +426,10 @@ class H(http.server.BaseHTTPRequestHandler):
                         self.send_response(409); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(msg))); self.end_headers()
                         self.wfile.write(msg); self.wfile.flush()
                         return
+                _was_tc = body.get("tool_choice")
+                body = apply_tool_choice(body)
+                if body.get("tool_choice") != _was_tc:
+                    _trace({"phase": "tool_choice", "was": _was_tc, "now": body.get("tool_choice"), "tools": len(body.get("tools") or [])})
                 if MAX_OUTPUT_TOKENS > 0:
                     _was = body.get("max_tokens")
                     body["max_tokens"] = MAX_OUTPUT_TOKENS
@@ -611,6 +632,12 @@ def serve_mitm(port=0, cert_dir="/work/mitm"):
     ctx.load_cert_chain(crt, key)
     handler = type("M_bound", (M,), {"ssl_context": ctx})
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", port), handler)
+    # DAEMON THREADS, OR NOTHING THAT OPENS A TUNNEL CAN EVER EXIT. ThreadingHTTPServer spawns one
+    # NON-daemon thread per connection; a CONNECT tunnel is long-lived, so the interpreter blocks on it
+    # at exit. Measured 2026-09-19: every smoke that exercised the proxy printed its verdict and then
+    # hung forever, and the red proof ran 2h20m producing nothing — a hang is indistinguishable from
+    # slow work when nothing bounds it.
+    srv.daemon_threads = True
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv.server_address[1], ca_pem
 

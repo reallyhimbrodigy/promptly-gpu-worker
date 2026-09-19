@@ -103,14 +103,24 @@ def build(out_dir):
               "moment needs. THEY ARE NOT RANKED and the order carries no "
               "meaning. USING ONE TWICE IS FINE when two moments do the same "
               "job. A component that is not on this sheet is not available.")
+    # THE REFUSAL (Zac, 2026-09-19). THE PICTURE MUST EQUAL THE REGISTRY OR THE COUNT IS A LIE.
+    # Measured: EndCard and NamePlate both RENDER — MEASURED, own project, own empty frame, pixels
+    # diffed, 3.469% and 3.545% of the frame — and were dropped for having no WHEN in the knowledge
+    # file. The builder printed them and wrote the sheet anyway, so the registry said 37, the picture
+    # said 35, and the agent was never shown either component. A component that draws and cannot be
+    # categorised is a CATEGORISATION gap, never a reason to hide it: absence rendered as a smaller
+    # number, with nothing reconciling the two.
+    if missing_condition:
+        raise SystemExit(
+            "SHEET REFUSED: %d component(s) RENDER and have no `when` in the knowledge file, so the "
+            "picture would be %d while the registry holds them: %s. Give each a WHEN (or say in the "
+            "knowledge file why it is not offered) — the inventory the agent sees must equal what is "
+            "registered." % (len(missing_condition), len(sheet), ", ".join(sorted(missing_condition))))
     manifest = os.path.join(out_dir, "sheet.json")
     json.dump({"header": header, "entries": sheet,
                "rendered_but_unconditioned": missing_condition},
               open(manifest, "w", encoding="utf-8"), indent=1)
     print("  sheet: %d components with a frame and a condition" % len(sheet))
-    if missing_condition:
-        print("  RENDERS BUT HAS NO `WHEN` IN THE KNOWLEDGE FILE (not offered): %s"
-              % ", ".join(missing_condition))
     by = {}
     for e in sheet:
         by.setdefault(e["when"], []).append(e["name"])
