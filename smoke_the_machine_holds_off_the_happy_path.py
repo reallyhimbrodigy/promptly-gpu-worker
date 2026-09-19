@@ -1389,6 +1389,13 @@ def main():
           _cc0 == {"state": "MEASURED", "cards": 0, "why": "from the API's `returned` count"} and _cc2["state"] == "MEASURED" and _cc2["cards"] == 2
           and _cca["state"] == "ABSENT" and "_text" in _cca["why"] and _ccf["state"] == "FAILED", "%s %s %s %s" % (_cc0, _cc2, _cca, _ccf))
 
+    # ---- THE NO-WATCH ARM RESUMES ITS OWN TURN-1 SESSION (a fresh session per turn cache-missed at call 2) ----
+    _ed8 = ast.unparse(next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "edit"))
+    check("no-watch: turn 1 creates the session cold and every later turn resumes it; the record says which and whether it resumed",
+          "if no_watch and n == 1 and _res.get('session_id'):" in _ed8 and "_run_sid['sid'] = str(_res.get('session_id'))" in _ed8
+          and re.search(r"_cmd_n = _cmd if _run_sid\['sid'\] == _watch_sid else cli_command\(_run_sid\['sid'\]", _ed8) is not None
+          and "_cmd_n + ['--max-turns', '1']" in _ed8 and "'resumed': '--resume' in _cmd_n" in _ed8)
+
     if FAILS:
         print("\n%d FAILURE(S)" % len(FAILS))
         for f in FAILS:

@@ -4997,6 +4997,11 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     _watch_sid = None if no_watch else install_watch("/work")
     print("  WATCH           : %s" % ("ABSENT BY DESIGN — no --resume; the prefix is the paragraph, the inventory and the source watch" if no_watch else "resumed %s" % _watch_sid), flush=True)
     _cmd = cli_command(_watch_sid, model, use_hands, agents if use_hands else None, _pm, effort=(effort or None))
+    # THE SESSION EVERY LATER TURN RESUMES: the watch's, or — no-watch — the one turn 1 creates.
+    # A fresh session per turn rewrote message 0 between invocations and cache-missed at call 2
+    # (batch of 2026-09-18, nowatch: read 40,656 of 55,715). Cold by design is call 1's prefix,
+    # not a new prefix per call; no breakpoint and no pinning are involved in resuming.
+    _run_sid = {"sid": _watch_sid}
     try:
         _platter, _n_platter = component_platter()
     except Exception as _pe:                                      # noqa: BLE001
@@ -5175,10 +5180,14 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         mark("turn%d.start" % n)
         # THE ONLY KILL IS THE RUN BOUND: this turn may use whatever is left of it.
         _left = max(10.0, RUN_TIMEOUT_S - (time.time() - _run_t0))
+        _cmd_n = _cmd if _run_sid["sid"] == _watch_sid else cli_command(_run_sid["sid"], model, use_hands, agents if use_hands else None, _pm, effort=(effort or None))
         rc, err, wall, killed = turn_clock.run_timed(
-            _cmd + ["--max-turns", "1"], "/work", _stream, _tfile, _left,
+            _cmd_n + ["--max-turns", "1"], "/work", _stream, _tfile, _left,
             env=_env, stdin_first=json.dumps(message), on_event=_on)
         mark("turn%d" % n)
+        if no_watch and n == 1 and _res.get("session_id"):
+            _run_sid["sid"] = str(_res.get("session_id"))
+            print("  NO-WATCH SESSION: turn 1 created %s; every later turn resumes it" % _run_sid["sid"][:8], flush=True)
         if wall > TURN_LAW_S:
             print("  LAW MISS (turn) : turn %d took %.1fs, over the %ds turn law%s" % (n, wall, TURN_LAW_S, " — KILLED at the run bound" if killed else ""), flush=True)
         u = _res.get("usage") or {}
@@ -5186,7 +5195,7 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         # low" once reached the machine as the agent's NO PLACEMENT.
         _legs = [x for x in _read_trace_rows() if isinstance(x, dict) and str(x.get("path", "")).split("?")[0] == "/v1/messages" and "status" in x and "req_bytes" in x]
         _api = _legs[-1] if _legs else {}
-        rec = {"rc": rc, "subtype": _res.get("subtype"), "tool_calls": _calls,
+        rec = {"rc": rc, "subtype": _res.get("subtype"), "tool_calls": _calls, "session": (_run_sid["sid"] or "")[:8], "resumed": "--resume" in _cmd_n,
                "text": "\n".join(_texts)[:2000], "killed": bool(killed), "wall": round(wall, 2),
                "bound_s": round(_left, 1), "over_turn_law": wall > TURN_LAW_S,
                "api_status": _api.get("status"), "api_head": str(_api.get("head") or "")[:200], "api_calls_seen": len(_legs),

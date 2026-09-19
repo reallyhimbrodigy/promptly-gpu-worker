@@ -34,4 +34,4 @@ case "$STAGE" in
   *) echo "unknown stage"; exit 2 ;;
 esac
 rm -f "$LOG" "$RC"; nohup sh -c "$CMD > $LOG 2>&1; echo \$? > $RC" >/dev/null 2>&1 &
-echo "launched $STAGE pid $! at $(date '+%H:%M:%S')  log=$LOG"
+echo "launched $STAGE pid $! at $(date '+%H:%M:%S') from $(git rev-parse --short HEAD 2>/dev/null)  log=$LOG"

@@ -517,6 +517,11 @@ MUTATIONS = [
      '    if False:\n        return {"state": "MEASURED", "cards": int(r["returned"]), "why": "from the API\'s `returned` count"}',
      "caption_cards: MEASURED from a list or the API's count, ABSENT with the keys, FAILED on an error",
      'isinstance(r.get("returned"), int)'),
+    ("the no-watch arm starts a fresh session every turn again",
+     '        if no_watch and n == 1 and _res.get("session_id"):\n            _run_sid["sid"] = str(_res.get("session_id"))',
+     '        if False:\n            _run_sid["sid"] = str(_res.get("session_id"))',
+     "no-watch: turn 1 creates the session cold and every later turn resumes it; the record says which and whether it resumed",
+     '_run_sid["sid"] = str(_res.get("session_id"))'),
 ]
 
 
