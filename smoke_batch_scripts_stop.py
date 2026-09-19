@@ -3,6 +3,7 @@
 sets pipefail and reads every verdict bare; the verdict module returns the
 exit codes the batch reasons about; and a failing verdict planted behind a
 `| tee` still stops a script that follows the rule."""
+import base64
 import glob
 import io
 import json
@@ -117,6 +118,47 @@ check("a missing fixture file is one UNREADABLE line and zero picks, exit 0 (the
 d4 = tempfile.mkdtemp(prefix="spend_")
 json.dump({"density_fps": 2.0, "control": {"usage": {"cache_read_input_tokens": 1000000, "output_tokens": 0}}, "review": {"usage": {"cache_read_input_tokens": 1000000, "output_tokens": 0}}}, open(os.path.join(d4, "probe2.json"), "w"))
 check("spend counts the control and the planted review (two calls)", abs(BS.total(d4, ping_logs=()) - 0.60) < 0.001, str(BS.total(d4, ping_logs=())))
+
+# ---- THE MP4 HANDED OVER IS THIS RUN'S, OR NONE (2026-09-18: the low arm's stale fetch decoded a file from 14:09) ----
+import hashlib                                                   # noqa: E402
+MP4 = os.path.join(HERE, "scripts", "batch_mp4.py")
+d5 = tempfile.mkdtemp(prefix="mp4_")
+
+
+def _mp4(stage, payload, record, arg_record=True):
+    out = os.path.join(d5, stage + ".mp4")
+    if payload is not None:
+        json.dump(payload, io.open(out + ".json", "w", encoding="utf-8"))
+    if record is not None:
+        json.dump(record, io.open(os.path.join(d5, stage + ".json"), "w", encoding="utf-8"))
+    argv = [sys.executable, MP4, out] + ([os.path.join(d5, stage + ".json")] if (arg_record and record is not None) else [])
+    r = subprocess.run(argv, capture_output=True, text=True)
+    return r.stdout.strip(), os.path.exists(out)
+
+
+_bytes = b"REAL MP4 BYTES FOR THIS RUN"
+_sha = hashlib.sha256(_bytes).hexdigest()
+_pay = {"b64": base64.b64encode(_bytes).decode(), "bytes": len(_bytes), "sha256": _sha}
+_line, _exists = _mp4("good", _pay, {"export": {"state": "MEASURED", "sha256": _sha}})
+check("an export this run made is written and its sha is checked against the record", _exists and _sha[:12] in _line and "matches the record's export" in _line, _line)
+# the real incident: a WITHHELD export with somebody else's bytes already at the path
+io.open(os.path.join(d5, "withheld.mp4"), "wb").write(b"SOMEBODY ELSE'S FILE FROM 14:09")
+_line, _exists = _mp4("withheld", _pay, {"export": {"state": "WITHHELD", "why": "terminal RUN TIMEOUT at turn 3"}})
+check("a WITHHELD export hands over nothing and REMOVES the stale file already at the path",
+      not _exists and "ABSENT" in _line and "WITHHELD" in _line and "removed the stale file" in _line, _line)
+_line, _exists = _mp4("wrongsha", _pay, {"export": {"state": "MEASURED", "sha256": "f" * 64}})
+check("bytes that do not hash to what this run exported are refused, both shas named",
+      not _exists and "ABSENT" in _line and _sha[:12] in _line and "ffffffffffff" in _line, _line)
+# the running batch calls it with ONE argument: the record must still be found by convention
+io.open(os.path.join(d5, "conv.mp4"), "wb").write(b"STALE")
+_line, _exists = _mp4("conv", _pay, {"export": {"state": "WITHHELD", "why": "terminal"}}, arg_record=False)
+check("a caller that passes no record is still checked — the record is found beside the mp4 by convention",
+      not _exists and "ABSENT" in _line and "WITHHELD" in _line, _line)
+_line, _exists = _mp4("norec", _pay, None)
+check("with no record anywhere the bytes are written and the line SAYS provenance is unchecked, never silently",
+      _exists and "NO RECORD GIVEN: provenance unchecked" in _line, _line)
+_line, _exists = _mp4("nofetch", None, {"export": {"state": "MEASURED", "sha256": _sha}})
+check("a fetch that returned nothing is ABSENT, not a pass", not _exists and "no fetched bytes" in _line, _line)
 
 print("%d failure(s)" % len(bad) if bad else "all legs green")
 sys.exit(1 if bad else 0)

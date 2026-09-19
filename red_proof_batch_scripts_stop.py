@@ -14,6 +14,7 @@ VERDICT = os.path.join(HERE, "scripts", "batch_verdict.py")
 BATCH = os.path.join(HERE, "scripts", "h_batch.sh")
 STAGE = os.path.join(HERE, "scripts", "h_stage.sh")
 BRIEFS = os.path.join(HERE, "scripts", "batch_briefs.py")
+MP4SC = os.path.join(HERE, "scripts", "batch_mp4.py")
 
 MUTATIONS = [
     ("an API refusal is no longer a stop", VERDICT,
@@ -49,6 +50,18 @@ MUTATIONS = [
      '--out /tmp/bs/probe1.json --density-fps 1"',
      '--out /tmp/bs/probe1.json --density-fps 2"',
      "h_stage runs G at 2 fps and at 1 fps into distinct records"),
+    ("a withheld export hands over whatever file is at the path", MP4SC,
+     '    if ex.get("state") != "MEASURED":\n        refuse("the record says export %s: %s" % (ex.get("state"), str(ex.get("why"))[:90]))',
+     '    if False:\n        refuse("the record says export %s: %s" % (ex.get("state"), str(ex.get("why"))[:90]))',
+     "a WITHHELD export hands over nothing and REMOVES the stale file already at the path"),
+    ("the bytes are not hashed against the record", MP4SC,
+     'if want and sha != want:',
+     'if False:',
+     "bytes that do not hash to what this run exported are refused, both shas named"),
+    ("a one-argument caller goes unchecked again", MP4SC,
+     'rec_path = sys.argv[2] if len(sys.argv) > 2 else (_conv if os.path.exists(_conv) and _conv != out + ".json" else "")',
+     'rec_path = sys.argv[2] if len(sys.argv) > 2 else ""',
+     "a caller that passes no record is still checked — the record is found beside the mp4 by convention"),
     ("the off-arm stages after the low ping run without a re-ping", BATCH,
      "if at motion; then ping warm; stage motion",
      "if at motion; then stage motion",
@@ -79,7 +92,7 @@ def run():
 
 
 def main():
-    for p in (VERDICT, BATCH, STAGE, BRIEFS):
+    for p in (VERDICT, BATCH, STAGE, BRIEFS, MP4SC):
         ORIG[p] = io.open(p, encoding="utf-8").read()
     rc, out = run()
     if rc != 0:

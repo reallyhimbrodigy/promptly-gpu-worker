@@ -1353,14 +1353,21 @@ def main():
     check("a clean verify leaves the common path alone (export at turn 2), and verify runs only when the agent asks to export",
           _tmo["verdict"] == "export at turn 2 (clean)" and _vlog2 == [2] and _tmf["verdict"] == "export at turn 3 (one fix pass)" and _vlog == [3], "%s %s / %s %s" % (_tmo["verdict"], _vlog2, _tmf["verdict"], _vlog))
     # THE SEAM IN edit(): the hook is handed over, the rewatch carries the faults, the agent is told, the record keeps it
-    _ed7 = ast.unparse(next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "edit"))
+    _edit_fn7 = next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "edit")
+    _ed7 = ast.unparse(_edit_fn7)
     check("edit() hands the constraint check to the turn machine",
           re.search(r"run_three_turns\(_invoke, _rewatch, _first_message, t0=t0, verify=_verify\)", _ed7) is not None)
     check("the rewatch hands constraint violations to the next turn as faults",
           "_constraints_now(_items, _base," in _ed7 and "'BRIEF CONSTRAINT VIOLATED — %s' % f for f in _cf_rw" in _ed7 and "'constraints': _crows_rw" in _ed7)
-    # AT THE SITE THE RUN WRITES: beside out['three_turns'] = _tm (a key in a literal the run never reaches is a dead table)
-    check("the record keeps what was extracted, every read, and the faults by turn — at the site the run writes",
-          "out['three_turns'] = _tm\n    out['constraints'] = {'extracted': _constraints, 'reads': _constraint_reads, 'faults_by_turn': _tm.get('constraint_faults')" in _ed7 and "constraints=_constraints" in _ed7)
+    # WHERE IN THE RECORD, structurally: the key rides in the dict assigned to out["turn_machine"] (a substring
+    # over edit() cannot tell a written key from one in a literal nothing assigns — and a reader looking at the
+    # wrong level reported the key missing when it was there, 2026-09-18).
+    _tmw = next((n for n in ast.walk(_edit_fn7) if isinstance(n, ast.Assign) and isinstance(n.value, ast.Dict)
+                 and any(ast.unparse(t) == "out['turn_machine']" for t in n.targets)), None)
+    _tmk = [k.value for k in _tmw.value.keys if isinstance(k, ast.Constant)] if _tmw else []
+    check("the record keeps what was extracted, every read, and the faults by turn — in the dict the run assigns to out['turn_machine']",
+          "constraints" in _tmk and "three_turns" in _tmk and "'extracted': _constraints, 'reads': _constraint_reads, 'faults_by_turn': _tm.get('constraint_faults')" in ast.unparse(_tmw)
+          and "constraints=_constraints" in _ed7, "turn_machine keys: %s" % _tmk)
     # THE MESSAGE THE AGENT RECEIVES, not the function's text (a block under `if False:` still reads as present in the source)
     _m1c = J.pass1_message(None, [], os.path.join(HERE, "sheet", "INVENTORY.png"), source_watch=None, deciding="x", face=["FACE — f"], platter="PROPERTY KEYS — p", constraints=_bc("no captions"))
     _t1c = [b.get("text") or "" for b in _m1c["message"]["content"] if b.get("type") == "text"]
