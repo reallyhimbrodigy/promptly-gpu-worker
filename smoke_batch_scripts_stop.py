@@ -72,6 +72,9 @@ check("G's sheets come out of the results store for Zac's eye, both densities", 
 stg = io.open(os.path.join(HERE, "scripts", "h_stage.sh"), encoding="utf-8").read()
 check("h_stage runs G at 2 fps and at 1 fps into distinct records", "--out /tmp/bs/probe2.json --density-fps 2" in stg and "--out /tmp/bs/probe1.json --density-fps 1" in stg)
 check("the brief stage takes its text from a file, never the command line", "--brief-file '$BRIEF_FILE'" in stg and "--brief '$BRIEF" not in stg)
+check("the off ping runs again before H1 and before the off-arm stages that follow the low ping (the preflight compares against the LAST ping)",
+      re.search(r"at th0; then\nping warm", bcode) is not None and re.search(r"at motion; then ping warm;", bcode) is not None)
+check("every launch of the batch carries its own run ids (last batch's job state must never be reused)", "export RUNSFX=" in bcode and bcode.count("$RUNSFX") >= 10 and "--run-id h-th-think0$RUNSFX" in stg)
 check("the no-watch stage carries no ping and no pinning (cold by design)", re.search(r"nowatch\)[^\n]*--no-watch", stg) is not None and "ping " not in bcode.split("at nowatch;")[1].split("at briefs;")[0])
 def prec(cold=False, api=None, head="", fp=0):
     return {"density_fps": 2.0, "control": {"cold_write": {"cold": cold, "write": 200000 if cold else 1000, "read": 1000 if cold else 226000}, "api_status": api, "api_head": head, "false_positives": fp, "wall_s": 40.0, "request_mb": 20.1},

@@ -522,6 +522,11 @@ MUTATIONS = [
      '        if False:\n            _run_sid["sid"] = str(_res.get("session_id"))',
      "no-watch: turn 1 creates the session cold and every later turn resumes it; the record says which and whether it resumed",
      '_run_sid["sid"] = str(_res.get("session_id"))'),
+    ("a contaminated reused stage runs anyway",
+     '        if _stage.get("priorItems") is None or len(_stage.get("priorItems") or []) > 0:',
+     '        if False:',
+     "a reused stage whose timeline holds items, or cannot be read, is a CONTAMINATED ARM terminal before any model call",
+     'len(_stage.get("priorItems") or []) > 0'),
 ]
 
 

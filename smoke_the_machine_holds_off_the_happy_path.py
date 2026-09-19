@@ -1154,7 +1154,7 @@ def main():
     check("a refused preflight refuses the CLI's retry too, and nothing ever reaches upstream", _codes == [409, 409] and not _FakeConn.last.get("body"), "codes=%s forwarded=%s" % (_codes, bool(_FakeConn.last.get("body"))))
     _st_sh = io.open(os.path.join(HERE, "scripts", "h_stage.sh"), encoding="utf-8").read()
     check("the no-speech and car stages run on the off arm, the arm the batch's ping carries (an adaptive stage against an off-arm ping was refused, retried, and paid)",
-          all(("--run-id h-%s-1 --think-tokens 0" % k) in _st_sh for k in ("motion", "car")))
+          all(re.search(r"^\s*%s\)\s+CMD=.*--run-id h-%s-1\S* --think-tokens 0" % (k, k), _st_sh, re.M) is not None and "--effort" not in next(l for l in _st_sh.split("\n") if re.match(r"^\s*%s\)" % k, l)) for k in ("motion", "car")))
 
     # ---- REGISTRATION: select options as the acceptor's objects; a refusal named in the validator's words ----
     _np = J.normalise_properties([{"key": "anchor", "type": "select", "defaultValue": "center", "options": ["center", "top"]}, {"key": "decimals", "type": "number", "defaultValue": 0}, {"key": "x", "type": "select", "options": [{"value": "a", "label": "A"}]}])
@@ -1395,6 +1395,13 @@ def main():
           "if no_watch and n == 1 and _res.get('session_id'):" in _ed8 and "_run_sid['sid'] = str(_res.get('session_id'))" in _ed8
           and re.search(r"_cmd_n = _cmd if _run_sid\['sid'\] == _watch_sid else cli_command\(_run_sid\['sid'\]", _ed8) is not None
           and "_cmd_n + ['--max-turns', '1']" in _ed8 and "'resumed': '--resume' in _cmd_n" in _ed8)
+
+    # ---- A REUSED STAGE THAT HOLDS ITEMS IS REFUSED BEFORE THE FIRST CALL (H1 of 2026-09-18 inherited last batch's items) ----
+    _ed9 = ast.unparse(next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "edit"))
+    _i_refuse = _ed9.find("'kind': 'CONTAMINATED ARM'"); _i_first = _ed9.find("run_three_turns(_invoke, _rewatch, _first_message")
+    check("a reused stage whose timeline holds items, or cannot be read, is a CONTAMINATED ARM terminal before any model call",
+          "if _stage.get('priorItems') is None or len(_stage.get('priorItems') or []) > 0:" in _ed9 and _i_refuse > 0 and _i_refuse < _i_first
+          and "'export': {'state': 'WITHHELD'" in _ed9[_i_refuse:_i_refuse + 900] and "_stage['priorItems'] = None" in _ed9)
 
     if FAILS:
         print("\n%d FAILURE(S)" % len(FAILS))

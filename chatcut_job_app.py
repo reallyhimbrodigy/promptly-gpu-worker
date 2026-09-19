@@ -4737,8 +4737,24 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
             print("  PRIOR ITEMS     : %d on the reused timeline (%s)"
                   % (len(_stage["priorItems"]), _prb.get("read_why")), flush=True)
         except Exception as _pe:                                  # noqa: BLE001
-            _stage["priorItems"] = []
+            _stage["priorItems"] = None
             print("  PRIOR ITEMS     : FAILED to read (%s)" % _pe, flush=True)
+        # THE REFUSAL THE COMMENT ABOVE PROMISED AND THE CODE NEVER MADE (2026-09-18): a reused stage
+        # whose timeline already holds items is last batch's job wearing this run id — H1 inherited a
+        # DropCard and an EndCard and spent turn 1 inspecting them. A retry that prestaged and placed
+        # nothing may continue; a timeline with items, or one that cannot be read, is CONTAMINATED and
+        # ends here, before any model call.
+        if _stage.get("priorItems") is None or len(_stage.get("priorItems") or []) > 0:
+            _why = ("the reused project %s holds %s prior item(s) — a fresh job must not inherit them"
+                    % (str(_stage["projectId"])[:8], "unreadable" if _stage.get("priorItems") is None else len(_stage["priorItems"])))
+            print("  CONTAMINATED ARM: %s — refused before the first call" % _why, flush=True)
+            _out = {"state": "REFUSED", "why": _why, "run_id": run_id, "attempt": _attempt, "projectId": _stage.get("projectId"),
+                    "prior_items": _stage.get("priorItems"), "wall_s": round(time.time() - t0, 1),
+                    "three_turns": {"api_calls": 0, "verdict": None, "terminal": {"kind": "CONTAMINATED ARM", "at": 0, "why": _why}, "cold_write": None, "turns": []},
+                    "run_line": {"api_calls": 0, "usd_cli": 0.0, "request_mb": [], "terminal": {"kind": "CONTAMINATED ARM", "at": 0, "why": _why}, "no_watch": bool(no_watch)},
+                    "export": {"state": "WITHHELD", "why": "contaminated arm — nothing is exported"}}
+            RESULTS[run_id] = _out
+            return _out
     else:
         _stage = prestage(tok, prestage_title, controls=_ctl,
                           source_path="/work/source.mp4", titles=_titles)

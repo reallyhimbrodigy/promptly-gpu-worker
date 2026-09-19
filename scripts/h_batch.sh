@@ -14,6 +14,8 @@ B=/tmp/batch; mkdir -p $B $B/sheets; LEDGER=$B/ledger.txt; T0=$(date +%s)
 # START=<stage> resumes after a launch-side failure (Modal answered "app is stopped or disabled" at a spawn,
 # 2026-09-18) without re-running the stages whose records already exist; the ledger is appended, not reset.
 START=${START:-ping}; SKIP=1; [ "$START" = "ping" ] && SKIP=0 && : > $LEDGER
+# FRESH RUN IDS PER LAUNCH (see h_stage.sh RUNSFX): the suffix is this launch's clock unless the caller resumes with one
+export RUNSFX=${RUNSFX:--$(date +%H%M)}
 END=${END:-briefs}; DONE=0
 at() { [ "$SKIP" = "1" ] && [ "$1" = "$START" ] && SKIP=0; [ "$DONE" = "1" ] && return 1; [ "$1" = "$END" ] && DONE=1; [ "$SKIP" = "0" ]; }
 log() { echo "$*" >> $LEDGER; echo "$*"; }
@@ -33,7 +35,7 @@ ping() { st=$1; [ "${SKIP_PING:-0}" = "1" ] && { log "ping $st SKIPPED (the arm'
 # G: the probe's record lands in /tmp/bs/<stage>.json; its sheets (control and planted) come out of the results store for Zac's eye
 probe() { st=$1; idle; rm -f /tmp/bs/h_$st.rc; sh $SC/h_stage.sh $st >> $LEDGER 2>&1; waitrc /tmp/bs/h_$st.rc 1500; cp /tmp/bs/$st.json $B/$st.json 2>/dev/null; [ -f $B/$st.json ] || { log "NO RECORD for $st"; return 1; }; log "$(/usr/bin/grep -E '  CONTROL  |  G @ ' /tmp/bs/h_$st.log)"; return 0; }
 sheets() { key=$1; st=$2; (cd $D && modal run chatcut_read_result.py --run-id "$key" --out "$B/${st}_full.json" > $B/read_$st.log 2>&1); python3 "$SC/batch_sheets.py" "$B/${st}_full.json" "$B/sheets/$st" > $B/sheets.txt; log "$(cat $B/sheets.txt)"; }
-log "BATCH START $(date '+%H:%M:%S')"
+log "BATCH START $(date '+%H:%M:%S') run ids *$RUNSFX"
 # 1. the off-arm ping (the 1h watch-end breakpoint; its system text and thinking are what the preflight compares against)
 if at ping; then ping warm; fi
 # 2. G at 2 fps with its negative control (the control's call is the first job-shaped call after the ping: a cold write here is the cross-run fault, before H1 spends)
@@ -50,23 +52,26 @@ sheets probe-rewatch-1fps probe1; cap_or_stop
 fi
 # 4. H1 — thinking off: the preflight, the cross-run proof, the within-run assertion
 if at th0; then
-stage th0 h-th-think0 $B/th0.json || exit 4
+ping warm                                   # the off ping again: a restart from here, or the probes, must not leave the low ping as the preflight's reference
+stage th0 h-th-think0$RUNSFX $B/th0.json || exit 4
 verdict $B/th0.json; rc=$?
 [ $rc -eq 0 ] || { log "STOP: A is red on H1 (rc=$rc) — nothing else fires"; exit 5; }
-mp4 h-th-think0 $B/th0.mp4; cap_or_stop
+mp4 h-th-think0$RUNSFX $B/th0.mp4; cap_or_stop
 fi
 # 5. F's second arm: effort low (the API refuses a token budget on this model) — its own ping, same thinking/effort
 if at thlow; then
 ping warmlow
-stage thlow h-th-low $B/thlow.json || exit 4
+stage thlow h-th-low$RUNSFX $B/thlow.json || exit 4
 verdict $B/thlow.json; rc=$?; [ $rc -ne 2 ] || { log "STOP: API refusal on the low arm"; exit 5; }
-mp4 h-th-low $B/thlow.mp4; cap_or_stop
+mp4 h-th-low$RUNSFX $B/thlow.mp4; cap_or_stop
 fi
-# 6. no-speech, 7. Zac's clip (both on the off arm; the off ping's entry is the one they read)
-if at motion; then stage motion h-motion-1 $B/motion.json || exit 4; verdict $B/motion.json; rc=$?; [ $rc -ne 2 ] || exit 5; mp4 h-motion-1 $B/motion.mp4; cap_or_stop; fi
-if at car; then stage car h-car-1 $B/car.json || exit 4; verdict $B/car.json; rc=$?; [ $rc -ne 2 ] || exit 5; mp4 h-car-1 $B/car.mp4; cap_or_stop; fi
+# 6. no-speech, 7. Zac's clip (both on the off arm). THE OFF PING RUNS AGAIN FIRST: the preflight compares against the
+# LAST ping, which after thlow is the low one, and an off-arm job against a low ping is refused (2026-09-18). A re-ping reads
+# the live 1h entry (~$0.07), it does not rewrite it.
+if at motion; then ping warm; stage motion h-motion-1$RUNSFX $B/motion.json || exit 4; verdict $B/motion.json; rc=$?; [ $rc -ne 2 ] || exit 5; mp4 h-motion-1$RUNSFX $B/motion.mp4; cap_or_stop; fi
+if at car; then stage car h-car-1$RUNSFX $B/car.json || exit 4; verdict $B/car.json; rc=$?; [ $rc -ne 2 ] || exit 5; mp4 h-car-1$RUNSFX $B/car.mp4; cap_or_stop; fi
 # 8. the no-watch run: COLD BY DESIGN — its own prefix, no ping, no pinning; the verdict names the cold write and still reds a within-run miss
-if at nowatch; then stage nowatch h-th-nowatch $B/nowatch.json || exit 4; verdict $B/nowatch.json; rc=$?; [ $rc -ne 2 ] || exit 5; mp4 h-th-nowatch $B/nowatch.mp4; cap_or_stop; fi
+if at nowatch; then stage nowatch h-th-nowatch$RUNSFX $B/nowatch.json || exit 4; verdict $B/nowatch.json; rc=$?; [ $rc -ne 2 ] || exit 5; mp4 h-th-nowatch$RUNSFX $B/nowatch.mp4; cap_or_stop; fi
 # 9. up to three production briefs from Builder-2's file — each a job on the off arm, the brief travelling as a file
 if at briefs; then
 python3 "$SC/batch_briefs.py" "$D/fixtures/production_briefs.v1.jsonl" /tmp/bs > $B/briefs.tsv 2> $B/briefs_listing.txt; log "$(cat $B/briefs_listing.txt)"
@@ -75,10 +80,10 @@ while IFS="$TAB" read -r bid bkey bfile bslot; do
   [ -n "$bid" ] || continue
   log "BRIEF $bid ($bslot) on $bkey"
   idle; BRIEF_ID=$bid BRIEF_KEY=$bkey BRIEF_FILE=$bfile sh $SC/h_stage.sh brief >> $LEDGER 2>&1
-  sh $SC/h_wait.sh "h-brief-$bid" "$B/brief_$bid.json" >> $LEDGER 2>&1
+  sh $SC/h_wait.sh "h-brief-$bid$RUNSFX" "$B/brief_$bid.json" >> $LEDGER 2>&1
   [ -f "$B/brief_$bid.json" ] || { log "NO RECORD for brief $bid"; continue; }
   verdict $B/brief_$bid.json; rc=$?; [ $rc -ne 2 ] || { log "STOP: API refusal on brief $bid"; exit 5; }
-  mp4 "h-brief-$bid" "$B/brief_$bid.mp4"; cap_or_stop
+  mp4 "h-brief-$bid$RUNSFX" "$B/brief_$bid.mp4"; cap_or_stop
 done < $B/briefs.tsv
 fi
 python3 "$SC/batch_pair.py" > $B/pair.txt; log "$(cat $B/pair.txt)"
