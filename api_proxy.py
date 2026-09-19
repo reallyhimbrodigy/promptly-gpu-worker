@@ -85,6 +85,12 @@ CONNECTION = http.client.HTTPSConnection
 # markers are raised to 1h; the last-message marker stays 5m, after them).
 RUN_FIRST_TEXT = os.environ.get("API_PROXY_RUN_FIRST_TEXT", "")
 MAX_BREAKPOINTS = 4
+# THE OUTPUT CAP (Zac, 2026-09-19), applied to the body because the CLI owns max_tokens and we do not.
+# 0 leaves the CLI's own value alone. Measured 2026-09-18/19: the turn that produced a working full
+# edit billed 1,108 output tokens (brief pb-002 turn 1, 3 ops + its text); 2x that is 2,216. A turn
+# that hits the cap comes back stop_reason "max_tokens" and the harness ends the run on a NAMED
+# terminal — a truncated tool call must never be mistaken for an edit.
+MAX_OUTPUT_TOKENS = int(os.environ.get("API_PROXY_MAX_OUTPUT_TOKENS", "0") or 0)
 # THE THINKING BUDGET, PLACED ON THE WIRE (Zac, 2026-09-18: "MAX_THINKING_TOKENS=2000,
 # recorded on the wire"). Measured: the CLI sends thinking {type: adaptive} with
 # NO budget for any MAX_THINKING_TOKENS > 0 (3000, 2000, 1024 all alike), and
@@ -403,6 +409,10 @@ class H(http.server.BaseHTTPRequestHandler):
                         self.send_response(409); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(msg))); self.end_headers()
                         self.wfile.write(msg); self.wfile.flush()
                         return
+                if MAX_OUTPUT_TOKENS > 0:
+                    _was = body.get("max_tokens")
+                    body["max_tokens"] = MAX_OUTPUT_TOKENS
+                    _trace({"phase": "output_cap", "was": _was, "now": MAX_OUTPUT_TOKENS})
                 body, inj = inject_watch_breakpoint(body, RUN_FIRST_TEXT)
                 thk = {"rewritten": False, "why": "no budget: the API refuses thinking.enabled on this model (2026-09-18)"}
                 if inj.get("injected") or pinned:
@@ -464,6 +474,7 @@ class H(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.flush()
             head = b""
+            tail = b""
             nchunks = 0
             while True:
                 # read1: whatever has ARRIVED, never blocking to fill 4096 —
@@ -477,6 +488,7 @@ class H(http.server.BaseHTTPRequestHandler):
                     _trace({"phase": "first_chunk", "s": round(time.time() - t0, 3), "bytes": len(chunk), "head": chunk[:400].decode("utf-8", "replace")})
                 if len(head) < 2000:
                     head += chunk[:2000 - len(head)]
+                tail = (tail + chunk)[-2000:]        # stop_reason arrives in message_delta, at the END
                 relayed += len(chunk)
                 self.wfile.write(b"%x\r\n" % len(chunk) + chunk + b"\r\n")
                 self.wfile.flush()
@@ -488,6 +500,11 @@ class H(http.server.BaseHTTPRequestHandler):
             _trace({"phase": "relay_closed", "s": round(time.time() - t0, 3)})
             row["relayed_bytes"] = relayed
             row["head"] = head.decode("utf-8", "replace")
+            # THE API'S OWN WORD ON WHY GENERATION STOPPED. "max_tokens" means the answer was
+            # TRUNCATED: a half-written tool call that json.loads may still parse.
+            _sr = re.search(r'"stop_reason":"([a-z_]+)"', tail.decode("utf-8", "replace"))
+            if _sr:
+                row["stop_reason"] = _sr.group(1)
             row["done_s"] = round(time.time() - t0, 3)
             # the API's own word on the cache: message_start carries
             # diagnostics.cache_miss_reason (h-th-think0 read 12,643 of 235k

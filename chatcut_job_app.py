@@ -771,6 +771,28 @@ LOADBEARING = ["00_job_and_arc.md", "02_intent_standard.md", "01_cut_pass.md",
 # ship uncompensated — hop 7 then reports the raw offset instead of ~0.
 CHATCUT_AUDIO_LEAD_MS = 42
 
+# THE OUTPUT CAP (Zac, 2026-09-19), DERIVED NOT GUESSED. Measured on the batch of 2026-09-18/19:
+#   the turn that produced a working full edit billed 1,108 output tokens   (brief pb-002 turn 1)
+#   the turn that timed out billed 18,164, of which 17,567 was thinking     (H1 off turn 1)
+#   the WORK in that 18k turn was 5 ops / 2,389 bytes = ~597 tokens         (3.3% of the output)
+# The cap would be 2x the measured need for a full edit. IT IS NOT APPLIED — see the hold in edit().
+# max_tokens counts thinking, and thinking arrives whether or not the request disables it, so the
+# number below is a recorded derivation waiting on a controlled arm, not a live guard. A turn that
+# reaches ANY max_tokens (the CLI sends 64,000 of its own) stops with stop_reason "max_tokens" and
+# the run ends on a NAMED terminal: a truncated tool call can still parse, so a silent truncation
+# would reach ChatCut as a real edit.
+OUTPUT_CAP_TOKENS = 2 * 1108
+
+
+# WHAT THE AGENT MAY CALL, ON EVERY CALL (Zac, 2026-09-19). ONE LIST FOR EVERY TURN: the tool block is
+# in the cache key, and a per-turn list is a cold write per run — measured in this repo at 43,222
+# cache_write tokens, 74% of a run (CLAUDE.md). So the reads are not "withheld until turn 2", they are
+# gone: the harness reads the timeline back and serves it, and the contract already says the agent never
+# fetches, inspects or previews. Measured 2026-09-18/19 on the wire: the tools block carried 13 entries
+# including Bash, Read, Write, Glob and Grep — because cli_command NAMED them in --tools. 4 of 11 runs
+# died at turn 1 on an orientation call (--max-turns 1 ends the turn at the first tool call), one of them
+# a Bash call to load a skill this lane disallows. "No shell" had been prompt-only.
+AGENT_TOOLS = ["edit_item", "edit_captions"]
 
 NEEDED_TOOLS = [
     # THE SINGLE AGENT'S SURFACE, 2026-09-16. It now DECIDES as well as places,
@@ -3902,6 +3924,12 @@ def run_three_turns(invoke, rewatch, first_message, cap=TURN_CAP,
                 tm["terminal"] = {"kind": "CACHE MISS", "at": n,
                                   "why": "call %d did not read the prefix call 1 established (%s) — the bytes moved" % (n, why)}
                 return None
+        if r.get("stop_reason") == "max_tokens":
+            tm["turns"].append(r)
+            tm["terminal"] = {"kind": "OUTPUT CAP", "at": n,
+                              "why": "turn %d hit the %d-token output cap — the answer is TRUNCATED and a half-written "
+                                     "tool call can still parse, so it is never applied" % (n, OUTPUT_CAP_TOKENS)}
+            return None
         if r.get("api_status") == 409 and "preflight_refused" in str(r.get("api_head") or ""):
             tm["turns"].append(r)
             tm["terminal"] = {"kind": "PREFLIGHT REFUSED", "at": n,
@@ -4239,7 +4267,7 @@ def write_cli_context(tok):
     cfg = {"mcpServers": {"chatcut": {
         "command": "python3", "args": ["/root/mcp_shim.py"],
         "env": {"MCP_SHIM_UPSTREAM": MCP_URL, "MCP_SHIM_TOKEN": tok,
-                "MCP_SHIM_ALLOW": ",".join(NEEDED_TOOLS),
+                "MCP_SHIM_ALLOW": ",".join(AGENT_TOOLS),
                 "MCP_SHIM_LOG": "/work/mcp_shim.log"}}}}
     with open("/work/mcp.json", "w") as fh:
         json.dump(cfg, fh)
@@ -4454,7 +4482,7 @@ def cli_command(sid, model, use_hands=False, agents=None, partial=True, effort=N
     thinking {type: adaptive} — MAX_THINKING_TOKENS=3000 does NOT put a
     budget in the request. The effort flag is the dial that exists.
     """
-    _sel = ",".join("mcp__chatcut__" + t for t in NEEDED_TOOLS)
+    _sel = ",".join("mcp__chatcut__" + t for t in AGENT_TOOLS)
     return (["claude", "-p",
              *(["--resume", sid] if sid else []),
              "--input-format", "stream-json",
@@ -4463,10 +4491,8 @@ def cli_command(sid, model, use_hands=False, agents=None, partial=True, effort=N
              "--output-format", "stream-json", "--verbose",
              "--mcp-config", "/work/mcp.json", "--strict-mcp-config",
              "--settings", "/root/chatcut_hooks.json",
-             "--allowedTools",
-             ",".join(["mcp__chatcut__" + t for t in NEEDED_TOOLS]
-                      + ["Bash", "Read", "Write", "Glob", "Grep"]),
-             "--tools", "Bash,Read,Write,Glob,Grep," + _sel,
+             "--allowedTools", _sel,
+             "--tools", _sel,
              "--disallowedTools", "Skill,Task,Agent",
              "--model", model]
             + (["--effort", str(effort)] if effort else [])
@@ -4485,7 +4511,8 @@ RUN_FIRST_TEXT_PING = "KEEP-WARM PING FROM THE HARNESS: reply pong"   # distinct
                        modal.Secret.from_name("anthropic-api-key")])
 def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
          run_id: str = "latest", use_hands: bool = False, plan: str = "",
-         think_tokens: int = -1, effort: str = "", prefix_ttl: str = "1h", no_watch: bool = False, density_fps: float = 2.0, prestage_title: str = "",
+         think_tokens: int = -1, effort: str = "", prefix_ttl: str = "1h", no_watch: bool = False, density_fps: float = 2.0,
+         run_bound: int = 0, prestage_title: str = "",
          prestage_controls: str = "", prestage_titles: str = "",
          transcript: str = "",
          # THE SUBTRACTION EXPERIMENT (2026-09-17). Same paragraph, same
@@ -4935,10 +4962,16 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         "deletes fields directly (never the json field). Every add is "
         "exactly this shape: {\"type\": \"motion-graphic\", \"assetId\": "
         "\"<inventory id>\", \"fromFrame\": N, \"durationInFrames\": N, "
-        "\"propertyOverrides\": {...}, \"why\": \"one line: what it is for\"}. "
+        "\"propertyOverrides\": {...}, \"why\": \"under 12 words\"}. "
         "type is motion-graphic for every inventory component. Captions are "
         "NOT an item: one edit_captions call with action \"enable\" turns "
-        "them on. Put the why INSIDE each op — the harness reads it there; "
+        "them on. Put the why INSIDE each op — the harness reads it there. "
+        "THE DIET, and it is the reason a run times out: your whole answer is the ops. "
+        "Every `why` is TWELVE WORDS OR FEWER. Write no prose, no plan, no summary, no "
+        "restatement of the brief, and nothing before or after the call — an op payload "
+        "carries only the fields the harness executes. Measured on this harness: a turn "
+        "that placed five graphics needed 597 tokens of ops and spent 18,164, and the run "
+        "died of it. There is a hard output cap and a turn that reaches it is discarded. "
         "write no files and call no preview: after your call the harness "
         "watches the render and sends you the frames. Then you fix in one "
         "call, and once more if needed, and say \"export\"."
@@ -5072,6 +5105,16 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         # keeps it; "5m" is development — no ping, no injection, call 1 writes
         # and calls 2+ read (the within-run assertion alone).
         _px.RUN_FIRST_TEXT = RUN_FIRST_TEXT_JOB if (prefix_ttl == "1h" and not no_watch) else ""
+        # THE CAP IS HELD (Zac, 2026-09-19) AND THIS LINE IS THE HOLD, not an oversight.
+        # max_tokens counts THINKING, and thinking is not ours to control: the proxy captured
+        # `thinking {"type":"disabled"}` on every off-arm call, and responses came back WITH a
+        # redacted thinking block anyway on the runs that ran long (H1 off 155 deltas / 18,164 out;
+        # pb-003 109 / 12,998) and WITHOUT one on the runs that stayed short (pb-002 exported on
+        # 1,108). A cap on an uncontrolled term truncates the answer instead of bounding it, and a
+        # truncated tool call still parses. It ships only when a response is PROVEN to carry zero
+        # thinking blocks. The OUTPUT CAP terminal below stays: the CLI's own max_tokens (64,000)
+        # can still truncate, and that must never be read as an edit.
+        _px.MAX_OUTPUT_TOKENS = 0
         # THE PREFLIGHT: the ping's system text, if a ping is on record and this
         # run expects to read its entry (1h, with the watch)
         _px.EXPECT_SYSTEM = None
@@ -5195,7 +5238,7 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                     pass
         mark("turn%d.start" % n)
         # THE ONLY KILL IS THE RUN BOUND: this turn may use whatever is left of it.
-        _left = max(10.0, RUN_TIMEOUT_S - (time.time() - _run_t0))
+        _left = max(10.0, _bound_s - (time.time() - _run_t0))
         _cmd_n = _cmd if _run_sid["sid"] == _watch_sid else cli_command(_run_sid["sid"], model, use_hands, agents if use_hands else None, _pm, effort=(effort or None))
         rc, err, wall, killed = turn_clock.run_timed(
             _cmd_n + ["--max-turns", "1"], "/work", _stream, _tfile, _left,
@@ -5215,6 +5258,7 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                "text": "\n".join(_texts)[:2000], "killed": bool(killed), "wall": round(wall, 2),
                "bound_s": round(_left, 1), "over_turn_law": wall > TURN_LAW_S,
                "api_status": _api.get("status"), "api_head": str(_api.get("head") or "")[:200], "api_calls_seen": len(_legs),
+               "stop_reason": _api.get("stop_reason"),
                "usage": {"read": u.get("cache_read_input_tokens"), "write": u.get("cache_creation_input_tokens"),
                          "in": u.get("input_tokens"), "out": u.get("output_tokens"),
                          # WHICH TTL WAS WRITTEN. The rewatch probe's review wrote 231,986 as
@@ -5332,8 +5376,15 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
             pass
         return out
 
+    # THE BOUND THIS RUN USES. 300s is the law; a diagnostic window may be widened DELIBERATELY and the
+    # record says so, because a run that finished only because its bound was raised must never read like
+    # a run that finished. The 120s per-turn law-miss line still prints either way.
+    _bound_s = int(run_bound) if run_bound and int(run_bound) > 0 else RUN_TIMEOUT_S
+    if _bound_s != RUN_TIMEOUT_S:
+        print("  RUN BOUND       : %ds — RAISED from the %ds law for this diagnostic run; the 120s turn law still reports"
+              % (_bound_s, RUN_TIMEOUT_S), flush=True)
     _run_t0 = t0                    # the job's own start: every bound counts from it
-    _tm = run_three_turns(_invoke, _rewatch, _first_message, t0=t0, verify=_verify)
+    _tm = run_three_turns(_invoke, _rewatch, _first_message, t0=t0, verify=_verify, run_timeout=_bound_s)
     mark("agent")
     _tm["whys"] = _shim_whys()
     # THE THINKING ARM, AS SENT (not as named): measured through the proxy
@@ -5905,6 +5956,33 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                 _fm.append({"image": "unreadable: %s" % str(_ie)[:60]})
     out["first_message"] = _fm
     out["three_turns"] = _tm
+    # THE RESPONSE'S OWN BLOCKS, per call, from this run's stream: thinking is billed inside `out` and
+    # nothing else in the record separates them.
+    _think_by_call = {}
+    try:
+        for _rs in ((out.get("shape") or {}).get("reasoning") or []):
+            if isinstance(_rs, dict):
+                _think_by_call[str(_rs.get("turn"))] = {"deltas": _rs.get("thinking_deltas"),
+                                                        "est_tokens": _rs.get("est_thinking_tokens"),
+                                                        "redacted": _rs.get("redacted"), "chars": _rs.get("chars")}
+    except Exception:                                             # noqa: BLE001
+        _think_by_call = {"state": "ABSENT"}
+    _tools_by_call, _tools_same = [], None
+    try:
+        for _c in (out.get("prefix_calls") or []):
+            _t = ((_c.get("fp") or {}).get("tools") or {})
+            _tools_by_call.append({"n": _c.get("n"), "count": _t.get("n"), "sha": _t.get("sha"), "bytes": _t.get("bytes")})
+        _shas = {x["sha"] for x in _tools_by_call if x.get("sha")}
+        _tools_same = (len(_shas) == 1) if _tools_by_call else None
+        print("  TOOL BLOCK      : %s — %s" % (
+            ("IDENTICAL on all %d call(s)" % len(_tools_by_call)) if _tools_same else ("DIFFERS across calls (%d shas) — every later call is a cold write" % len(_shas)),
+            ", ".join("call %s: %s tools %s" % (x["n"], x["count"], str(x["sha"])[:12]) for x in _tools_by_call)), flush=True)
+    except Exception as _te:                                      # noqa: BLE001
+        _tools_same = None
+        print("  TOOL BLOCK      : ABSENT (%s)" % str(_te)[:80], flush=True)
+    if _think_by_call:
+        print("  THINKING BLOCKS : %s" % json.dumps(_think_by_call), flush=True)
+
     # SECTION E: THE PER-RUN LINE, printed in the commit that adds it.
     _kinds = {}
     for _t in _tm["turns"]:
@@ -5931,6 +6009,14 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                        "usd_at_rate": round(_usd, 4), "usd_cli": round(_cli_usd, 4),
                        "rates": "read $0.30/M, write 1h $6/M or 5m $3.75/M by the measured split, in $3/M, out $15/M",
                        "cli_version": _cli_ver, "kernel": _kernel,
+                       # WHAT THE RESPONSE CARRIED, per call: thinking blocks are the term the request
+                       # asks to disable and does not control (measured 2026-09-19), so they are read
+                       # from the stream and reported beside the output they are billed inside.
+                       "thinking_by_call": _think_by_call,
+                       # THE TOOL BLOCK IS IN THE CACHE KEY: one list on every call, or every later call
+                       # is a cold write. Proven per run from the proxy's own hash, not from the flags.
+                       "tools_by_call": _tools_by_call, "tools_identical": _tools_same,
+                       "run_bound_s": _bound_s, "run_bound_raised": _bound_s != RUN_TIMEOUT_S,
                        "marks_s": marks, "wall_s": out["wall_s"], "verdict": _tm.get("verdict"),
                        "terminal": _tm.get("terminal"), "cold_write": _tm.get("cold_write"),
                        "density_fps": density_fps, "no_watch": bool(no_watch)}
@@ -7337,7 +7423,7 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
          read_ceiling: int = 0,
          model: str = "claude-sonnet-5", use_hands: bool = False,
          think_tokens: int = -1, effort: str = "", prefix_ttl: str = "1h", no_watch: bool = False, density_fps: float = 2.0,
-         prestage_title: str = "", prestage_controls: str = "",
+         run_bound: int = 0, prestage_title: str = "", prestage_controls: str = "",
          prestage_titles: str = "", transcript_file: str = "", brief_file: str = ""):
     if not clip_url:
         raise SystemExit("pass --clip-url")
@@ -7416,7 +7502,7 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
     if wait:
         print(json.dumps(edit.remote(clip_url, brief, model=model, run_id=rid,
                                      use_hands=use_hands, plan=plan_text,
-                                     think_tokens=think_tokens, effort=effort, prefix_ttl=prefix_ttl, no_watch=no_watch, density_fps=density_fps,
+                                     think_tokens=think_tokens, effort=effort, prefix_ttl=prefix_ttl, no_watch=no_watch, density_fps=density_fps, run_bound=run_bound,
                                      prestage_title=prestage_title,
                       prestage_controls=prestage_controls,
                       prestage_titles=prestage_titles,
@@ -7446,7 +7532,7 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
     require_detach("a spawned ChatCut edit")
     call = edit.spawn(clip_url, brief, model=model, run_id=rid,
                       use_hands=use_hands, plan=plan_text,
-                      think_tokens=think_tokens, effort=effort, prefix_ttl=prefix_ttl, no_watch=no_watch, density_fps=density_fps,
+                      think_tokens=think_tokens, effort=effort, prefix_ttl=prefix_ttl, no_watch=no_watch, density_fps=density_fps, run_bound=run_bound,
                       prestage_title=prestage_title,
                       prestage_controls=prestage_controls,
                       prestage_titles=prestage_titles,

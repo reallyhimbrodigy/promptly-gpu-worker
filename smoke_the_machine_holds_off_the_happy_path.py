@@ -21,6 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 os.environ.setdefault("MODAL_IS_INSIDE_CONTAINER", "0")
 import chatcut_job_app as J                                      # noqa: E402
+PX_SRC = io.open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "api_proxy.py"), encoding="utf-8").read()
 import chatcut_gate as G                                         # noqa: E402
 
 FAILS = []
@@ -340,10 +341,10 @@ def main():
                      and getattr(n.value, "value", None) == "false" for n in ast.walk(edit))
     check("ToolSearch is off for the run", _env_false,
           "the schema-fetch turn changes the tool block and rewrites every cached byte after it")
-    check("--tools names the builtins and the eight ChatCut tools",
-          "--tools" in _cc and _cc[_cc.index("--tools") + 1].startswith("Bash,Read,Write,Glob,Grep,mcp__chatcut__")
-          and _cc[_cc.index("--tools") + 1].count("mcp__chatcut__") == 8,
-          "--tools restricts builtins; the MCP block is the shim's eight")
+    check("--tools restricts the block to the agent's surface, and that surface is the edit ops",
+          "--tools" in _cc and _cc[_cc.index("--tools") + 1] == ",".join("mcp__chatcut__" + t for t in J.AGENT_TOOLS)
+          and _cc[_cc.index("--tools") + 1].count("mcp__chatcut__") == len(J.AGENT_TOOLS),
+          "--tools is now the edit ops alone: %r" % (_cc[_cc.index("--tools") + 1] if "--tools" in _cc else None))
     check("the paragraph no longer asks for a schema fetch",
           "Fetch the tool schemas first" not in d and "tools are loaded" in d)
     check("no Write of any record is asked for",
@@ -778,7 +779,11 @@ def main():
     _left_asg = [ast.unparse(n.value) for n in ast.walk(_inv) if isinstance(n, ast.Assign)
                  and any(isinstance(t, ast.Name) and t.id == "_left" for t in n.targets)]
     check("a turn's bound is what is left of the RUN budget, never a per-turn constant",
-          _rt_bound == "_left" and len(_left_asg) == 1 and "RUN_TIMEOUT_S" in _left_asg[0] and "_run_t0" in _left_asg[0]
+          # _bound_s IS the run budget: it is RUN_TIMEOUT_S unless a diagnostic run raised it deliberately,
+          # and the record says which. The property is that a turn takes what is LEFT of the RUN's budget,
+          # never a constant of its own.
+          _rt_bound == "_left" and len(_left_asg) == 1 and "_bound_s" in _left_asg[0] and "_run_t0" in _left_asg[0]
+          and "_bound_s = int(run_bound) if run_bound and int(run_bound) > 0 else RUN_TIMEOUT_S" in ast.unparse(_edit_fn)
           and not hasattr(J, "TURN_TIMEOUT_S") and J.TURN_LAW_S == 120,
           "bound=%s left=%s" % (_rt_bound, _left_asg))
     _fp_row = PX.fingerprint({"model": "m", "system": [], "tools": [], "messages": [], "thinking": {"type": "adaptive"}, "output_config": {"effort": "low"}, "max_tokens": 7})
@@ -801,9 +806,9 @@ def main():
     _para = next((ast.unparse(n) for n in ast.walk(_edit_fn) if isinstance(n, ast.Constant) and isinstance(n.value, str)
                   and "Place everything in ONE edit_item call" in n.value), "")
     _para_all = "".join(n.value for n in ast.walk(_edit_fn) if isinstance(n, ast.Constant) and isinstance(n.value, str))
-    check("the deciding paragraph shows the exact add shape, names type motion-graphic, forbids the json field, routes captions to edit_captions, and never mentions /work/DONE",
+    check("the deciding paragraph shows the exact add shape with the dieted why, names type motion-graphic, forbids the json field, routes captions to edit_captions, and never mentions /work/DONE",
           '"type": "motion-graphic"' in _para_all and "never the json field" in _para_all and 'edit_captions call with action "enable"' in _para_all
-          and '"why": "one line' in _para_all and "/work/DONE" not in _para_all and "preview_timeline yourself" not in _para_all,
+          and '"why": "under 12 words"' in _para_all and "/work/DONE" not in _para_all and "preview_timeline yourself" not in _para_all,
           "shape=%s json=%s captions=%s DONE=%s" % ('"type": "motion-graphic"' in _para_all, "never the json field" in _para_all,
                                                      'edit_captions call with action "enable"' in _para_all, "/work/DONE" in _para_all))
     # sheets are JPEG, small, and the image block reads the media type from the extension
@@ -1356,7 +1361,7 @@ def main():
     _edit_fn7 = next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "edit")
     _ed7 = ast.unparse(_edit_fn7)
     check("edit() hands the constraint check to the turn machine",
-          re.search(r"run_three_turns\(_invoke, _rewatch, _first_message, t0=t0, verify=_verify\)", _ed7) is not None)
+          re.search(r"run_three_turns\(_invoke, _rewatch, _first_message, t0=t0, verify=_verify", _ed7) is not None)
     check("the rewatch hands constraint violations to the next turn as faults",
           "_constraints_now(_items, _base," in _ed7 and "'BRIEF CONSTRAINT VIOLATED — %s' % f for f in _cf_rw" in _ed7 and "'constraints': _crows_rw" in _ed7)
     # WHERE IN THE RECORD, structurally: the key rides in the dict assigned to out["turn_machine"] (a substring
@@ -1410,6 +1415,66 @@ def main():
     check("a reused stage whose timeline holds items, or cannot be read, is a CONTAMINATED ARM terminal before any model call",
           "if _stage.get('priorItems') is None or len(_stage.get('priorItems') or []) > 0:" in _ed9 and _i_refuse > 0 and _i_refuse < _i_first
           and "'export': {'state': 'WITHHELD'" in _ed9[_i_refuse:_i_refuse + 900] and "_stage['priorItems'] = None" in _ed9)
+
+    # ---- ITEM 1+2 (Zac, 2026-09-19): THE OUTPUT DIET, THE CAP, AND ONE TOOL LIST ----
+    # THE AGENT'S SURFACE, DRIVEN: cli_command is the producer, so ask IT, not the source text.
+    _cmd_t1 = J.cli_command("sid-1", "claude-sonnet-5")
+    _cmd_t2 = J.cli_command("sid-1", "claude-sonnet-5")
+    check("the tool list is identical on every turn (the tool block is in the cache key; a per-turn list is a cold write per run)",
+          _cmd_t1 == _cmd_t2 and _cmd_t1.count("--tools") == 1)
+    _tools_arg = _cmd_t1[_cmd_t1.index("--tools") + 1]
+    _allow_arg = _cmd_t1[_cmd_t1.index("--allowedTools") + 1]
+    _named = set(_tools_arg.split(",")) | set(_allow_arg.split(","))
+    _BUILTINS = {"Bash", "Read", "Write", "Glob", "Grep", "Edit", "WebFetch", "WebSearch"}
+    _READS = {"mcp__chatcut__" + t for t in ("read_project", "inspect_item", "inspect_asset", "preview_timeline", "read_captions", "transcript", "edit_asset")}
+    check("THE GATE: no builtin is named on any turn — Bash above all (a Bash call to load a disallowed skill killed a run, 2026-09-18)",
+          not (_named & _BUILTINS), "named builtins: %s" % sorted(_named & _BUILTINS))
+    check("THE GATE: no read tool is named on any turn — the harness reads the timeline back and serves it",
+          not (_named & _READS), "named reads: %s" % sorted(_named & _READS))
+    check("the agent's surface is exactly the edit ops", _named == {"mcp__chatcut__edit_item", "mcp__chatcut__edit_captions"}, str(sorted(_named)))
+    check("the shim is told the same list, so tools/list cannot re-advertise what the flags removed",
+          "'MCP_SHIM_ALLOW': ','.join(AGENT_TOOLS)" in ast.unparse(next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "write_cli_context")))
+    # THE CAP: derived, applied on the wire, and terminal rather than silent
+    check("the cap's derivation is recorded from a measured full edit, not guessed (held, not applied)",
+          J.OUTPUT_CAP_TOKENS == 2 * 1108, "OUTPUT_CAP_TOKENS=%s" % J.OUTPUT_CAP_TOKENS)
+    _ed10 = ast.unparse(next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "edit"))
+    # THE HOLD IS THE PROPERTY (Zac, 2026-09-19): max_tokens counts thinking, thinking arrives whether
+    # or not the request disables it, so no cap goes on the body until a response is proven to carry none.
+    check("NO cap is applied to the body while thinking is uncontrolled — the proxy can, and edit() passes 0",
+          "_px.MAX_OUTPUT_TOKENS = 0" in _ed10 and "_px.MAX_OUTPUT_TOKENS = OUTPUT_CAP_TOKENS" not in _ed10
+          and "body['max_tokens'] = MAX_OUTPUT_TOKENS" in ast.unparse(ast.parse(PX_SRC)))
+    check("the proxy reads stop_reason from the END of the stream (message_delta), not the head",
+          "tail = (tail + chunk)[-2000:]" in PX_SRC and '"stop_reason":"([a-z_]+)"' in PX_SRC)
+    _U1c = {"read": 0, "write": 300000, "in": 2, "out": 900}
+    def _capped(n, message):
+        return {"rc": 1, "subtype": None, "tool_calls": [{"name": "mcp__chatcut__edit_item", "input": {"adds": [{"id": "x"}]}}],
+                "text": "", "usage": _U1c, "wall": 1.0, "killed": False, "stop_reason": "max_tokens"}
+    _tmcap = J.run_three_turns(_capped, lambda n, final: {"message": {}, "sheets": 0}, {"type": "user", "message": {"role": "user", "content": []}})
+    check("a turn that hits the cap is a NAMED terminal and its truncated tool call is never applied",
+          (_tmcap["terminal"] or {}).get("kind") == "OUTPUT CAP" and (_tmcap["terminal"] or {}).get("at") == 1
+          and str(J.OUTPUT_CAP_TOKENS) in (_tmcap["terminal"] or {}).get("why", "") and _tmcap["verdict"] is None, str(_tmcap.get("terminal")))
+    # THE DIET, in the paragraph the agent actually receives
+    # THE PARAGRAPH edit() COMPOSES (pass1_message receives it as `plan`; driving the builder with
+    # plan=None reads a message that never carried it — the leg would test its own argument).
+    _t1d = "".join(n.value for n in ast.walk(next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "edit"))
+                   if isinstance(n, ast.Constant) and isinstance(n.value, str))
+    check("the paragraph states the diet: a why under 12 words, no prose, payloads carrying only what the harness executes",
+          "TWELVE WORDS OR FEWER" in _t1d and "Write no prose" in _t1d and "only the fields the harness executes" in _t1d
+          and "one line: what it is for" not in _t1d, [k for k in ("TWELVE WORDS OR FEWER", "Write no prose", "only the fields the harness executes") if k not in _t1d])
+
+    # ---- THE DIAGNOSTIC WINDOW, AND WHAT THE RESPONSE CARRIED (Zac, 2026-09-19) ----
+    _ed11 = ast.unparse(next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "edit"))
+    check("a widened run bound is a PARAMETER, defaults to the law, and the record says when it was raised",
+          "_bound_s = int(run_bound) if run_bound and int(run_bound) > 0 else RUN_TIMEOUT_S" in _ed11
+          and "'run_bound_s': _bound_s, 'run_bound_raised': _bound_s != RUN_TIMEOUT_S" in _ed11
+          and "run_timeout=_bound_s" in _ed11 and "_left = max(10.0, _bound_s - (time.time() - _run_t0))" in _ed11)
+    check("the 120s turn law still reports when the run bound is raised",
+          "over the %ds turn law" in _ed11 and "TURN_LAW_S" in _ed11)
+    check("the response's thinking blocks are read per call and reported beside the output they are billed inside",
+          "'thinking_by_call': _think_by_call" in _ed11 and "'deltas': _rs.get('thinking_deltas')" in _ed11 and "THINKING BLOCKS" in _ed11)
+    check("the tool block is proven identical across calls from the proxy's own hash, not from the flags",
+          "'tools_identical': _tools_same" in _ed11 and "_shas = {x['sha'] for x in _tools_by_call if x.get('sha')}" in _ed11
+          and "every later call is a cold write" in _ed11)
 
     if FAILS:
         print("\n%d FAILURE(S)" % len(FAILS))
