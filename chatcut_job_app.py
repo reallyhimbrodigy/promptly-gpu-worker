@@ -5905,6 +5905,10 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                 _fm.append({"image": "unreadable: %s" % str(_ie)[:60]})
     out["first_message"] = _fm
     out["three_turns"] = _tm
+    # THE BRIEF'S CONSTRAINTS, IN THE RECORD THAT IS ACTUALLY WRITTEN (the first placement of this key sat in a
+    # literal the run never reaches; H1 of the 2026-09-18 batch came back without it)
+    out["constraints"] = {"extracted": _constraints, "reads": _constraint_reads, "faults_by_turn": _tm.get("constraint_faults"),
+                          "text_carriers": sorted(TEXT_CARRIERS) if TEXT_CARRIERS is not None else None}
     # SECTION E: THE PER-RUN LINE, printed in the commit that adds it.
     _kinds = {}
     for _t in _tm["turns"]:

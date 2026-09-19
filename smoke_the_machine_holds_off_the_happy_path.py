@@ -1358,8 +1358,9 @@ def main():
           re.search(r"run_three_turns\(_invoke, _rewatch, _first_message, t0=t0, verify=_verify\)", _ed7) is not None)
     check("the rewatch hands constraint violations to the next turn as faults",
           "_constraints_now(_items, _base," in _ed7 and "'BRIEF CONSTRAINT VIOLATED — %s' % f for f in _cf_rw" in _ed7 and "'constraints': _crows_rw" in _ed7)
-    check("the record keeps what was extracted, every read, and the faults by turn",
-          "'constraints': {'extracted': _constraints, 'reads': _constraint_reads, 'faults_by_turn': _tm.get('constraint_faults')" in _ed7 and "constraints=_constraints" in _ed7)
+    # AT THE SITE THE RUN WRITES: beside out['three_turns'] = _tm (a key in a literal the run never reaches is a dead table)
+    check("the record keeps what was extracted, every read, and the faults by turn — at the site the run writes",
+          "out['three_turns'] = _tm\n    out['constraints'] = {'extracted': _constraints, 'reads': _constraint_reads, 'faults_by_turn': _tm.get('constraint_faults')" in _ed7 and "constraints=_constraints" in _ed7)
     # THE MESSAGE THE AGENT RECEIVES, not the function's text (a block under `if False:` still reads as present in the source)
     _m1c = J.pass1_message(None, [], os.path.join(HERE, "sheet", "INVENTORY.png"), source_watch=None, deciding="x", face=["FACE — f"], platter="PROPERTY KEYS — p", constraints=_bc("no captions"))
     _t1c = [b.get("text") or "" for b in _m1c["message"]["content"] if b.get("type") == "text"]
