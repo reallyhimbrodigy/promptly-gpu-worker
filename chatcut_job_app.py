@@ -18,6 +18,7 @@ agent edit like the references instead of generically, and a harness that
 re-encodes them as rules loses exactly the thing that took the week.
 """
 import base64
+import hashlib
 import json
 import math
 import os
@@ -1369,6 +1370,477 @@ def prestage(access_token, title_text, controls=None, source_path=None,
             "baseItemId": _base_id, "sourceFrames": _sframes,
             "components": registered, "components_refused": reg_failed,
             "editorUrl": _find(proj, "editorUrl"), "phases": _pt}
+
+
+# ── PRESTAGE AT ATTACH ─────────────────────────────────────────────────────
+#
+# WHAT THIS IS FOR. Prestage is 24.2s of a 120s budget and it is 97-98% IMPORT
+# — ChatCut ingesting the source — which is a production floor, not waste: the
+# file genuinely has to get there. The source watch is another ~25s behind it.
+# Neither depends on the BRIEF. Both depend only on the SOURCE, and the source
+# exists at ATTACH time, which is minutes before the user presses send.
+#
+# So the work does not get faster; it gets moved into a gap that is already
+# being spent waiting for a human. Nothing here is an optimisation of prestage.
+#
+# THE UNIT IS ONE ATTACHED FILE, NOT ONE SOURCE. This is the part that decides
+# the whole shape. A prestaged project is STATEFUL and SINGLE-USE: the moment a
+# job edits it, it holds that job's timeline. Two jobs on the same bytes must
+# NOT share one — the dispatch path already refuses that case by name
+# (CONTAMINATED ARM), and a cache that hands the same project to a second job
+# would manufacture it deliberately. So a hit CLAIMS the record and REMOVES it;
+# a second job on identical bytes misses and prestages cold. One attach, one
+# project, one edit.
+#
+# WHAT CANNOT MOVE, and why the entry is not simply `prestage`:
+#   * TITLES depend on the plan, which depends on the brief, which does not
+#     exist at attach. They stay on the dispatch path and register into the
+#     claimed project.
+#   * The CONTACT SHEET is brief-independent but costs ~2s off a file dispatch
+#     already downloads. Moving it would trade a network hop for a disk read.
+#   * TRANSCRIPTION is not moved by this code and is moved by it anyway: the
+#     import is what starts ChatCut transcribing, so an early import means the
+#     words are ready when `source_beats` asks. That is a CONSEQUENCE to be
+#     MEASURED on the first warm run, not a saving to claim here.
+ATTACHED = modal.Dict.from_name("chatcut-attached", create_if_missing=True)
+# EVERY CLAIM, KEPT. The claim is a pop, which is one server-side round trip
+# and is therefore atomic as far as a client can tell — but "as far as a client
+# can tell" is an ASSUMPTION about somebody else's implementation, and this
+# repo's rule is that an assumption carries its source and a measurement
+# replaces it. Two jobs claiming one key would be invisible in a Dict that
+# forgets. Here it is a second row with the same key, and the ledger says so.
+ATTACH_CLAIMS = modal.Dict.from_name("chatcut-attach-claims", create_if_missing=True)
+# THE WATCH SHEETS CROSS A CONTAINER BOUNDARY, so they are artifacts on shared
+# storage and not paths in a dict. A Volume is mounted at the same path in both
+# functions, which is what makes this legal under the boundary contract — and
+# the write is only visible to the reader after `commit()`, so a missing commit
+# looks exactly like an attach that never watched. `attach_verify` reads the
+# files rather than the record's word for them.
+ATTACH_VOL = modal.Volume.from_name("chatcut-attach", create_if_missing=True)
+ATTACH_ROOT = "/attach"
+# A PRESTAGED PROJECT THE USER NEVER SENDS IS AN ORPHAN WITH A STORAGE BILL.
+# Bounded here so the sweep has a rule to enforce; the number is a policy
+# choice, not a measurement, and is labelled as one.
+ATTACH_TTL_S = 24 * 3600
+# THE KEY'S OWN VERSION. Bumping it invalidates every stored record in one
+# edit — the escape hatch for the day a record's SHAPE changes and the fields
+# a verify reads are no longer the fields an attach wrote.
+PRESTAGE_KEY_VERSION = 1
+
+
+def file_sha256(path, chunk=1 << 20):
+    """Content hash of a local file. -> {state, sha, bytes, why}
+
+    THREE STATES, BECAUSE A KEY IS THE ONE PLACE AN EMPTY STRING IS FATAL.
+    A hash that silently returns "" for an unreadable file gives every
+    unreadable file THE SAME KEY, so the first orphaned project would be handed
+    to every later job whose download failed — a cache hit manufactured out of
+    a read error. ABSENT and FAILED are refused by `prestage_key`.
+    """
+    out = {"state": "ABSENT", "sha": None, "bytes": None, "why": "not attempted"}
+    if not path or not os.path.exists(path):
+        out["why"] = "no file at %r" % (path,)
+        return out
+    try:
+        h, n = hashlib.sha256(), 0
+        with open(path, "rb") as fh:
+            while True:
+                b = fh.read(chunk)
+                if not b:
+                    break
+                h.update(b)
+                n += len(b)
+    except OSError as e:
+        out["state"], out["why"] = "FAILED", "%s: %s" % (type(e).__name__, str(e)[:160])
+        return out
+    if n == 0:
+        # A ZERO-BYTE FILE HASHES PERFECTLY WELL, to the empty digest, and that
+        # digest is the same for every failed download on earth. It is the
+        # clean zero this repo distrusts, in the position where it does the
+        # most damage.
+        out["state"], out["why"] = "FAILED", "the file is 0 bytes — a failed download, not a source"
+        return out
+    out.update({"state": "MEASURED", "sha": h.hexdigest(), "bytes": n,
+                "why": "sha256 over %d byte(s)" % n})
+    return out
+
+
+def registry_fingerprint(path="/craft/chatcut_registry_baked.json"):
+    """What the prestaged project's component library WILL BE. -> {state, digest, components, why}
+
+    IN THE KEY BECAUSE A CACHED PROJECT CARRIES ITS REGISTRATIONS. A record
+    prestaged before a component changed holds the OLD code under the SAME
+    name, and the agent places an id that renders last week's component. That
+    failure is invisible: the placement succeeds, the frame is wrong, and
+    nothing in the run mentions the registry at all.
+    """
+    out = {"state": "ABSENT", "digest": None, "components": None, "why": "not attempted"}
+    if not path or not os.path.exists(path):
+        out["why"] = "no registry at %r" % (path,)
+        return out
+    try:
+        raw = json.load(open(path, encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        out["state"], out["why"] = "FAILED", "%s: %s" % (type(e).__name__, str(e)[:160])
+        return out
+    reg = raw.get("components") if isinstance(raw, dict) and "components" in raw else raw
+    if not isinstance(reg, dict) or not reg:
+        out["state"], out["why"] = "FAILED", "no component map in %s (%s)" % (path, type(reg).__name__)
+        return out
+    # SORTED, SO THE DIGEST IS ABOUT THE CONTENT AND NOT ABOUT DICT ORDER.
+    blob = json.dumps(reg, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    out.update({"state": "MEASURED", "digest": hashlib.sha256(blob).hexdigest()[:16],
+                "components": len(reg),
+                "why": "%d component(s) from %s" % (len(reg), path)})
+    return out
+
+
+def prestage_key(source_sha=None, registry_digest=None, account=None,
+                 w=None, h=None, fps=None, version=PRESTAGE_KEY_VERSION):
+    """The lookup key for a prestaged project. -> {state, key, parts, why}
+
+    THE KEY IS NOT THE SOURCE HASH. It is everything a claimed project would be
+    WRONG about if it differed, and each part earns its place by naming a way a
+    hit could be worse than a miss:
+
+      source_sha       different bytes are a different clip. The URL cannot
+                       serve: a signed URL differs on every attach for the
+                       same object, so keying on it would miss every time and
+                       look like a cache that does not work.
+      registry_digest  a project carries its registrations; see above.
+      account          a project belongs to a ChatCut user. Another account's
+                       project id is not unreachable-looking, it is a 404 at
+                       the first edit_item, twenty minutes in.
+      w, h, fps        the canvas is fixed at create_project and cannot be
+                       changed afterwards. With the canvas following the source
+                       these are derived FROM the hashed bytes and so are
+                       nearly redundant — nearly is not enough, because the
+                       export ceiling that clamps them is ChatCut's and moves
+                       without us.
+
+    A MISSING PART IS REFUSED, NEVER HASHED. `str(None)` is a perfectly good
+    hash input and would give every run with an unread registry one shared key.
+    That is the absent-as-a-value family in the position where it hands one
+    job's project to another.
+    """
+    parts = {"version": version, "source_sha": source_sha,
+             "registry_digest": registry_digest, "account": account,
+             "w": w, "h": h, "fps": fps}
+    missing = sorted(k for k, v in parts.items() if v is None or v == "")
+    if missing:
+        return {"state": "REFUSED", "key": None, "parts": parts,
+                "why": ("the key is missing %s — a key built from an absent part "
+                        "collides with every other run missing the same part"
+                        % ", ".join(missing))}
+    blob = json.dumps(parts, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return {"state": "MEASURED", "key": hashlib.sha256(blob).hexdigest()[:32],
+            "parts": parts, "why": "over %s" % ", ".join(sorted(parts))}
+
+
+def attach_claim(key, run_id, now_s=None, store=None, claims=None, ttl_s=ATTACH_TTL_S):
+    """Take a prestaged project, removing it. -> {state, record, why}
+
+    HIT | MISS | EXPIRED | FAILED, and the three that are not HIT all mean the
+    same thing to the caller — prestage cold — while meaning three different
+    things to whoever asks later why the warm rate is what it is. Folding them
+    into one boolean is how a cache that has silently stopped working reads
+    identically to a workload with no repeats in it.
+
+    THE CLAIM IS A REMOVAL. See the header: a project is single-use, and the
+    dispatch path refuses an inherited timeline by name. Leaving the record in
+    place would hand the same project to the next job on the same bytes.
+    """
+    out = {"state": "MISS", "record": None, "why": "no record for this key"}
+    if not key:
+        return {"state": "FAILED", "record": None,
+                "why": "no key — the caller could not build one"}
+    store = ATTACHED if store is None else store
+    now_s = time.time() if now_s is None else now_s
+    try:
+        rec = store.pop(key)
+    except KeyError:
+        return out
+    except Exception as e:                                        # noqa: BLE001
+        return {"state": "FAILED", "record": None,
+                "why": "%s: %s" % (type(e).__name__, str(e)[:160])}
+    if not isinstance(rec, dict):
+        return {"state": "FAILED", "record": None,
+                "why": "stored record is %s, not a dict" % type(rec).__name__}
+    made = rec.get("attached_at")
+    if made is None:
+        return {"state": "FAILED", "record": rec,
+                "why": "the record carries no attached_at — its age cannot be read"}
+    age = now_s - float(made)
+    # EVERY CLAIM IS RECORDED, INCLUDING THE EXPIRED ONE, so a second claim on
+    # one key is visible afterwards even though nothing here can prevent it.
+    claims = ATTACH_CLAIMS if claims is None else claims
+    try:
+        prior = claims.get(key) or []
+        claims[key] = list(prior) + [{"run_id": run_id, "at": now_s,
+                                      "age_s": round(age, 1),
+                                      "projectId": rec.get("projectId")}]
+        if prior:
+            out["double_claim"] = len(prior) + 1
+    except Exception:                                             # noqa: BLE001
+        # A CLAIM LEDGER THAT CANNOT BE WRITTEN MUST NOT FAIL THE CLAIM — but
+        # it must say so, or the absence of double-claim rows reads as proof
+        # there were none.
+        out["claims_ledger"] = "FAILED"
+    if age > ttl_s:
+        return dict(out, state="EXPIRED", record=rec,
+                    why="prestaged %.0fs ago, past the %ds bound" % (age, ttl_s))
+    return dict(out, state="HIT", record=rec,
+                why="prestaged %.0fs ago" % age)
+
+
+def attach_verify(rec, reader=None, vol_root=ATTACH_ROOT, base_only=True,
+                  want_density=None):
+    """Is this claimed record still good enough to edit? -> {state, why, checked}
+
+    MEASURED | STALE | FAILED. A hit is not trusted; it is READ.
+
+    The whole point of an early prestage is that time passes between the
+    prestage and the edit, and time is exactly what invalidates it: the user
+    deletes the project, ChatCut expires something, the volume write never
+    committed, someone opens the editor and drops a clip on the timeline. Every
+    one of those produces a record that looks perfect in the Dict.
+
+    STALE IS NOT AN ERROR. It falls through to the cold path, which is the path
+    that worked yesterday. The only thing a stale hit costs is the lookup.
+    """
+    out = {"state": "FAILED", "why": "not attempted", "checked": []}
+    if not isinstance(rec, dict):
+        return dict(out, why="no record")
+    need = ("projectId", "timelineId", "trackId", "sourceAssetId",
+            "baseItemId", "sourceFrames")
+    absent = [k for k in need if not rec.get(k)]
+    if absent:
+        return dict(out, state="STALE", checked=["fields"],
+                    why="the record is missing %s" % ", ".join(absent))
+    out["checked"].append("fields")
+
+    # THE SHEETS, READ FROM DISK. `sheets` in the record is a list of paths
+    # RELATIVE to the volume root plus the size each was when written. A path
+    # that is present with the wrong size is a truncated or half-committed
+    # write, which renders to the agent as a corrupt image rather than as a
+    # missing one.
+    sheets = rec.get("sheets")
+    if sheets is None:
+        return dict(out, state="STALE", checked=out["checked"],
+                    why="the record carries no sheets — the watch never stored anything")
+    bad = []
+    for s in sheets:
+        p = os.path.join(vol_root, s.get("path", ""))
+        if not os.path.exists(p):
+            bad.append("%s absent" % s.get("path"))
+        elif s.get("bytes") is not None and os.path.getsize(p) != s["bytes"]:
+            bad.append("%s is %d bytes, stored as %d"
+                       % (s.get("path"), os.path.getsize(p), s["bytes"]))
+    if bad:
+        return dict(out, state="STALE", checked=out["checked"] + ["sheets"],
+                    why="%d of %d sheet(s) unreadable: %s"
+                        % (len(bad), len(sheets), "; ".join(bad[:3])))
+    out["checked"].append("sheets")
+
+    # THE SHEETS ARE AT A DENSITY, AND A JOB ASKING FOR ANOTHER ONE IS NOT
+    # SERVED BY THEM. This is not a key part — the PROJECT is correct either
+    # way — it is a property of the stored watch, and folding it into the key
+    # would make every non-default density miss the project as well as the
+    # sheets. A density mismatch is stale, and it says which two numbers.
+    if want_density is not None:
+        got = (rec.get("watch") or {}).get("density_fps")
+        if got is None:
+            return dict(out, state="STALE", checked=out["checked"],
+                        why="the record does not say what density its sheets were "
+                            "watched at, and this job wants %.2ffps" % float(want_density))
+        if abs(float(got) - float(want_density)) > 1e-6:
+            return dict(out, state="STALE", checked=out["checked"],
+                        why="the sheets are %.2ffps and this job wants %.2ffps"
+                            % (float(got), float(want_density)))
+        out["checked"].append("density")
+
+    # THE TIMELINE, READ THROUGH CHATCUT. The reader is injected so a check can
+    # drive every branch without a project — and so the failure of the read is
+    # distinguishable from the failure of the project.
+    if reader is None:
+        return dict(out, state="FAILED", checked=out["checked"],
+                    why="no reader — whether the project still exists is UNKNOWN, "
+                        "and an unknown project is not a verified one")
+    try:
+        rb = reader(rec)
+    except Exception as e:                                        # noqa: BLE001
+        return dict(out, state="STALE", checked=out["checked"] + ["timeline"],
+                    why="the project could not be read: %s: %s"
+                        % (type(e).__name__, str(e)[:160]))
+    items = (rb or {}).get("items")
+    if items is None:
+        return dict(out, state="STALE", checked=out["checked"] + ["timeline"],
+                    why="the read-back returned no item list (%s) — an unreadable "
+                        "timeline is not an empty one"
+                        % ((rb or {}).get("read_why") or "no reason given"))
+    base = str(rec.get("baseItemId") or "").replace("-", "")[:10]
+    extra = [str(i.get("id")) for i in items
+             if i.get("id") and str(i["id"]).replace("-", "")[:10] != base]
+    if base_only and extra:
+        return dict(out, state="STALE", checked=out["checked"] + ["timeline"],
+                    why="the timeline already holds %d item(s) besides the base "
+                        "clip — this project has been edited since it was prestaged"
+                        % len(extra))
+    if not any(str(i.get("id", "")).replace("-", "")[:10] == base for i in items):
+        return dict(out, state="STALE", checked=out["checked"] + ["timeline"],
+                    why="the base clip %s is no longer on the timeline" % base[:10])
+    out["checked"].append("timeline")
+    return {"state": "MEASURED", "checked": out["checked"],
+            "why": "project %s reads back with the base clip and nothing else, "
+                   "%d sheet(s) on the volume"
+                   % (str(rec["projectId"])[:8], len(sheets))}
+
+
+def attach_saving(gap_s=None, cold_setup_s=None):
+    """What prestage-at-attach is worth on ONE job. -> {state, saved_s, why}
+
+    THE SAVING IS BOUNDED BY THE GAP, NOT BY THE COST OF THE WORK. A user who
+    attaches and sends three seconds later has given prestage three seconds to
+    run, and the other 46 are still on the job's clock. Quoting the full setup
+    cost as the saving is the arithmetic that turns a real 3s into a claimed
+    49s, and it would be quoted per job across the whole population.
+
+        saved = min(attach-to-send gap, cold setup cost)
+
+    Both inputs come from somewhere else — the gap from content-studio's
+    upload_timing events (Builder-2), the cold setup from this harness's own
+    stage marks — so this returns ABSENT rather than a number when either is
+    missing. A projection with a fabricated input is the thing this file has a
+    rule about.
+    """
+    if gap_s is None or cold_setup_s is None:
+        return {"state": "ABSENT", "saved_s": None,
+                "why": "gap=%r cold_setup=%r — a saving needs both, and neither "
+                       "is derivable from the other" % (gap_s, cold_setup_s)}
+    try:
+        gap, cold = float(gap_s), float(cold_setup_s)
+    except (TypeError, ValueError):
+        return {"state": "FAILED", "saved_s": None,
+                "why": "gap=%r cold_setup=%r are not numbers" % (gap_s, cold_setup_s)}
+    if gap < 0 or cold < 0:
+        return {"state": "FAILED", "saved_s": None,
+                "why": "negative input (gap=%.1f cold=%.1f)" % (gap, cold)}
+    saved = min(gap, cold)
+    return {"state": "MEASURED", "saved_s": round(saved, 1),
+            "why": ("the gap is %.1fs and the setup costs %.1fs, so this job saves "
+                    "%.1fs — %s" % (gap, cold, saved,
+                                    "the gap is the binding constraint" if gap < cold
+                                    else "the whole setup fits in the gap"))}
+
+
+def attach_lookup(run_id, source_path=None, density_fps=2.0, titles=None,
+                  title_text="", controls=None, reader=None, now_s=None,
+                  store=None, claims=None, env=None,
+                  registry_path="/craft/chatcut_registry_baked.json",
+                  vol_root=ATTACH_ROOT, geometry=None, source_hash=None):
+    """Can this job skip prestage? -> {state, stage, watch, key, why}
+
+    WARM | COLD | STALE. Zac named two; the third is the one that would
+    otherwise hide inside the first two and make the warm rate wrong in a
+    direction nobody could see. A hit that fails verification is not a miss —
+    a miss means nobody prestaged this source, a stale hit means somebody did
+    and it rotted, and those are acted on differently: one is a workload with
+    no repeats, the other is a broken feature.
+
+    HOISTED OUT OF THE DISPATCH ON PURPOSE. A rule that lives inside a
+    tool-dispatch branch can only be exercised by a check that REIMPLEMENTS it,
+    and then the check proves the reimplementation while the shipped path goes
+    untested — twice recorded in this repo. Every input is injectable so a leg
+    drives the real function.
+
+    COLD IS THE SAFE ANSWER AND IS RETURNED FOR EVERY UNCERTAINTY. The cold
+    path is the path that worked yesterday; the only thing a wrong COLD costs
+    is the saving.
+    """
+    out = {"state": "COLD", "stage": None, "watch": None, "key": None,
+           "why": "not attempted"}
+    # ── WHAT A WARM PROJECT CANNOT CARRY ────────────────────────────────────
+    # Titles are registered per PLAN and the plan comes from the brief, which
+    # did not exist at attach. A warm hit that silently dropped them would be
+    # the half-ruling shape: the job asked for fifteen graphics, got a project
+    # with none, and nothing anywhere said the request was discarded.
+    if titles:
+        return dict(out, why="this job prestages %d title(s), which depend on its "
+                             "plan and cannot have been attached" % len(titles))
+    if title_text or (controls or {}):
+        return dict(out, why="this job prestages a per-job title/controls, which "
+                             "cannot have been attached")
+
+    sha = source_hash if source_hash else None
+    if sha is None:
+        _s = file_sha256(source_path)
+        if _s["state"] != "MEASURED":
+            return dict(out, why="source hash %s: %s" % (_s["state"], _s["why"]))
+        sha = _s["sha"]
+    geo = geometry if geometry else source_geometry(source_path)
+    if geo.get("state") != "MEASURED":
+        return dict(out, why="source geometry %s: %s" % (geo.get("state"), geo.get("why")))
+    reg = registry_fingerprint(registry_path)
+    if reg["state"] != "MEASURED":
+        return dict(out, why="registry %s: %s" % (reg["state"], reg["why"]))
+    acct = account_fingerprint(env)
+    if acct["state"] != "MEASURED":
+        return dict(out, why="account %s: %s" % (acct["state"], acct["why"]))
+
+    keyr = prestage_key(source_sha=sha, registry_digest=reg["digest"],
+                        account=acct["fp"], w=geo["w"], h=geo["h"], fps=geo["fps"])
+    if keyr["state"] != "MEASURED":
+        return dict(out, why=keyr["why"])
+    out["key"] = keyr["key"]
+
+    claim = attach_claim(keyr["key"], run_id, now_s=now_s, store=store, claims=claims)
+    if claim["state"] == "MISS":
+        return dict(out, why="no record for this key — nothing attached this source")
+    if claim["state"] == "FAILED":
+        return dict(out, why="the claim failed: %s" % claim["why"])
+    if claim["state"] == "EXPIRED":
+        return dict(out, state="STALE", why="expired: %s" % claim["why"])
+
+    rec = claim["record"]
+    ver = attach_verify(rec, reader=reader, vol_root=vol_root,
+                        want_density=density_fps)
+    if ver["state"] != "MEASURED":
+        return dict(out, state="STALE",
+                    why="%s after %s: %s" % (ver["state"], "+".join(ver["checked"]) or "nothing",
+                                             ver["why"]))
+
+    # THE STAGE IS BUILT FIELD BY FIELD RATHER THAN HANDED THE RECORD. The
+    # record carries more than a stage does, and passing it whole would make a
+    # renamed field invisible until something downstream read None.
+    stage = {"projectId": rec.get("projectId"), "timelineId": rec.get("timelineId"),
+             "trackId": rec.get("trackId"), "titleAssetId": None,
+             "sourceAssetId": rec.get("sourceAssetId"), "titles": [],
+             "baseItemId": rec.get("baseItemId"),
+             "sourceFrames": rec.get("sourceFrames"),
+             "components": rec.get("components") or {},
+             "components_refused": rec.get("components_refused") or {},
+             "editorUrl": rec.get("editorUrl"), "phases": rec.get("phases"),
+             "prestage_source": "warm", "attached_at": rec.get("attached_at")}
+    _w = rec.get("watch") or {}
+    watch = {"state": "MEASURED",
+             "sheets": [os.path.join(vol_root, s["path"]) for s in rec["sheets"]],
+             "frames": _w.get("frames"), "times": _w.get("times"),
+             "transcript": _w.get("transcript"),
+             "density_fps": _w.get("density_fps"),
+             "why": "from the attach record: %s" % str(_w.get("why"))[:160]}
+    res = {"state": "WARM", "stage": stage, "watch": watch, "key": keyr["key"],
+           "why": "claimed project %s, prestaged %s ago; %s"
+                  % (str(rec.get("projectId"))[:8],
+                     ("%.0fs" % ((now_s or time.time()) - float(rec["attached_at"]))),
+                     ver["why"])}
+    if claim.get("double_claim"):
+        # NOT A REFUSAL. The verify above already proved this timeline is
+        # clean, so this run may proceed; what matters is that the fact reaches
+        # the ledger, because a pop that is not atomic would otherwise show up
+        # only as an occasional CONTAMINATED ARM with no cause attached to it.
+        res["double_claim"] = claim["double_claim"]
+        res["why"] += " — CLAIM %d ON THIS KEY, the pop did not serialise" % claim["double_claim"]
+    return res
 
 
 # ── THE SHEET IS REQUIRED, AND THE GATE AND THE PROMPT SHARE THIS SENTENCE ──
@@ -4899,6 +5371,18 @@ STATEFUL_READERS = (
     ("library_ids", "an envelope carrying no ids", "ABSENT"),
     ("write_effect", "a response naming none of adds/updates/deletes", "UNREADABLE"),
     ("calibration_verdict", "a residual that was never measured", "ABSENT"),
+    # PRESTAGE AT ATTACH. Every one of these feeds the decision to REUSE a
+    # ChatCut project, which is the seam with the worst failure available on
+    # this path: a wrong hit hands one job another job's timeline.
+    ("file_sha256", "no file at the path the key is built from", "ABSENT"),
+    ("registry_fingerprint", "no registry file to digest", "ABSENT"),
+    ("account_fingerprint", "an environment with no CHATCUT_CLIENT_ID", "ABSENT"),
+    ("source_geometry", "no file to probe", "ABSENT"),
+    ("prestage_key", "a key part that was never read", "REFUSED"),
+    ("attach_claim", "a store with no record under this key", "MISS"),
+    ("attach_verify", "a record whose project cannot be read", "FAILED"),
+    ("attach_saving", "a gap nobody has measured yet", "ABSENT"),
+    ("attach_lookup", "a source the key cannot be built from", "COLD"),
 )
 
 
@@ -5481,11 +5965,269 @@ def cli_command(sid, model, use_hands=False, agents=None, partial=True, effort=N
 RUN_FIRST_TEXT_JOB = "THE COMPONENT INVENTORY"   # the first text of pass1_message: what the proxy finds the watch's end by
 RUN_FIRST_TEXT_PING = "KEEP-WARM PING FROM THE HARNESS: reply pong"   # distinctive: "ping" alone matched "skipping" in the CLI's own message
 
+def account_fingerprint(env=None):
+    """Which ChatCut identity a prestaged project belongs to. -> {state, fp, why}
+
+    THE OAUTH CLIENT ID, DIGESTED. It is stable across the token rotation that
+    happens mid-run (the refresh token changes; the client id does not), which
+    is the whole requirement for a key part.
+
+    WHAT IT DOES NOT DISTINGUISH, said here because it will be true one day and
+    silent when it becomes true: two ChatCut USERS sharing one client id get one
+    fingerprint, and would then be offered each other's prestaged projects. The
+    replacement is a user id read from a ChatCut envelope — the MCP surface
+    derives one from connector auth — and this lane has not yet OBSERVED which
+    field carries it, so keying on it now would be the shape-guessing that has
+    cost this lane ten turns before. One account runs this lane today; the day
+    a second does, this is the line that has to change, and a project answering
+    404 at the first edit_item is what it will look like if it does not.
+    """
+    env = os.environ if env is None else env
+    cid = env.get("CHATCUT_CLIENT_ID")
+    if not cid:
+        return {"state": "ABSENT", "fp": None,
+                "why": "CHATCUT_CLIENT_ID is not in the environment — the "
+                       "credential secret is not attached"}
+    return {"state": "MEASURED", "fp": hashlib.sha256(cid.encode()).hexdigest()[:12],
+            "why": "sha256 of CHATCUT_CLIENT_ID, first 12"}
+
+
+def source_geometry(path):
+    """w, h, fps and duration from the file itself. -> {state, w, h, fps, dur_s, why}
+
+    THE CANVAS FOLLOWS THE SOURCE, and at attach time the source is all there
+    is — there is no brief, no plan and no agent. This is the read that makes
+    create_project's geometry a measurement rather than the 1080x1920 literal
+    that has been hard-coded on this path since it was written.
+
+    EVERY FIELD IS REQUIRED. A partial read returns FAILED rather than a canvas
+    with one guessed side: an asymmetric default is how a 1920x1080 source
+    becomes a vertical project with the picture in a letterbox, which renders
+    perfectly and is wrong.
+    """
+    out = {"state": "ABSENT", "w": None, "h": None, "fps": None, "dur_s": None,
+           "why": "not attempted"}
+    if not path or not os.path.exists(path):
+        return dict(out, why="no file at %r" % (path,))
+    try:
+        p = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height,r_frame_rate",
+             "-show_entries", "format=duration", "-of", "json", path],
+            capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError) as e:
+        return dict(out, state="FAILED", why="ffprobe: %s: %s" % (type(e).__name__, str(e)[:140]))
+    if p.returncode != 0:
+        return dict(out, state="FAILED",
+                    why="ffprobe exited %d: %s" % (p.returncode, (p.stderr or "")[:160]))
+    try:
+        meta = json.loads(p.stdout or "{}")
+    except ValueError as e:
+        return dict(out, state="FAILED", why="ffprobe json: %s" % str(e)[:140])
+    streams = meta.get("streams") or []
+    if not streams:
+        return dict(out, state="FAILED",
+                    why="ffprobe found no video stream — a file arrived, a clip did not")
+    st = streams[0]
+    w, h, rate = st.get("width"), st.get("height"), st.get("r_frame_rate")
+    dur = (meta.get("format") or {}).get("duration")
+    # EACH KEY ASSERTED PRESENT BEFORE ITS VALUE IS USED. `float(dur or 0)` at
+    # this exact spot is the laundering instance already written up in CLAUDE.md
+    # — it converts a missing duration into a well-typed 0.0 that segments a
+    # zero-second video downstream with nothing anywhere saying so.
+    absent = [n for n, v in (("width", w), ("height", h),
+                             ("r_frame_rate", rate), ("duration", dur)) if v in (None, "")]
+    if absent:
+        return dict(out, state="FAILED",
+                    why="ffprobe returned no %s — a partial geometry is not a canvas"
+                        % ", ".join(absent))
+    try:
+        num, _, den = str(rate).partition("/")
+        fps = float(num) / float(den or 1)
+        dur_s = float(dur)
+    except (TypeError, ValueError, ZeroDivisionError) as e:
+        return dict(out, state="FAILED",
+                    why="unreadable rate=%r duration=%r: %s" % (rate, dur, str(e)[:100]))
+    if not (w > 0 and h > 0 and fps > 0 and dur_s > 0):
+        return dict(out, state="FAILED",
+                    why="non-positive geometry w=%r h=%r fps=%r dur=%r" % (w, h, fps, dur_s))
+    return {"state": "MEASURED", "w": int(w), "h": int(h),
+            "fps": round(fps, 3), "dur_s": round(dur_s, 3),
+            "why": "%dx%d @ %.3ffps, %.2fs" % (w, h, fps, dur_s)}
+
+
+@app.function(image=IMG, timeout=900, cpu=4, memory=8192,
+              volumes={ATTACH_ROOT: ATTACH_VOL},
+              secrets=[modal.Secret.from_name("chatcut-oauth")])
+def attach(clip_url: str, source_sha: str = "", density_fps: float = 2.0):
+    """PRESTAGE AT ATTACH. One source URL in, one claimable record stored.
+
+    CALLED FROM content-studio THE MOMENT A FILE FINISHES UPLOADING, before any
+    brief exists. It does the three things a job would otherwise do on its own
+    clock — create the project, import the source, watch it — and stores what
+    dispatch needs to skip them.
+
+    IT RETURNS A RECORD AND IT ALSO STORES ONE. The return is for the caller's
+    log; the STORE is the contract, because the caller is a web request that
+    may be gone and the job that needs this arrives minutes later in a
+    different container.
+
+    NOTHING HERE MAY RAISE INTO THE CALLER'S PATH. An attach is speculative: the
+    user may never send. A failed attach must cost the job nothing beyond a cold
+    prestage, so every failure is CAUGHT, named in the returned state, and
+    stores NO record — a half-written record is the one outcome worse than none,
+    because a claim would find it and a verify might not catch what was missing.
+    """
+    t0 = time.time()
+    out = {"state": "FAILED", "key": None, "why": "not attempted",
+           "wall_s": None, "clip_url_sha": hashlib.sha256(
+               (clip_url or "").encode()).hexdigest()[:12]}
+
+    def done(**kw):
+        out.update(kw)
+        out["wall_s"] = round(time.time() - t0, 1)
+        print("  ATTACH          : %s  %s (%.1fs)"
+              % (out["state"], out["why"], out["wall_s"]), flush=True)
+        return out
+
+    try:
+        work = "/work/attach"
+        os.makedirs(work, exist_ok=True)
+        src = os.path.join(work, "source.mp4")
+        # THE SAME -L AND THE SAME PROOF-IT-IS-A-VIDEO as the dispatch path,
+        # for the same reason: a 301 body is a file that exists and is not a
+        # clip. Here it matters more, because an attach that stores a record
+        # for a redirect body would hand the job a project containing one.
+        r = subprocess.run(["curl", "-fsSL", "-o", src, clip_url],
+                           capture_output=True, text=True, timeout=600)
+        if r.returncode != 0:
+            return done(state="FAILED",
+                        why="curl exited %d: %s" % (r.returncode, (r.stderr or "")[-160:]))
+        geo = source_geometry(src)
+        if geo["state"] != "MEASURED":
+            return done(state="FAILED", why="source geometry %s: %s" % (geo["state"], geo["why"]))
+
+        sha = file_sha256(src)
+        if sha["state"] != "MEASURED":
+            return done(state="FAILED", why="source hash %s: %s" % (sha["state"], sha["why"]))
+        # THE CALLER MAY HAVE HASHED THE BYTES ITSELF — content-studio holds
+        # them at upload. A disagreement means the URL served something other
+        # than what was uploaded, which is a REAL finding and not a reason to
+        # prefer one of the two numbers.
+        if source_sha and source_sha != sha["sha"]:
+            return done(state="FAILED",
+                        why="the caller's hash %s... does not match the bytes at "
+                            "this URL %s... — the URL is serving a different file"
+                            % (source_sha[:12], sha["sha"][:12]))
+        reg = registry_fingerprint()
+        if reg["state"] != "MEASURED":
+            return done(state="FAILED", why="registry %s: %s" % (reg["state"], reg["why"]))
+        acct = account_fingerprint()
+        if acct["state"] != "MEASURED":
+            return done(state="FAILED", why="account %s: %s" % (acct["state"], acct["why"]))
+
+        keyr = prestage_key(source_sha=sha["sha"], registry_digest=reg["digest"],
+                            account=acct["fp"], w=geo["w"], h=geo["h"], fps=geo["fps"])
+        if keyr["state"] != "MEASURED":
+            return done(state="FAILED", why=keyr["why"])
+        key = keyr["key"]
+        out["key"] = key
+        # ALREADY PRESTAGED AND NOT YET CLAIMED. Attaching the same file twice
+        # is a retry or a double-fire of the upload hook, and a second project
+        # would be an orphan nobody ever claims. The first one stands.
+        if key in ATTACHED:
+            return done(state="PRESENT",
+                        why="a record for this key is already stored and unclaimed")
+
+        tok = _access_token()
+        # TITLES ARE NOT PRESTAGED HERE — they depend on the plan, which depends
+        # on the brief, which does not exist yet. `titles=[]` is the honest
+        # argument and the dispatch path registers them into this project.
+        stage = prestage(tok, "", controls={}, source_path=src, titles=[],
+                         w=geo["w"], h=geo["h"], fps=int(round(geo["fps"])))
+        if not (stage and stage.get("projectId") and stage.get("sourceAssetId")):
+            return done(state="FAILED",
+                        why="prestage produced project=%r source=%r — a record "
+                            "without both is one a job cannot edit"
+                            % (str(stage.get("projectId"))[:8] if stage else None,
+                               str(stage.get("sourceAssetId"))[:12] if stage else None))
+
+        # THE WATCH, ONTO THE SHARED VOLUME. `watch_asset` writes wherever it is
+        # told; what makes this cross a container boundary is that the directory
+        # is a Volume mounted at the same path in `edit`, and that it is
+        # COMMITTED below. An uncommitted write is visible here and to nobody
+        # else — a sheet list in the record pointing at files the reader cannot
+        # open, which is why attach_verify opens them.
+        wdir = os.path.join(ATTACH_ROOT, key)
+        os.makedirs(wdir, exist_ok=True)
+        watch = watch_asset(tok, stage.get("sourceAssetId"), geo["dur_s"], wdir,
+                            fps=density_fps)
+        if watch.get("state") != "MEASURED" or not watch.get("sheets"):
+            # A PROJECT WITH NO WATCH IS STILL WORTH STORING? NO. The job would
+            # then have to watch on its own clock, which is the larger of the
+            # two stages being moved, and the record would read as a full warm
+            # hit in every count. A partial saving stored as a whole one is the
+            # reporting defect this lane keeps writing rules about.
+            return done(state="FAILED",
+                        why="the source watch is %s (%s) — storing a record "
+                            "without it would count as a warm hit and save "
+                            "half of what it claimed"
+                            % (watch.get("state"), str(watch.get("why"))[:140]))
+        sheets = []
+        for p in watch["sheets"]:
+            rel = os.path.relpath(p, ATTACH_ROOT)
+            sheets.append({"path": rel, "bytes": os.path.getsize(p)})
+        try:
+            ATTACH_VOL.commit()
+        except Exception as e:                                    # noqa: BLE001
+            return done(state="FAILED",
+                        why="the volume would not commit (%s: %s) — the sheets "
+                            "exist in this container and nowhere else"
+                            % (type(e).__name__, str(e)[:140]))
+
+        rec = {"projectId": stage.get("projectId"),
+               "timelineId": stage.get("timelineId"),
+               "trackId": stage.get("trackId"),
+               "sourceAssetId": stage.get("sourceAssetId"),
+               "baseItemId": stage.get("baseItemId"),
+               "sourceFrames": stage.get("sourceFrames"),
+               "components": stage.get("components") or {},
+               "components_refused": stage.get("components_refused") or {},
+               "editorUrl": stage.get("editorUrl"),
+               "phases": stage.get("phases"),
+               "sheets": sheets,
+               "watch": dict({k: watch.get(k) for k in ("frames", "times", "transcript", "why")},
+                             density_fps=float(density_fps)),
+               "geometry": {k: geo[k] for k in ("w", "h", "fps", "dur_s")},
+               "source_sha": sha["sha"], "source_bytes": sha["bytes"],
+               "registry_digest": reg["digest"], "account": acct["fp"],
+               "key_version": PRESTAGE_KEY_VERSION,
+               "attached_at": time.time(),
+               "attach_wall_s": round(time.time() - t0, 1)}
+        ATTACHED[key] = rec
+        out["record"] = rec
+        return done(state="MEASURED",
+                    why="project %s, %d component(s), %d sheet(s) over %.1fs of "
+                        "%dx%d@%.2f" % (str(rec["projectId"])[:8],
+                                        len(rec["components"]), len(sheets),
+                                        geo["dur_s"], geo["w"], geo["h"], geo["fps"]))
+    except Exception as e:                                        # noqa: BLE001
+        # SPECULATIVE WORK NEVER RAISES INTO THE CALLER. content-studio's upload
+        # path must not fail because a prestage did.
+        return done(state="FAILED", why="%s: %s" % (type(e).__name__, str(e)[:200]))
+
+
 @app.function(image=IMG, timeout=900, cpu=4, memory=8192,
               # SECTION B: the container's imports and CLI are snapshotted
               # after module load; per-job ChatCut work (project, import,
               # base item) cannot be, and is measured in PRESTAGE PHASES.
               enable_memory_snapshot=True,
+              # THE ATTACH VOLUME, MOUNTED AT THE SAME PATH AS IN `attach`.
+              # That identity is the whole reason a sheet written there is an
+              # artifact and not a local path crossing a boundary — and it is
+              # why the mount is spelled with the same constant on both sides
+              # rather than the literal twice.
+              volumes={ATTACH_ROOT: ATTACH_VOL},
               secrets=[modal.Secret.from_name("chatcut-oauth"),
                        modal.Secret.from_name("anthropic-api-key")])
 def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
@@ -5726,6 +6468,7 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     # means a reused run id: prior read tokens already on the ceiling, a
     # project that may hold items, and a "first" batch that is not the
     # first. Refuse it rather than measure a contaminated arm.
+    _attach_watch = None
     if _prior_stage and _prior_stage.get("projectId"):
         _stage = _prior_stage
         print("  PRESTAGE        : REUSED  project=%s from attempt %d — this "
@@ -5762,8 +6505,40 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
             RESULTS[run_id] = _out
             return _out
     else:
-        _stage = prestage(tok, prestage_title, controls=_ctl,
-                          source_path="/work/source.mp4", titles=_titles)
+        # ── PRESTAGE AT ATTACH: THE LOOKUP ──────────────────────────────────
+        # The volume is reloaded first, because a Volume mounted at container
+        # start shows the contents it had at container start. `attach` wrote
+        # and committed its sheets AFTER this container may have begun, and a
+        # missing reload reads as sheets that were never written — the same
+        # file, absent, with no error anywhere.
+        try:
+            ATTACH_VOL.reload()
+            _vol_why = None
+        except Exception as _ve:                                  # noqa: BLE001
+            _vol_why = "%s: %s" % (type(_ve).__name__, str(_ve)[:140])
+            print("  ATTACH VOLUME   : FAILED to reload (%s) — any warm record "
+                  "will read as stale" % _vol_why, flush=True)
+        _warm = attach_lookup(run_id, source_path="/work/source.mp4",
+                              density_fps=density_fps, titles=_titles,
+                              title_text=prestage_title, controls=_ctl,
+                              reader=lambda _r: read_back(tok, _r))
+        # ONE FIELD, THREE VALUES, PRINTED WHERE IT IS DECIDED. A counter that
+        # reaches the ledger and no output answers nothing — this lane has run
+        # a whole round to learn whether a gate fired and could not.
+        _prestage_source = {"WARM": "warm", "STALE": "stale"}.get(_warm["state"], "cold")
+        print("  PRESTAGE SOURCE : %s  %s" % (_prestage_source.upper(), _warm["why"]),
+              flush=True)
+        if _warm["state"] == "WARM":
+            _stage = _warm["stage"]
+            _attach_watch = _warm["watch"]
+        else:
+            _attach_watch = None
+            _stage = prestage(tok, prestage_title, controls=_ctl,
+                              source_path="/work/source.mp4", titles=_titles)
+            _stage["prestage_source"] = _prestage_source
+        _stage["prestage_key"] = _warm.get("key")
+        if _warm.get("double_claim"):
+            _stage["double_claim"] = _warm["double_claim"]
         job_state_put(run_id, stage=_stage)
     # AND ITS ABSENCE IS FATAL IN SECONDS, NOT IN TWENTY MINUTES. A run with no
     # project cannot place anything; letting it proceed buys a 1,500s timeout
@@ -5809,8 +6584,23 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         except Exception as _we:                                  # noqa: BLE001
             _watch_box.update({"state": "FAILED",
                                "why": "%s: %s" % (type(_we).__name__, str(_we)[:140])})
-    _watch_th = threading.Thread(target=_watch_source, daemon=True)
-    _watch_th.start()
+    # THE WARM WATCH IS ALREADY ON DISK. `attach` watched this source minutes
+    # ago and committed the sheets; re-watching would spend the stage the
+    # feature exists to remove, and would spend it while reporting a warm hit.
+    # The thread is not started rather than started and ignored — a daemon
+    # thread doing ~25s of ChatCut work nobody reads is invisible in the wall
+    # and visible on the bill.
+    if _attach_watch:
+        _watch_box.update(_attach_watch)
+        _watch_th = None
+        print("  SOURCE WATCH    : WARM  %d frame(s) at %.2ffps on %d sheet(s) "
+              "from the attach record — not re-watched"
+              % (int(_watch_box.get("frames") or 0),
+                 float(_watch_box.get("density_fps") or 0.0),
+                 len(_watch_box.get("sheets") or [])), flush=True)
+    else:
+        _watch_th = threading.Thread(target=_watch_source, daemon=True)
+        _watch_th.start()
     mark("prestage")
     _libn = len(_stage.get("components") or {})
 
@@ -5998,8 +6788,9 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         _beats, _beats_why = [], "the passed transcript did not parse"
     if not _beats:
         _beats_th.join(timeout=60)
-        _watch_th.join(timeout=120)
-        if _watch_th.is_alive():
+        if _watch_th is not None:
+            _watch_th.join(timeout=120)
+        if _watch_th is not None and _watch_th.is_alive():
             _watch_box.update({"state": "ABSENT", "why": "watch_asset still running after 120s"})
         print("  SOURCE WATCH    : %s — %s" % (_watch_box.get("state"), str(_watch_box.get("why"))[:140]),
               flush=True)
@@ -6591,6 +7382,15 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                                             "preview_timeline for a frame")},
            "think_tokens": think_tokens,
            "prestaged": bool(_stage),
+           # WARM | COLD | STALE | REUSED, ON EVERY RUN RECORD. `prestaged`
+           # above is a boolean and has always been True on a working run, so
+           # it can never answer where the setup came from. A cohort's warm
+           # rate is unreadable without this, and a stale rate folded into the
+           # cold one is a broken feature wearing a workload's clothes.
+           "prestage_source": (_stage or {}).get("prestage_source", "reused"),
+           "prestage_key": (_stage or {}).get("prestage_key"),
+           "attached_at": (_stage or {}).get("attached_at"),
+           "double_claim": (_stage or {}).get("double_claim"),
            "turn_budget": _budget,
            "partial_messages": {"state": _pm_state, "supported": _pm},
            "marks": marks, "tools": n_tools, "rc": r.returncode,

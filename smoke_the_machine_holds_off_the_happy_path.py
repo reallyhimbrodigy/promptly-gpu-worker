@@ -2124,6 +2124,20 @@ def main():
     # MISSING THE KEY IT READS and must answer ABSENT — never [], 0 or None.
     _blank = _np.zeros((2, 2, 3), dtype="float64")
     _rdr = lambda p: _blank
+    # A RECORD WHOSE FIELDS AND SHEETS ARE ALL GOOD, so attach_verify reaches
+    # the timeline check and answers FAILED for the ONE reason under test: it
+    # was given no reader. A fixture that was stale earlier would pass the leg
+    # for the wrong reason — the fifth costume, a check that passes for a
+    # reason other than the one it claims.
+    _VOLR = tempfile.mkdtemp(prefix="attachfix-")
+    os.makedirs(os.path.join(_VOLR, "k1", "sheets"), exist_ok=True)
+    _shp = os.path.join("k1", "sheets", "s00.png")
+    open(os.path.join(_VOLR, _shp), "wb").write(b"\x89PNG" + b"0" * 60)
+    _REC = {"projectId": "p-1", "timelineId": "t-1", "trackId": "tr-1",
+            "sourceAssetId": "a-1", "baseItemId": "b-1", "sourceFrames": 610,
+            "attached_at": 0.0,
+            "watch": {"density_fps": 2.0, "frames": 40},
+            "sheets": [{"path": _shp, "bytes": os.path.getsize(os.path.join(_VOLR, _shp))}]}
     _DRIVEN = {
         # reader                  a source missing the key it reads          expected
         "component_faults":  (lambda: J.component_faults(
@@ -2148,6 +2162,20 @@ def main():
         "library_ids":       (lambda: J.library_ids({"nothing": "here"}), "ABSENT"),
         "write_effect":      (lambda: J.write_effect({"adds": [1]}, {"_text": "ok"}), "UNREADABLE"),
         "calibration_verdict": (lambda: J.calibration_verdict({"state": "ABSENT", "why": "n"}), "ABSENT"),
+        # PRESTAGE AT ATTACH, each driven with the input missing the thing it
+        # reads. `prestage_key` REFUSES rather than saying ABSENT because a key
+        # is not a measurement — there is no honest partial key, and a key that
+        # said ABSENT would still be a string somebody could look up.
+        "file_sha256":         (lambda: J.file_sha256("/nonexistent/source.mp4"), "ABSENT"),
+        "registry_fingerprint": (lambda: J.registry_fingerprint("/nonexistent/registry.json"), "ABSENT"),
+        "account_fingerprint": (lambda: J.account_fingerprint({}), "ABSENT"),
+        "source_geometry":     (lambda: J.source_geometry("/nonexistent/source.mp4"), "ABSENT"),
+        "prestage_key":        (lambda: J.prestage_key(source_sha="a", registry_digest=None,
+                                                       account="c", w=1, h=2, fps=30), "REFUSED"),
+        "attach_claim":        (lambda: J.attach_claim("k", "run", store={}, claims={}), "MISS"),
+        "attach_verify":       (lambda: J.attach_verify(_REC, reader=None, vol_root=_VOLR), "FAILED"),
+        "attach_saving":       (lambda: J.attach_saving(gap_s=None, cold_setup_s=44.0), "ABSENT"),
+        "attach_lookup":       (lambda: J.attach_lookup("run", source_path="/nonexistent/s.mp4"), "COLD"),
     }
     _state_of = lambda r: (r[1] if isinstance(r, tuple) else
                            r.get("state") if isinstance(r, dict) else None)
@@ -2179,13 +2207,36 @@ def main():
     # uses one container; testing the container is the reader-keyed-to-shape mistake
     # this file already carries eight scars from.
     import inspect as _insp2
-    _shapeless = [_n for _n in _census
-                  if not callable(getattr(J, _n, None))
-                  or not any(_w in _insp2.getsource(getattr(J, _n))
-                             for _w in ("ABSENT", "UNREADABLE"))]
-    check("every censused reader exists and can name an absence in its own return",
-          not _shapeless, "; ".join(_shapeless) if _shapeless else
-          "%d censused, %d dict-shaped, library_ids returns (ids, state, why)" % (len(_census), len(_census) - 1))
+    # THE WORD COMES FROM THE CENSUS, NOT FROM A LIST IN THIS FILE.
+    #
+    # This check used to hold a literal tuple ("ABSENT", "UNREADABLE") and
+    # demand that every reader's source contain one of them. It went red on
+    # four CORRECT readers the day prestage-at-attach landed, because a key
+    # REFUSES, a claim MISSES and a lookup goes COLD — none of which is an
+    # absence, and all of which are states. That is the readers-keyed-to-
+    # wording mistake this file carries eight scars from, committed inside the
+    # check that already warns about it two comments up.
+    #
+    # The census entry already DECLARES what each reader answers blind. Reading
+    # the word from there makes the two halves one fact: a reader whose blind
+    # answer is COLD must be able to produce COLD, and a new state word cannot
+    # drift from this list because there is no list.
+    _expect_of = {_n: _e for _n, _w, _e in J.STATEFUL_READERS}
+    _shapeless = []
+    for _n in sorted(_census):
+        _fn = getattr(J, _n, None)
+        if not callable(_fn):
+            _shapeless.append("%s: not callable on the module" % _n)
+            continue
+        _want = _expect_of[_n]
+        if _want not in _insp2.getsource(_fn):
+            _shapeless.append("%s: censused as answering %r and cannot produce "
+                              "that word" % (_n, _want))
+    check("every censused reader exists and can produce the state the census says it answers",
+          not _shapeless, "; ".join(_shapeless[:3]) if _shapeless else
+          "%d censused across %d distinct state word(s): %s"
+          % (len(_census), len(set(_expect_of.values())),
+             ", ".join(sorted(set(_expect_of.values())))))
 
     # ---- CAPTION-MATCH MATCHES, AND THE WORKHORSE HAS ITS OWN NAME ----
     # For one day the references' most common shape (plain, medium, middle) was served
@@ -2567,6 +2618,138 @@ def main():
           [c["kind"] for c in J.brief_constraints("Сделай видео динамичным")] == ["language_unchecked"]
           and J.brief_constraints("Сделай видео динамичным")[0]["checkable"] is False
           and J.brief_constraints("just make it pop") == [])
+
+    # ---- PRESTAGE AT ATTACH ----
+    # The seam here is REUSING A CHATCUT PROJECT, and its worst failure is not
+    # a miss — it is a hit that hands one job another job's timeline. Every leg
+    # below is aimed at that, not at whether the cache works.
+    _K = dict(source_sha="s" * 64, registry_digest="r" * 16, account="a" * 12,
+              w=1080, h=1920, fps=30.0)
+    # THE CLAIM REMOVES. This is the whole single-use design in one assertion:
+    # a project is stateful, the dispatch path already refuses an inherited
+    # timeline by name (CONTAMINATED ARM), and a cache that answered HIT twice
+    # would manufacture that case deliberately.
+    _store = {"k1": {"projectId": "p1", "attached_at": time.time()}}
+    _c1 = J.attach_claim("k1", "runA", store=_store, claims={})
+    _c2 = J.attach_claim("k1", "runB", store=_store, claims={})
+    check("a claim REMOVES the record, so a second job on the same source misses",
+          _c1["state"] == "HIT" and _c2["state"] == "MISS" and "k1" not in _store,
+          "first=%s second=%s left=%s" % (_c1["state"], _c2["state"], list(_store)))
+    # AND A DOUBLE CLAIM IS VISIBLE EVEN THOUGH NOTHING HERE PREVENTS IT. The
+    # pop is one round trip and therefore atomic as far as a client can tell —
+    # an assumption about somebody else's implementation, so it is instrumented
+    # rather than trusted.
+    _cl = {}
+    _store2 = {"k2": {"projectId": "p2", "attached_at": time.time()}}
+    J.attach_claim("k2", "runA", store=_store2, claims=_cl)
+    _store2["k2"] = {"projectId": "p2", "attached_at": time.time()}
+    _c3 = J.attach_claim("k2", "runB", store=_store2, claims=_cl)
+    check("a second claim on one key reaches the ledger as a double claim",
+          _c3.get("double_claim") == 2 and len(_cl["k2"]) == 2,
+          "double_claim=%r rows=%d" % (_c3.get("double_claim"), len(_cl.get("k2") or [])))
+    # AN EXPIRED RECORD IS NOT A MISS. Both go cold; only one of them means the
+    # feature is working and the user is slow.
+    _old = {"k3": {"projectId": "p3", "attached_at": time.time() - J.ATTACH_TTL_S - 10}}
+    check("a record past the TTL is EXPIRED, not a miss — a slow user and a broken cache differ",
+          J.attach_claim("k3", "r", store=_old, claims={})["state"] == "EXPIRED"
+          and J.attach_claim("nope", "r", store={}, claims={})["state"] == "MISS",
+          str(J.attach_claim("k3", "r", store=dict(_old), claims={})["state"]))
+    # THE KEY. Every part must change it, or that part is decoration and the
+    # collision it was added to prevent is live.
+    _base = J.prestage_key(**_K)
+    _moved = {_p: J.prestage_key(**dict(_K, **{_p: (_K[_p] + "X") if isinstance(_K[_p], str)
+                                               else _K[_p] + 1}))["key"]
+              for _p in _K}
+    check("every key part changes the key — a part that does not is a collision waiting",
+          _base["state"] == "MEASURED"
+          and all(v != _base["key"] for v in _moved.values())
+          and len(set(_moved.values())) == len(_K)
+          and J.prestage_key(**_K)["key"] == _base["key"],
+          "%d part(s), %d distinct keys" % (len(_K), len(set(_moved.values()))))
+    check("a key with any part missing is REFUSED, never hashed as the string 'None'",
+          all(J.prestage_key(**dict(_K, **{_p: None}))["state"] == "REFUSED" for _p in _K)
+          and all(_p in J.prestage_key(**dict(_K, **{_p: None}))["why"] for _p in _K),
+          J.prestage_key(**dict(_K, registry_digest=None))["why"][:90])
+    # VERIFY: the four ways a stored record rots, each its own STALE.
+    _rdr_ok = lambda _r: {"items": [{"id": "b-1"}], "read_why": "ok"}
+    check("a verified record is MEASURED only when the timeline holds the base clip and nothing else",
+          J.attach_verify(_REC, reader=_rdr_ok, vol_root=_VOLR)["state"] == "MEASURED"
+          and J.attach_verify(_REC, reader=lambda _r: {"items": [{"id": "b-1"}, {"id": "x-9"}],
+                                                       "read_why": "ok"},
+                              vol_root=_VOLR)["state"] == "STALE"
+          and J.attach_verify(_REC, reader=lambda _r: {"items": [{"id": "z-9"}], "read_why": "ok"},
+                              vol_root=_VOLR)["state"] == "STALE"
+          and J.attach_verify(_REC, reader=lambda _r: {"items": None, "read_why": "unreadable"},
+                              vol_root=_VOLR)["state"] == "STALE",
+          J.attach_verify(_REC, reader=_rdr_ok, vol_root=_VOLR)["why"][:90])
+    # AN UNREADABLE TIMELINE IS NOT AN EMPTY ONE, said in the verify's own words
+    # so the next reader of a STALE line knows which of the four it was.
+    check("an unreadable read-back says so rather than passing as an empty timeline",
+          "not an empty one" in J.attach_verify(
+              _REC, reader=lambda _r: {"items": None, "read_why": "http 500"},
+              vol_root=_VOLR)["why"],
+          J.attach_verify(_REC, reader=lambda _r: {"items": None, "read_why": "http 500"},
+                          vol_root=_VOLR)["why"][:90])
+    # THE SHEETS ARE OPENED, NOT TRUSTED. A record listing files the reader
+    # cannot open is exactly what an uncommitted volume write leaves behind,
+    # and it is indistinguishable from a good record in the Dict.
+    _rec_wrongsize = dict(_REC, sheets=[dict(_REC["sheets"][0], bytes=999999)])
+    _rec_absent = dict(_REC, sheets=[{"path": "k1/sheets/gone.png", "bytes": 64}])
+    check("sheets are read off the volume — an absent or wrong-sized one is STALE, not a warm hit",
+          J.attach_verify(_rec_absent, reader=_rdr_ok, vol_root=_VOLR)["state"] == "STALE"
+          and J.attach_verify(_rec_wrongsize, reader=_rdr_ok, vol_root=_VOLR)["state"] == "STALE"
+          and J.attach_verify(dict(_REC, sheets=None), reader=_rdr_ok,
+                              vol_root=_VOLR)["state"] == "STALE",
+          J.attach_verify(_rec_wrongsize, reader=_rdr_ok, vol_root=_VOLR)["why"][:90])
+    check("sheets watched at another density are STALE — the project is fine, the pictures are not",
+          J.attach_verify(_REC, reader=_rdr_ok, vol_root=_VOLR, want_density=1.0)["state"] == "STALE"
+          and J.attach_verify(_REC, reader=_rdr_ok, vol_root=_VOLR, want_density=2.0)["state"] == "MEASURED",
+          J.attach_verify(_REC, reader=_rdr_ok, vol_root=_VOLR, want_density=1.0)["why"][:80])
+    # NO READER IS NOT A PASS. Whether the project still exists is UNKNOWN, and
+    # the whole family this repo writes rules about is UNKNOWN rendered as fine.
+    check("a verify with no reader is FAILED — an unknown project is not a verified one",
+          J.attach_verify(_REC, reader=None, vol_root=_VOLR)["state"] == "FAILED",
+          J.attach_verify(_REC, reader=None, vol_root=_VOLR)["why"][:80])
+    # WHAT A WARM PROJECT CANNOT CARRY. Titles are registered per PLAN; a warm
+    # hit that dropped them silently is the half-ruling shape — the job asked
+    # for graphics, got none, and nothing said the request was discarded.
+    check("a job prestaging its own titles or controls goes COLD and says why",
+          J.attach_lookup("r", titles=[{"text": "a"}])["state"] == "COLD"
+          and "title" in J.attach_lookup("r", titles=[{"text": "a"}])["why"]
+          and J.attach_lookup("r", controls={"fontSize": 90})["state"] == "COLD",
+          J.attach_lookup("r", titles=[{"text": "a"}])["why"][:80])
+    # THE SAVING IS BOUNDED BY THE GAP. Quoting the setup cost as the saving is
+    # the arithmetic that turns a real 3s into a claimed 49s, per job, across
+    # the whole population.
+    check("the saving is min(gap, setup) and is ABSENT when either input is missing",
+          J.attach_saving(3.0, 49.0)["saved_s"] == 3.0
+          and J.attach_saving(300.0, 49.0)["saved_s"] == 49.0
+          and J.attach_saving(None, 49.0)["state"] == "ABSENT"
+          and J.attach_saving(3.0, None)["state"] == "ABSENT"
+          and J.attach_saving(-1.0, 49.0)["state"] == "FAILED",
+          J.attach_saving(3.0, 49.0)["why"][:80])
+    # A ZERO-BYTE DOWNLOAD HASHES PERFECTLY, to the digest every other failed
+    # download on earth shares. That key would hand the first orphaned project
+    # to every later job whose download failed.
+    _z = os.path.join(_VOLR, "zero.mp4"); open(_z, "wb").close()
+    check("a 0-byte source is FAILED, not a valid hash every failed download would share",
+          J.file_sha256(_z)["state"] == "FAILED"
+          and J.file_sha256(_z)["sha"] is None,
+          J.file_sha256(_z)["why"][:80])
+    # THE VOLUME IS MOUNTED AT THE SAME PATH IN BOTH FUNCTIONS, or a sheet
+    # written by `attach` is a path `edit` cannot open — with no error.
+    _appsrc = open("chatcut_job_app.py", encoding="utf-8").read()
+    _mounts = _re.findall(r"volumes=\{([A-Za-z_]+):\s*([A-Za-z_]+)\}", _appsrc)
+    check("attach and edit mount the same volume at the same path, spelled by constant",
+          len(_mounts) == 2 and all(m == ("ATTACH_ROOT", "ATTACH_VOL") for m in _mounts),
+          "mounts=%r" % (_mounts,))
+    # AND THE DISPATCH RELOADS IT. A Volume shows what it held at container
+    # start; `attach` committed after that, so without a reload the sheets are
+    # absent and the record reads as stale for a reason that is not true.
+    check("the dispatch reloads the volume before looking, and commits after writing",
+          "ATTACH_VOL.reload()" in _appsrc and "ATTACH_VOL.commit()" in _appsrc,
+          "reload=%s commit=%s" % ("ATTACH_VOL.reload()" in _appsrc,
+                                   "ATTACH_VOL.commit()" in _appsrc))
 
     if FAILS:
         print("\n%d FAILURE(S)" % len(FAILS))
