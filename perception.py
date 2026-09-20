@@ -436,7 +436,7 @@ FACE_SAMPLE_H = 480
 
 
 def face_track(path, every_n_frames=6, model=YUNET_MODEL, fps_hint=30.0,
-               sample_h=FACE_SAMPLE_H):
+               sample_h=FACE_SAMPLE_H, frame_w=None, frame_h=None):
     """-> {state, boxes, faces_per_s, samples, hits, detector, why}
 
     `boxes` is [{t, x, y, w, h, score}] in the SAMPLED frame's pixel space,
@@ -444,9 +444,9 @@ def face_track(path, every_n_frames=6, model=YUNET_MODEL, fps_hint=30.0,
     pixels of an unstated frame size is the shape that produced a card placed
     off the bottom of the picture.
     """
-    out = {"state": "ABSENT", "boxes": [], "faces_per_s": None, "samples": 0,
-           "hits": 0, "detector": "yunet", "frame_w": None, "frame_h": None,
-           "why": "not attempted"}
+    out = {"state": "ABSENT", "boxes": [], "traj": None, "faces_per_s": None,
+           "samples": 0, "hits": 0, "detector": "yunet", "frame_w": None,
+           "frame_h": None, "why": "not attempted"}
     if not path or not os.path.exists(path):
         return dict(out, why="no file at %r" % (path,))
     if not os.path.exists(model):
@@ -497,6 +497,46 @@ def face_track(path, every_n_frames=6, model=YUNET_MODEL, fps_hint=30.0,
                                   "w": float(f[2]), "h": float(f[3]),
                                   "score": round(float(f[14]), 3)})
         dur = _probe_duration_s(path)
+        # ── THE TRAJECTORY: ONE PRODUCER, TWO CONSUMERS ────────────────────
+        # SAME EYES (Zac, 2026-09-20). The morning run terminated on a
+        # face/text collision, and the agent had been shown a region from
+        # res10 while the read-back judged against YuNet -- two detectors, two
+        # sampling grids, two boxes. The agent was told one thing and marked
+        # against another, so the terminal was OURS.
+        #
+        # The fix is not "make both call YuNet". Two callers that happen to
+        # agree today is not the property; ONE trajectory, produced here and
+        # consumed by both, is. Rows are {t, cx, cy, found, confidence} in
+        # SOURCE-FRAME pixels -- the shape face_lines already reads -- so the
+        # turn-1 region and the collision check cannot diverge again.
+        #
+        # SCALED BACK UP. Frames are extracted at scale=-2:<sample_h>, so every
+        # box is in the sampled frame's pixels. Handing those to a consumer
+        # that assumes 1080x1920 is the coded-dims class of error: it renders
+        # perfectly and points at the wrong part of the picture.
+        sx = (float(frame_w) / out["frame_w"]) if (frame_w and out["frame_w"]) else 1.0
+        sy = (float(frame_h) / out["frame_h"]) if (frame_h and out["frame_h"]) else 1.0
+        by_t = {}
+        for b in boxes:
+            prev = by_t.get(b["t"])
+            if prev is None or b["score"] > prev["score"]:
+                by_t[b["t"]] = b
+        traj = []
+        for i in range(len(frames)):
+            t = round(i * every_n_frames / float(fps_hint or 30.0), 3)
+            b = by_t.get(t)
+            if b:
+                traj.append({"t": t, "cx": round((b["x"] + b["w"] / 2.0) * sx, 1),
+                             "cy": round((b["y"] + b["h"] / 2.0) * sy, 1),
+                             "w": round(b["w"] * sx, 1), "h": round(b["h"] * sy, 1),
+                             "found": True, "confidence": b["score"]})
+            else:
+                traj.append({"t": t, "cx": None, "cy": None, "found": False,
+                             "confidence": 0.0})
+        out["traj"] = traj
+        out["scaled_by"] = {"x": round(sx, 4), "y": round(sy, 4),
+                            "from": [out["frame_w"], out["frame_h"]],
+                            "to": [frame_w, frame_h]}
         out.update({"state": "MEASURED", "boxes": boxes, "hits": hits,
                     "samples": len(frames),
                     "faces_per_s": (round(len(boxes) / dur, 2) if dur else None),
@@ -513,11 +553,25 @@ def face_track(path, every_n_frames=6, model=YUNET_MODEL, fps_hint=30.0,
 # ── ADAPTIVE FRAME DENSITY ─────────────────────────────────────────────────
 # Zac: 1-2fps baseline, EVERY frame within +-0.5s of a shot change, an emphasis
 # peak, the hook and the close. Shot changes are the primary anchor.
-DENSITY_WINDOW_S = 0.5
+# ZAC'S CAP (2026-09-20), after the morning run measured 250 frames against 41
+# at a flat 2fps -- 6.1x, 13 sheets of 20. The rule as first specified is
+# generous by construction: +-0.5s at the SOURCE fps is 30 frames per anchor,
+# and a clip with six anchors pays for six of those. Three dials, and the third
+# is the one that actually bounds it:
+#   * the window halves to +-0.25s
+#   * dense spans sample at 10fps, not the source's 30
+#   * THE TOTAL IS CAPPED at a multiple of the flat count, so a clip with
+#     twenty shot changes cannot buy itself a hundred sheets. A per-anchor
+#     saving on an unbounded step is absorbed by the step; only the cap bounds
+#     the bill.
+DENSITY_WINDOW_S = 0.25
+DENSITY_DENSE_FPS = 10.0
+DENSITY_MAX_MULTIPLE = 2.0
 
 
 def frame_density(dur_s, changes=None, peaks=None, base_fps=1.0, src_fps=30.0,
-                  window_s=DENSITY_WINDOW_S, hook_s=2.0, close_s=2.0):
+                  window_s=DENSITY_WINDOW_S, hook_s=2.0, close_s=2.0,
+                  dense_fps=DENSITY_DENSE_FPS, max_multiple=DENSITY_MAX_MULTIPLE):
     """-> {state, times, dense_spans, n_base, n_dense, why}
 
     THE COST IS THE POINT, so it is returned rather than described: `n_dense`
@@ -555,21 +609,45 @@ def frame_density(dur_s, changes=None, peaks=None, base_fps=1.0, src_fps=30.0,
         times.append(round(i * step, 3))
         i += 1
     n_base = len(times)
-    fstep = 1.0 / float(src_fps)
+    fstep = 1.0 / float(dense_fps or src_fps)
+    dense = []
     for sp in spans:
         t = sp["start"]
         while t <= sp["end"]:
-            times.append(round(t, 3))
+            dense.append(round(t, 3))
             t += fstep
-    times = sorted(set(times))
+    # THE CAP, APPLIED BEFORE THE FRAMES ARE PAID FOR, and it says what it
+    # dropped. A silent truncation reads as "covered everything" -- the
+    # denominator rule, applied to a cost rather than to a report.
+    ceiling = int(n_base * float(max_multiple))
+    room = max(0, ceiling - n_base)
+    dropped = 0
+    if len(set(dense) - set(times)) > room:
+        # Keep them SPREAD rather than taking the first `room`: the anchors are
+        # ordered in time, so a head-first truncation would spend the whole
+        # allowance on the opening and leave the close with nothing.
+        uniq = sorted(set(dense) - set(times))
+        if room <= 0:
+            keep = []
+        else:
+            stride = len(uniq) / float(room)
+            keep = [uniq[int(k * stride)] for k in range(room)]
+        dropped = len(uniq) - len(keep)
+        dense = keep
+    times = sorted(set(times) | set(dense))
     out.update({"state": "MEASURED", "times": times, "dense_spans": spans,
                 "n_base": n_base, "n_dense": len(times) - n_base,
-                "why": "%d frame(s): %d at %.1ffps baseline plus %d across %d "
-                       "dense span(s) at %.0ffps (+-%.1fs of %d shot change(s), "
-                       "%d peak(s), hook, close)"
-                       % (len(times), n_base, base_fps, len(times) - n_base,
-                          len(spans), src_fps, window_s,
-                          len(changes or []), len(peaks or []))})
+                "dropped": dropped, "ceiling": ceiling,
+                "why": "%d frame(s) against a %d ceiling (%.1fx the %d-frame "
+                       "flat %.1ffps): %d baseline plus %d across %d dense "
+                       "span(s) at %.0ffps, +-%.2fs of %d shot change(s), %d "
+                       "peak(s), hook, close%s"
+                       % (len(times), ceiling, len(times) / float(n_base or 1),
+                          n_base, base_fps, n_base, len(times) - n_base,
+                          len(spans), dense_fps, window_s,
+                          len(changes or []), len(peaks or []),
+                          "; %d dense frame(s) DROPPED to stay inside the cap"
+                          % dropped if dropped else "")})
     return out
 
 

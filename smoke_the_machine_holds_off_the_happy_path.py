@@ -2984,6 +2984,67 @@ def main():
               for e in _pend),
           "%d pending: %s" % (len(_pend), ", ".join(sorted({e["family"] for e in _pend}))))
 
+    # ---- THE WITHIN-RUN CACHE GATE TERMINATES ----
+    # Zac: "the run must stop at call 2, not bill to the end." A gate that
+    # REPORTS a cache miss and lets the run continue is the expensive half of
+    # this family -- it looks like an instrument and costs like an outage.
+    check("the cache gate fails a call that did not read the prefix, and passes one that did",
+          J.cache_gate({"read": 14414, "write": 201698}, {"read": 216112})[0] is True
+          and J.cache_gate({"read": 14414, "write": 201698}, {"read": 4264})[0] is False
+          # a prefix that was never measured cannot convict anyone
+          and J.cache_gate({"read": 0, "write": 0}, {"read": 0})[0] is True,
+          "hit=%s miss=%s" % (J.cache_gate({"read": 14414, "write": 201698}, {"read": 216112})[1],
+                              J.cache_gate({"read": 14414, "write": 201698}, {"read": 4264})[1]))
+    # AND IT STOPS THE RUN. Driven through the REAL run_two_calls rather than a
+    # restatement of its loop: a rule that lives inside a dispatch and is tested
+    # by a local copy is tested nowhere.
+    _calls = []
+
+    def _inv(_n, _message):
+        _calls.append(_n)
+        # Call 1 places something, so the run has a reason to reach call 2 --
+        # a stub that places nothing terminates at NO PLACEMENT and never
+        # exercises the gate. Call 2 then WRITES the prefix again instead of
+        # reading it, which is exactly what a changed tool list looks like on
+        # the wire.
+        _u = ({"read": 14414, "write": 201698} if _n == 1
+              else {"read": 4264, "write": 201698})
+        return {"usage": _u, "stop_reason": "end_turn", "text": "", "api_status": 200,
+                "tool_calls": [{"name": "mcp__chatcut__edit_item",
+                                "input": {"adds": [{"type": "text"}]}}]}
+    try:
+        _tm = J.run_two_calls(_inv, lambda *a, **k: {"message": "rw", "sheets": []},
+                              "first", verify=lambda *a, **k: {},
+                              readback=lambda *a, **k: {})
+    except TypeError:
+        _tm = None
+    check("a call-2 prefix write TERMINATES the run at call 2 rather than billing on",
+          _tm is not None
+          and (_tm.get("terminal") or {}).get("kind") == "CACHE MISS"
+          and (_tm.get("terminal") or {}).get("at") == 2
+          and len(_calls) == 2,
+          "terminal=%s at=%s calls=%d" % (
+              (_tm or {}).get("terminal", {}).get("kind") if _tm else "run_two_calls not drivable",
+              (_tm or {}).get("terminal", {}).get("at") if _tm else "-", len(_calls)))
+    # THE TOOL-BLOCK READER READS ITS FILE, NOT A DICT FILLED 160 LINES LATER.
+    # It printed "DIFFERS across calls (0 shas)" on every run this lane has
+    # ever done, because out["prefix_calls"] is populated below the print. A
+    # permanent red becomes furniture; this one was quoted as a finding.
+    _appsrc = open("chatcut_job_app.py", encoding="utf-8").read()
+    _tb = _appsrc.index("TOOL BLOCK      : %s")
+    _region = _appsrc[max(0, _tb - 2000):_tb]
+    check("the tool-block reader reads the fingerprint file and not a dict filled later",
+          "_read_prefix_rows()" in _region
+          and 'out.get("prefix_calls")' not in _region,
+          "reads _read_prefix_rows=%s, still reads out[]=%s" % (
+              "_read_prefix_rows()" in _region, 'out.get("prefix_calls")' in _region))
+    # ZERO SHAS IS ABSENT, NOT DRIFT. "we could not read it" and "they
+    # disagree" are different facts and only one is about the tool block.
+    check("no tool sha at all reports ABSENT rather than DIFFERS",
+          "this is \n                                           \"unread, not drifted\"" in _appsrc
+          or "unread, not drifted" in _appsrc,
+          "the absent branch names itself")
+
     if FAILS:
         print("\n%d FAILURE(S)" % len(FAILS))
         for f in FAILS:

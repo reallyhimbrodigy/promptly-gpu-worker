@@ -6715,7 +6715,8 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         _perc["motion_curve"] = _pc.motion_curve("/work/source.mp4")
         _perc["audio_energy"] = _pc.audio_energy("/work/source.mp4")
         _perc["silence_spans"] = _pc.silence_spans("/work/source.mp4")
-        _perc["face_track"] = _pc.face_track("/work/source.mp4", fps_hint=_src_fps)
+        _perc["face_track"] = _pc.face_track("/work/source.mp4", fps_hint=_src_fps,
+                                            frame_w=_geo["w"], frame_h=_geo["h"])
         # FILLERS NEED THE WORDS, which arrive on the beats thread. Joined
         # here rather than left out: the morning run reported fillers ABSENT
         # and that was honest and useless -- a signal censused, printed, and
@@ -6960,7 +6961,36 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         _platter, _n_platter = component_platter()
     except Exception as _pe:                                      # noqa: BLE001
         _platter, _n_platter = "PROPERTY KEYS: ABSENT (%s) — every key you send is a guess" % str(_pe)[:80], 0
-    _face_lines = face_lines((_regions.get("face_traj") if isinstance(_regions, dict) else None), _dur_for_detect or 0)
+    # ── SAME EYES: ONE TRAJECTORY, TWO CONSUMERS (Zac, 2026-09-20) ────────
+    # The morning run terminated on a face/text collision and the terminal was
+    # OURS: turn 1 showed the agent a region from res10 (region_states ->
+    # face_bands, 82/82 at 0.25s steps) while the read-back judged against
+    # YuNet (103/103 every 6 frames). Two detectors, two grids, two boxes —
+    # the agent was told one thing and marked against another.
+    #
+    # THE FIX IS ONE PRODUCER, NOT TWO CALLERS THAT AGREE. Two detectors that
+    # happen to agree today is not the property. perception.face_track is the
+    # single producer and both the turn-1 region and the collision check read
+    # its trajectory.
+    #
+    # res10's trajectory is still READ, and only to report disagreement: a
+    # silent swap would leave nobody able to say whether the new detector is
+    # better on THIS clip, and the whole argument for YuNet is a measurement.
+    _ft = (_perc.get("face_track") or {})
+    _face_traj = _ft.get("traj")
+    _face_src = "yunet"
+    if not _face_traj:
+        _face_traj = (_regions.get("face_traj") if isinstance(_regions, dict) else None)
+        _face_src = "res10 (FALLBACK — yunet %s: %s)" % (
+            _ft.get("state"), str(_ft.get("why"))[:80])
+    _r10 = (_regions.get("face_traj") if isinstance(_regions, dict) else None) or []
+    _y_found = sum(1 for r in (_ft.get("traj") or []) if r.get("found"))
+    _r_found = sum(1 for r in _r10 if r.get("found"))
+    print("  FACE REGION     : %s  yunet %d/%d found, res10 %d/%d found — the "
+          "turn-1 region and the read-back check read the SAME trajectory"
+          % (_face_src, _y_found, len(_ft.get("traj") or []), _r_found, len(_r10)),
+          flush=True)
+    _face_lines = face_lines(_face_traj, _dur_for_detect or 0)
     print("  PLATTER         : %d component(s), %d chars; FACE lines: %d" % (_n_platter, len(_platter), len(_face_lines)), flush=True)
     # THE THINKING CAP. 267 of 608 seconds — 44% of the wall — was `thinking`
     # blocks on an agent handed a COMPLETE plan. It is executing, not deciding,
@@ -7559,6 +7589,12 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
            "perception": {_k: {"state": _v.get("state"), "why": _v.get("why")}
                           for _k, _v in _perc.items() if isinstance(_v, dict)},
            "perception_measured": _pok,
+           # WHICH EYES THE AGENT WAS GIVEN. A run whose terminal is a face
+           # collision is unreadable without it — the morning run's terminal
+           # was ours and nothing in its record said so.
+           "face_region_detector": _face_src,
+           "face_found_yunet": _y_found,
+           "face_found_res10": _r_found,
            "frame_density": {_k: (_perc.get("frame_density") or {}).get(_k)
                              for _k in ("state", "n_base", "n_dense", "why")},
            "prestage_source": (_stage or {}).get("prestage_source", "reused"),
@@ -8044,16 +8080,55 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                                                         "redacted": _rs.get("redacted"), "chars": _rs.get("chars")}
     except Exception:                                             # noqa: BLE001
         _think_by_call = {"state": "ABSENT"}
+    # ── THE TOOL BLOCK, READ FROM ITS FILE AND NOT FROM `out` ─────────────
+    # THIS READER HAS NEVER ONCE MEASURED ANYTHING. It read out["prefix_calls"],
+    # which is populated ~160 lines BELOW this print, so it always saw an empty
+    # list -- and an empty list makes `len(_shas) == 1` false, so it printed
+    # "DIFFERS across calls (0 shas) -- every later call is a cold write" on
+    # EVERY RUN THIS LANE HAS EVER DONE. A permanent red becomes furniture, and
+    # this one was quoted to Zac on 2026-09-20 as a real finding about caching.
+    #
+    # The truth, read from the same run's record afterwards: call 1 and call 2
+    # carried the IDENTICAL tool sha 430a28ae6aa0e36a (2 tools, 1121 bytes) and
+    # the identical system sha e4bffdeb6d3bb1e7. Nothing drifted.
+    #
+    # TWO FIXES, BECAUSE THERE ARE TWO BUGS. It now reads the JSONL directly so
+    # it cannot depend on assignment order again; and ZERO SHAS IS ABSENT, NOT
+    # "DIFFERS" -- "we could not read it" and "they disagree" are different
+    # facts and only one of them is about the tool block.
     _tools_by_call, _tools_same = [], None
     try:
-        for _c in (out.get("prefix_calls") or []):
+        for _c in (_read_prefix_rows() or []):
             _t = ((_c.get("fp") or {}).get("tools") or {})
             _tools_by_call.append({"n": _c.get("n"), "count": _t.get("n"), "sha": _t.get("sha"), "bytes": _t.get("bytes")})
         _shas = {x["sha"] for x in _tools_by_call if x.get("sha")}
-        _tools_same = (len(_shas) == 1) if _tools_by_call else None
-        print("  TOOL BLOCK      : %s — %s" % (
-            ("IDENTICAL on all %d call(s)" % len(_tools_by_call)) if _tools_same else ("DIFFERS across calls (%d shas) — every later call is a cold write" % len(_shas)),
-            ", ".join("call %s: %s tools %s" % (x["n"], x["count"], str(x["sha"])[:12]) for x in _tools_by_call)), flush=True)
+        if not _tools_by_call:
+            _tools_same, _verdict = None, "ABSENT — no fingerprinted call to read"
+        elif not _shas:
+            _tools_same, _verdict = None, ("ABSENT — %d call(s) fingerprinted and "
+                                           "not one carried a tool sha; this is "
+                                           "unread, not drifted" % len(_tools_by_call))
+        elif len(_shas) == 1:
+            _tools_same, _verdict = True, "IDENTICAL on all %d call(s)" % len(_tools_by_call)
+        else:
+            _tools_same, _verdict = False, ("DIFFERS across calls (%d distinct sha) "
+                                            "— every later call is a cold write" % len(_shas))
+        print("  TOOL BLOCK      : %s — %s" % (_verdict,
+            ", ".join("call %s: %s tools %s" % (x["n"], x["count"], str(x["sha"])[:12])
+                      for x in _tools_by_call)), flush=True)
+        # WHAT DIFFERED, NOT JUST THAT IT DID (Zac). A drift verdict nobody can
+        # act on sends the next person to diff two 22 MB requests by hand.
+        if _tools_same is False:
+            _byname = {}
+            for _c in (_read_prefix_rows() or []):
+                _t = ((_c.get("fp") or {}).get("tools") or {})
+                _byname[_c.get("n")] = set(_t.get("names") or [])
+            _ns = sorted(_byname)
+            if len(_ns) >= 2:
+                _a, _b = _byname[_ns[0]], _byname[_ns[-1]]
+                print("      DRIFT         : call %s -> %s  added=%s removed=%s"
+                      % (_ns[0], _ns[-1], sorted(_b - _a) or "none",
+                         sorted(_a - _b) or "none"), flush=True)
     except Exception as _te:                                      # noqa: BLE001
         _tools_same = None
         print("  TOOL BLOCK      : ABSENT (%s)" % str(_te)[:80], flush=True)
