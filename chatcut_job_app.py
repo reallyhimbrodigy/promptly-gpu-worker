@@ -7303,7 +7303,7 @@ def source_layer_probe(clip_url: str = ""):
     return {k: v for k, v in out.items() if k != "frames"} | {"frames_n": (out.get("frames") or {}).get("n")}
 
 
-def component_contract(code):
+def component_contract(code, properties=None):
     """ChatCut's three validator rules, checked BEFORE the component is sent. PURE.
 
     -> [violations] — empty means it satisfies the three rules we have MEASURED
@@ -7350,6 +7350,24 @@ def component_contract(code):
     m = re.search(r"return\s*\(\s*<(\w+)", stripped)
     if m and m.group(1) != "div":
         bad.append("the first returned root is <%s>, not <div>" % m.group(1))
+    # RULE 4, MEASURED 2026-09-19 FROM THE VALIDATOR'S OWN WORDS: "Motion Graphic
+    # property \"text\" is declared in properties array but not used in code. Remove
+    # the property entry or read props.text in the component." Three capability
+    # probes were refused for exactly this — I sent every probe both `clip` and
+    # `text` while each reads one — and the refusal said nothing about the
+    # capability I was asking. The two lists must agree in BOTH directions.
+    if properties is not None:
+        declared = {str((q or {}).get("key") or "") for q in properties if isinstance(q, dict)}
+        declared.discard("")
+        read = set(re.findall(r"\bprops\.([A-Za-z_][A-Za-z0-9_]*)", stripped))
+        unused = sorted(declared - read)
+        undeclared = sorted(read - declared)
+        if unused:
+            bad.append("declared but never read in the code (the validator refuses this): %s"
+                       % ", ".join(unused))
+        if undeclared:
+            bad.append("read through props but not declared as a property: %s"
+                       % ", ".join(undeclared))
     return bad
 
 
@@ -7462,9 +7480,21 @@ def mg_runtime_probe(clip_url: str = ""):
     out = {"state": "RUNNING", "project": pid, "capabilities": {}}
     print("  PRESTAGE        project=%s source=%s" % (str(pid)[:8], str(src_asset)[:12]), flush=True)
 
+    def _props_for(nm):
+        """ONLY the properties this probe actually reads. The validator refuses a
+        declared-but-unused property, and a refusal about a property says nothing
+        about the capability the probe exists to ask."""
+        code_ = MG_CAPABILITY_PROBES[nm]
+        out_ = []
+        if "props.clip" in code_:
+            out_.append({"key": "clip", "label": "Clip", "type": "video", "defaultValue": ""})
+        if "props.text" in code_:
+            out_.append({"key": "text", "label": "Text", "type": "text", "defaultValue": nm})
+        return out_
+
     for name, code in MG_CAPABILITY_PROBES.items():
         row = {"registered": False, "placed": False, "frame": "ABSENT"}
-        _v = component_contract(code)
+        _v = component_contract(code, _props_for(name))
         if _v:
             row["state"] = "REFUSED"; row["refusal"] = "our own contract check: %s" % "; ".join(_v)
             out["capabilities"][name] = row
@@ -7474,9 +7504,7 @@ def mg_runtime_probe(clip_url: str = ""):
             a = _mcp_call(tok, "create_motion_graphic_from_code", {
                 "projectId": pid, "name": "cap_" + name, "code": code,
                 "width": 1080, "height": 1920, "durationInFrames": 60,
-                "properties": normalise_properties([
-                    {"key": "clip", "label": "Clip", "type": "video", "defaultValue": ""},
-                    {"key": "text", "label": "Text", "type": "text", "defaultValue": name}])}, expect=None)
+                "properties": normalise_properties(_props_for(name))}, expect=None)
             mg = asset_id_from(a or {})
             row["registered"] = bool(mg)
             if not mg:
@@ -7489,7 +7517,8 @@ def mg_runtime_probe(clip_url: str = ""):
             else:
                 r = edit_item_checked(tok, {"projectId": pid, "adds": [
                     {"type": "motion-graphic", "assetId": mg, "fromFrame": 0, "durationInFrames": 60,
-                     "propertyOverrides": {"clip": src_asset, "text": name}}]},
+                     "propertyOverrides": {k["key"]: (src_asset if k["key"] == "clip" else name)
+                                           for k in _props_for(name)}}]},
                     "placing the %s capability probe" % name)
                 row["placed"] = bool((r.get("adds") or [{}])[0].get("id"))
                 row["item"] = ((r.get("adds") or [{}])[0] or {}).get("id")
@@ -7847,7 +7876,7 @@ def zoom_pair(clip_url: str = "", at_s: float = 12.0, span_s: float = 2.0,
     # ── OURS: our ported component, as a layer OVER the base ─────────────
     def place_ours(pid, base, src_asset):
         code = ported_code("SmoothPush")
-        _v = component_contract(code)
+        _v = component_contract(code, PORTED_PROPS["SmoothPush"])
         if _v:
             # REFUSED HERE, NOT BY THE SERVER. Sending a component we already know
             # breaks a measured rule spends a round trip to be told what we knew.

@@ -1925,12 +1925,25 @@ def main():
     # The ported Remotion components were frame-verified against Remotion and REFUSED by
     # ChatCut on six counts; a later hand-written one was refused for AbsoluteFill when
     # the repo's own measured contract says a plain div. A rule paid for twice is a check.
+    # AGAINST THEIR OWN PROPERTY TABLES, not just the code. The validator refuses a
+    # property declared and never read — three capability probes died on exactly that,
+    # and the refusal said nothing about the capability each probe existed to ask.
     check("every component this harness can send satisfies the contract we measured",
-          all(not J.component_contract(open("port/build/%s.jsx" % _n, encoding="utf-8").read())
-              for _n in ("SmoothPush", "StepZoom", "StagedPush"))
-          and all(not J.component_contract(_c) for _c in J.MG_CAPABILITY_PROBES.values()),
-          str({_n: J.component_contract(open("port/build/%s.jsx" % _n, encoding="utf-8").read())
+          all(not J.component_contract(open("port/build/%s.jsx" % _n, encoding="utf-8").read(),
+                                       J.PORTED_PROPS[_n])
+              for _n in ("SmoothPush", "StepZoom", "StagedPush")),
+          str({_n: J.component_contract(open("port/build/%s.jsx" % _n, encoding="utf-8").read(),
+                                        J.PORTED_PROPS[_n])
                for _n in ("SmoothPush", "StepZoom", "StagedPush")}))
+    check("a property declared and never read is caught, and so is a read that was never declared",
+          J.component_contract("const Component=({item})=>{const props=item.props;"
+                               " return (<div>{props.a}</div>);};", [{"key": "a"}, {"key": "b"}])
+          and J.component_contract("const Component=({item})=>{const props=item.props;"
+                                   " return (<div>{props.z}</div>);};", [])
+          and not J.component_contract("const Component=({item})=>{const props=item.props;"
+                                       " return (<div>{props.a}</div>);};", [{"key": "a"}]),
+          str(J.component_contract("const Component=({item})=>{const props=item.props;"
+                                   " return (<div>{props.a}</div>);};", [{"key": "a"}, {"key": "b"}])))
     check("each of the four refusal classes is caught, and a COMMENT is not code",
           J.component_contract("const Component = () => { return (<AbsoluteFill/>); };")
           and J.component_contract("const FOO = 3;\nconst Component = () => { return (<div/>); };")
