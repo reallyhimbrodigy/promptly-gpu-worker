@@ -1957,6 +1957,41 @@ READ_TOKEN_CEILING = 2_500_000
 EXPORT_POLL_SCHEDULE = ([1] * 6 + [2] * 6 + [3] * 6 + [4] * 5 + [6] * 30)
 
 
+ROUTES = ("speech", "no-speech", "other")
+
+
+def run_route(beats, state, why=""):
+    """WHICH ROUTE THIS RUN IS, for the record. PURE. -> {route, words, why}
+
+    ZAC, 2026-09-19: every run record carries its route so density can be read
+    against the right reference. A blended density over a mixed route population is
+    not a product metric — this repo's own law, and Builder-2's split is waiting on
+    the field.
+
+    THREE ROUTES, AND THE THIRD IS NOT A DUMP:
+      speech     the transcript READ and returned words
+      no-speech  the transcript READ and returned NONE — a positive reading of
+                 silence, not a failure to look
+      other      the read did not complete, so the route is UNKNOWN and says so
+
+    AN EMPTY TRANSCRIPT FROM A FAILED READ IS NOT SILENCE. That conflation is
+    already a scar here: an empty transcript once scored as fine because the gate
+    read the value and not the state, and 11 of 40 clips passed with zero words. A
+    clip we could not transcribe is `other`, and it carries the reason.
+    """
+    n = len(beats or [])
+    st = str(state or "").upper()
+    if st == "MEASURED":
+        if n:
+            return {"route": "speech", "words": n,
+                    "why": "the transcript read and returned %d beat(s)" % n}
+        return {"route": "no-speech", "words": 0,
+                "why": "the transcript READ and returned nothing — silence, positively read"}
+    return {"route": "other", "words": n,
+            "why": ("the transcript did not complete (%s: %s) — the route is UNKNOWN, and an "
+                    "unread transcript is not silence" % (st or "no state", str(why)[:140]))}
+
+
 def derive_record(items, beats, base_item_id=None, why_text=""):
     """The record, READ OFF THE TIMELINE. -> {spec, rulings}
 
@@ -6714,6 +6749,12 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     # envelope shape twice this week and been wrong twice; this is the same
     # correction as the raw-wire sample, applied to ChatCut's side.
     _fi = (_final.get("items") or [])
+    # THE ROUTE, ON EVERY RECORD (Zac, 2026-09-19). Density read across a mixed route
+    # population is not a product metric, so the field travels with the run rather
+    # than being reconstructed afterwards from something that no longer exists.
+    out["route"] = run_route(_beats, _beats_box.get("state"), _beats_box.get("why"))
+    print("  ROUTE           : %s — %s" % (out["route"]["route"], out["route"]["why"]), flush=True)
+
     out["timeline_sample"] = {
         "count": len(_fi),
         "video_count": sum(1 for i in _fi
@@ -8630,7 +8671,7 @@ def unpicklable_safe(fn, *a, **k):
 @app.function(image=IMG, timeout=3000, cpu=4, memory=8192,
               secrets=[modal.Secret.from_name("chatcut-oauth")])
 def caption_face_check(clip_url: str = "", at_s: float = 6.0, span_s: float = 2.0,
-                       text: str = "this is the moment"):
+                       text: str = "hamburgefons"):
     """IS THE FACE ON THE FRAME THE FACE THE STYLE SPECIFIES? No model calls.
 
     NINE STYLES RENDERING DIFFERENTLY IS NOT NINE STYLES RENDERING CORRECTLY. The
@@ -8649,6 +8690,24 @@ def caption_face_check(clip_url: str = "", at_s: float = 6.0, span_s: float = 2.
     style names. A silent fallback puts every style on one face, and the argmax then
     names that face for all nine — which is visible in the table rather than hidden
     in a pass.
+
+    THE STRING IS SHORT ON PURPOSE. "this is the moment" WRAPPED TO TWO LINES in the
+    component while the reference drew one, which is why five styles overlapped no
+    candidate at all — the masks were different SHAPES, not different faces. The
+    component's text box is the canvas MINUS ITS PADDING (fontSize * 0.9 each side)
+    and then 94% of that: 696px at preview scale, not the 829px I first measured
+    against by forgetting the padding. Four of the five families exceed 696px with the
+    long string and only one exceeds 829px, which is exactly the set that went absent.
+    A short word fits every face with room to spare, so layout stops being a variable
+    and the only thing that differs between arms is the typeface.
+
+    AND THE STRING MUST SEPARATE THE FACES, not merely fit. With "moment" — six
+    lowercase letters — Playfair Display scored 0.5451 against an INTER frame, barely
+    under Inter's own 0.5753. Six round lowercase glyphs look alike in any face, so
+    the argmax was deciding on very little. "hamburgefons" is the type-setter's own
+    proof string for exactly this reason: ascenders, descenders, round and square
+    bowls, and the serif/sans difference lands on every one of them. Measured at 529
+    to 606 px across the five families, comfortably inside the 696px box.
     """
     _t0 = time.time()
     os.makedirs("/work", exist_ok=True)
@@ -8771,6 +8830,22 @@ def caption_face_check(clip_url: str = "", at_s: float = 6.0, span_s: float = 2.
                       for _dx, _dy in ((0, _fs), (0, -_fs), (_fs * 3, 0), (-_fs * 3, 0))]
             _nulls = [x for x in _nulls if x is not None and x >= 0]
             row["null"] = round(max(_nulls), 4) if _nulls else None
+            # THE FRAME AND THE REFERENCE, KEPT. Four styles rendered text (max diff
+            # 254, so something WAS drawn) that overlapped no candidate at all — and a
+            # score table cannot say why a mask is somewhere unexpected. Only the
+            # picture can, so it comes back with the verdict.
+            import base64 as _b64
+            row["b64_frame"] = _b64.b64encode(open(list(f.values())[0], "rb").read()).decode()
+            _ref = refs.get(fam)
+            if _ref is not None:
+                _ri = _PI.fromarray((_ref * 255).astype("uint8"))
+                _rp = "/work/ref_%s.png" % style
+                _ri.save(_rp)
+                row["b64_ref"] = _b64.b64encode(open(_rp, "rb").read()).decode()
+            _gi = _PI.fromarray((gm["mask"] * 255).astype("uint8"))
+            _gp = "/work/glyph_%s.png" % style
+            _gi.save(_gp)
+            row["b64_glyphs"] = _b64.b64encode(open(_gp, "rb").read()).decode()
             row.update(face_verdict(scores, fam, null=(max(_nulls) if _nulls else None)))
             print("  %-16s %-12s best=%-18s margin=%s  %s"
                   % (style, row.get("state"), row.get("best"), row.get("margin"),
@@ -8799,7 +8874,10 @@ def caption_face_check(clip_url: str = "", at_s: float = 6.0, span_s: float = 2.
     out["state"] = "MEASURED"
     out["wall_s"] = round(time.time() - _t0, 1)
     RESULTS["caption-face-check"] = out
-    return {k: v for k, v in out.items() if k != "fonts"}
+    return {"state": out["state"], "wall_s": out.get("wall_s"), "project": out.get("project"),
+            "verdict": out.get("verdict"),
+            "styles": {k: {kk: vv for kk, vv in v.items() if not kk.startswith("b64")}
+                       for k, v in out["styles"].items()}}
 
 
 @app.function(image=IMG, timeout=2400, cpu=4, memory=8192,

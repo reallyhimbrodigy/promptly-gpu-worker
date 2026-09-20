@@ -2328,6 +2328,30 @@ def main():
           and J.CAPTION_STYLE_WEIGHT_CASE_WEIGHTS == [700, 800, 900],
           "weights %s" % J.CAPTION_STYLE_WEIGHT_CASE_WEIGHTS)
 
+    # ---- ITEM 1: THE ROUTE ON EVERY RECORD (Zac, 2026-09-19) ----
+    # Density across a mixed route population is not a product metric. Three routes,
+    # and the third is not a dump: `other` means the transcript DID NOT COMPLETE, so
+    # the route is unknown. An empty transcript from a FAILED read is not silence —
+    # that conflation already cost this repo a gate that passed 11 of 40 clips with
+    # zero words because it read the value and not the state.
+    check("a read transcript with words is speech, and with none is no-speech",
+          J.run_route([1, 2, 3], "MEASURED")["route"] == "speech"
+          and J.run_route([1, 2, 3], "MEASURED")["words"] == 3
+          and J.run_route([], "MEASURED")["route"] == "no-speech"
+          and "positively read" in J.run_route([], "MEASURED")["why"],
+          str(J.run_route([], "MEASURED")))
+    check("a transcript that did NOT complete is `other`, never no-speech, and carries why",
+          J.run_route([], "FAILED", "timeout after 90s")["route"] == "other"
+          and "timeout after 90s" in J.run_route([], "FAILED", "timeout after 90s")["why"]
+          and J.run_route([], "ABSENT", "not started")["route"] == "other"
+          and "not silence" in J.run_route([], "ABSENT", "n")["why"],
+          J.run_route([], "FAILED", "timeout after 90s")["why"][:100])
+    check("the route travels on the record, computed from the beats' own state",
+          'out["route"] = run_route(_beats, _beats_box.get("state"), _beats_box.get("why"))'
+          in open("chatcut_job_app.py", encoding="utf-8").read()
+          and J.ROUTES == ("speech", "no-speech", "other"),
+          "wired at the record")
+
     # THE WORKING TREE, NOT THE COMMIT. red_proof_no_undefined_names builds an ISOLATED
     # worktree from HEAD, so it judges what is COMMITTED — and a run is launched from what
     # is on disk. A slice-based edit removed `place_theirs`, `place_ours` and PORTED_PROPS
