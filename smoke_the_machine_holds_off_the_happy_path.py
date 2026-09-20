@@ -2751,6 +2751,107 @@ def main():
           "reload=%s commit=%s" % ("ATTACH_VOL.reload()" in _appsrc,
                                    "ATTACH_VOL.commit()" in _appsrc))
 
+    # ---- PERCEPTION SIGNALS (item 4) ----
+    import perception as PC
+    _pwrong = []
+    _pdrive = {
+        "shot_changes":  lambda: PC.shot_changes("/nonexistent/s.mp4"),
+        "motion_curve":  lambda: PC.motion_curve("/nonexistent/s.mp4"),
+        "audio_energy":  lambda: PC.audio_energy("/nonexistent/s.mp4"),
+        "silence_spans": lambda: PC.silence_spans("/nonexistent/s.mp4"),
+        "filler_words":  lambda: PC.filler_words(None),
+        "face_track":    lambda: PC.face_track("/nonexistent/s.mp4"),
+        "frame_density": lambda: PC.frame_density(0),
+    }
+    for _n, _w, _e in PC.PERCEPTION_READERS:
+        _f = _pdrive.get(_n)
+        if _f is None:
+            _pwrong.append("%s: censused with no leg" % _n); continue
+        _g = _f().get("state")
+        if _g != _e:
+            _pwrong.append("%s: answered %r blind, expected %r" % (_n, _g, _e))
+    check("every perception detector answers its censused state on a source missing what it reads",
+          not _pwrong, "; ".join(_pwrong[:3]) if _pwrong else
+          "%d detector(s) driven blind" % len(PC.PERCEPTION_READERS))
+    # A FAILED DETECTOR AND A CLIP WITH NOTHING IN IT MUST NOT LOOK THE SAME.
+    # This is the whole reason the module exists rather than calling the old
+    # functions directly: extract_motion_curve returns [] on ANY error by
+    # design, and an agent handed [] reads "no gestures" off a broken ffmpeg.
+    _rc1 = type("R", (), {"returncode": 1, "stdout": "", "stderr": "boom"})()
+    _rc0 = type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+    check("an errored detector is FAILED and an empty-but-successful read is not",
+          PC.shot_changes(__file__, runner=lambda *a, **k: _rc1)["state"] == "FAILED"
+          and PC.shot_changes(__file__, runner=lambda *a, **k: _rc0)["state"] == "MEASURED"
+          and PC.motion_curve(__file__, runner=lambda *a, **k: _rc1)["state"] == "FAILED"
+          # no scene scores is FAILED, NOT a still clip: a still clip scores
+          # near zero, it does not score nothing.
+          and PC.motion_curve(__file__, runner=lambda *a, **k: _rc0)["state"] == "FAILED",
+          "scdet rc1=%s rc0=%s motion rc0=%s" % (
+              PC.shot_changes(__file__, runner=lambda *a, **k: _rc1)["state"],
+              PC.shot_changes(__file__, runner=lambda *a, **k: _rc0)["state"],
+              PC.motion_curve(__file__, runner=lambda *a, **k: _rc0)["why"][:60]))
+    # A SOURCE WITH NO AUDIO IS ABSENT, NOT FAILED — a real and common answer.
+    _nostream = type("R", (), {"returncode": 1, "stdout": "",
+                               "stderr": "Stream map '0:a:0' matches no streams."})()
+    check("a source with no audio stream is ABSENT, and a broken filter is FAILED",
+          PC.audio_energy(__file__, runner=lambda *a, **k: _nostream)["state"] == "ABSENT"
+          and PC.audio_energy(__file__, runner=lambda *a, **k: _rc1)["state"] == "FAILED"
+          and PC.silence_spans(__file__, runner=lambda *a, **k: _nostream)["state"] == "ABSENT",
+          PC.audio_energy(__file__, runner=lambda *a, **k: _nostream)["why"][:70])
+    # THE PORTED REGEX AGAINST HANDLER'S OWN SOURCE. Two derivations agreeing
+    # is the only evidence available that neither was invented, and this is the
+    # alarm if handler's list ever moves.
+    _hsrc = open("handler.py", encoding="utf-8").read()
+    _hm = _re.search(r"_FILLER_HESITATION_REGEX = _re_filler\.compile\((.*?)\n\)", _hsrc, _re.S)
+    _theirs = _re.compile("".join(_re.findall(r'r"([^"]*)"', _hm.group(1))), _re.I)
+    _probe = ["um","umm","ummmm","uh","uhh","uhm","er","err","erm","ah","ahh","hm","hmm",
+              "mhm","mhmm","mm","mmm","like","you","know","mean","hello","summer","ohm","m"]
+    _dis = [w for w in _probe if bool(_theirs.match(w)) != bool(PC.FILLER_HESITATION.match(w))]
+    check("the ported filler regex still agrees with handler.py's, word for word",
+          not _dis and len(_probe) == 25,
+          "disagreements: %s" % _dis if _dis else "%d probe word(s) agree" % len(_probe))
+    # FILLERS ARE COMMA-WRAPPED OR THEY ARE CONTENT. "I like pizza" stays.
+    _W = lambda t: {"punctuated_word": t, "start": 0.0}
+    _fw = PC.filler_words([_W("We're,"), _W("like,"), _W("amazing"), _W("and,"),
+                           _W("you"), _W("know,"), _W("um"), _W("I"), _W("like"), _W("pizza")])
+    check("a comma-wrapped filler is cut and the same word as content is kept",
+          [f["word_index"] for f in _fw["fillers"]] == [1, 4, 5, 6]
+          and PC.filler_words([])["state"] == "MEASURED"
+          and PC.filler_words(None)["state"] == "ABSENT",
+          str([(f["word_index"], f["reason"]) for f in _fw["fillers"]]))
+    # THE DETECTOR CHOICE IS LOAD-BEARING AND IS ASSERTED, NOT TRUSTED.
+    # res10 reads a face on 48% of clips where YuNet reads 78% (handler.py's
+    # own measurement on IND-dominant traffic). An ABSENT face box does not
+    # make the face-collision check FAIL, it makes it VACUOUS — the check that
+    # keeps a card off someone's face would pass everything, for exactly the
+    # users the detector cannot see. A silent fallback to res10 brings that
+    # back, so there is none.
+    _psrc = open("perception.py", encoding="utf-8").read()
+    check("faces use YuNet and never fall back to res10 when the model is missing",
+          "yunet.onnx" in _psrc and "caffemodel" not in _psrc
+          and PC.face_track(__file__, model="/nonexistent/yunet.onnx")["state"] == "ABSENT"
+          and "res10" in PC.face_track(__file__, model="/nonexistent/yunet.onnx")["why"],
+          PC.face_track(__file__, model="/nonexistent/yunet.onnx")["why"][:80])
+    # DENSITY: the anchors merge, the baseline is kept, and the COST is returned.
+    _d = PC.frame_density(20.0, changes=[{"t": 5.0}, {"t": 5.2}, {"t": 12.0}],
+                          peaks=[8.0], base_fps=1.0, src_fps=30.0)
+    check("overlapping anchors merge into one dense span and the extra frames are counted",
+          _d["state"] == "MEASURED" and len(_d["dense_spans"]) == 5
+          and [s["kinds"] for s in _d["dense_spans"]].count(["shot"]) == 2
+          and _d["n_base"] == 21 and _d["n_dense"] > 0
+          and _d["times"] == sorted(set(_d["times"])),
+          "%d span(s), base %d, dense %d" % (len(_d["dense_spans"]), _d["n_base"], _d["n_dense"]))
+    # EVERY SIGNAL STATES ITSELF IN THE AGENT'S OWN MESSAGE. An agent told
+    # "0 shot changes" edits a single take; one told "shot changes FAILED"
+    # knows not to trust its anchor list.
+    _ptxt, _pok, _ptot = PC.perception_lines(
+        {"shot_changes": {"state": "MEASURED", "why": "3"},
+         "motion_curve": {"state": "FAILED", "why": "ffmpeg exited 1"}})
+    check("the turn-1 block names every signal's state, including the ones that failed",
+          "MEASURED" in _ptxt and "FAILED" in _ptxt and "ABSENT" in _ptxt
+          and _pok == 1 and _ptot == 6 and "primary anchor" in _ptxt,
+          "%d/%d measured, %d line(s)" % (_pok, _ptot, len(_ptxt.splitlines())))
+
     if FAILS:
         print("\n%d FAILURE(S)" % len(FAILS))
         for f in FAILS:

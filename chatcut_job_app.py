@@ -282,6 +282,13 @@ JSON""",
                     "/root/burned_text.py", copy=True)
     .add_local_file(os.path.join(_HERE, "face_bands.py"),
                     "/root/face_bands.py", copy=True)
+    # THE PERCEPTION SIGNALS (item 4). Ported detectors + the new audio-energy
+    # curve. Mounted rather than inlined so the port stays readable beside the
+    # originals it came from, and so the undefined-name smoke covers it — that
+    # population is DERIVED from these mounts, so an unmounted module is a
+    # module no check covers.
+    .add_local_file(os.path.join(_HERE, "perception.py"),
+                    "/root/perception.py", copy=True)
     # THE MEASURED BANDS THEMSELVES. verify_chain reads sheet/rows.json
     # relative to its own directory, and that file was never mounted — so in
     # the container `measured_bands()` returned {} and EVERY band fell through
@@ -3668,7 +3675,8 @@ def _transcript_rows(r, dur_s=None):
     return sorted(out, key=lambda b: b["t_start"])
 
 def pass1_message(plan, beats, inventory_png, source_watch=None,
-                  deciding=False, face=None, platter=None, constraints=None):
+                  deciding=False, face=None, platter=None, constraints=None,
+                  perception=None):
     """WHAT THE AGENT IS SERVED BEFORE IT DECIDES ANYTHING.
 
     In order, in one message:
@@ -3722,6 +3730,13 @@ def pass1_message(plan, beats, inventory_png, source_watch=None,
     # the watch"); the resumed session holds the ten readings themselves.
     # THE SOURCE, WATCHED THROUGH CHATCUT (watch_asset): dense frames with the
     # editor's timecode strip, tiled, and the transcript rows aligned to them.
+    # THE PERCEPTION SIGNALS, BEFORE THE PICTURES THEY DESCRIBE. The frames
+    # show what the clip looks like; these say where the clip CHANGES, and the
+    # agent that reads the change list first knows what to look for.
+    if perception:
+        import perception as _pcm
+        _ptxt, _pok, _ptot = _pcm.perception_lines(perception)
+        blocks.append({"type": "text", "text": _ptxt})
     _sw = source_watch or {}
     if _sw.get("sheets"):
         blocks.append({"type": "text", "text":
@@ -6287,6 +6302,23 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     # one name is the same defect as two numbers under one name, and it was
     # invisible because the total was right.
     mark("download")
+    # THE SOURCE'S OWN GEOMETRY, READ ONCE. The perception signals need the
+    # real fps to turn a sampled frame index into a source time, and a wrong
+    # fps silently shifts every shot change and every face box — the kind of
+    # error that produces a plausible list of times that are all wrong.
+    # source_geometry FAILS rather than defaulting a side: an asymmetric guess
+    # is how a 1920x1080 source becomes a vertical project with the picture in
+    # a letterbox, which renders perfectly and is wrong.
+    _geo = source_geometry("/work/source.mp4")
+    _src_fps = _geo["fps"] if _geo["state"] == "MEASURED" else None
+    print("  SOURCE GEOMETRY : %s  %s" % (_geo["state"], _geo["why"]), flush=True)
+    if _src_fps is None:
+        raise RuntimeError(
+            "the source geometry is %s (%s) — every perception signal converts "
+            "a frame index to a time with this fps, so an assumed 30 would "
+            "shift every shot change and face box by a plausible-looking "
+            "amount. Refusing rather than guessing a side."
+            % (_geo["state"], _geo["why"]))
     # THE DETECTORS RUN OFF THE WALL CLOCK. `region_states` is ~160 res10
     # inferences plus an EAST pass, and its answer is not needed until the
     # REVIEW — which is the last stage of the run. Serially it would be pure
@@ -6601,6 +6633,32 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     else:
         _watch_th = threading.Thread(target=_watch_source, daemon=True)
         _watch_th.start()
+
+    # ── PERCEPTION SIGNALS (item 4) ────────────────────────────────────────
+    # ON A THREAD, because every one of them is ffmpeg or cv2 over the local
+    # file and none of them needs ChatCut. They overlap the import, the watch
+    # and the prompt build rather than adding to them.
+    #
+    # SHOT CHANGES ARE THE PRIMARY ANCHOR (Zac) — not one of a list. The frame
+    # density is derived from them and the motion peaks, so they are joined
+    # before the density is computed and the rest are reported as they land.
+    _perc = {}
+
+    def _perceive():
+        import perception as _pc
+        _perc["shot_changes"] = _pc.shot_changes("/work/source.mp4")
+        _perc["motion_curve"] = _pc.motion_curve("/work/source.mp4")
+        _perc["audio_energy"] = _pc.audio_energy("/work/source.mp4")
+        _perc["silence_spans"] = _pc.silence_spans("/work/source.mp4")
+        _perc["face_track"] = _pc.face_track("/work/source.mp4", fps_hint=_src_fps)
+        _perc["frame_density"] = _pc.frame_density(
+            _dur_for_detect,
+            changes=(_perc["shot_changes"].get("changes") or []),
+            peaks=(_perc["motion_curve"].get("peaks") or []),
+            base_fps=density_fps, src_fps=_src_fps)
+
+    _perc_th = threading.Thread(target=_perceive, daemon=True)
+    _perc_th.start()
     mark("prestage")
     _libn = len(_stage.get("components") or {})
 
@@ -7020,8 +7078,39 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         _before = {"state": "FAILED", "items": None, "why": "capture raised: %s" % str(_be)[:160]}
     print("  BEFORE TIMELINE : %s — %s" % (_before["state"], _before["why"]), flush=True)
 
+    # ── THE SIGNALS ARE JOINED AND REPORTED BEFORE THEY ARE SERVED ────────
+    # A derived signal that is not PRINTED cannot be verified: a run that found
+    # no shot changes and a run whose detector never finished are the same
+    # empty list once nobody looks. Six detectors, six states, one line each.
+    _perc_th.join(timeout=180)
+    if _perc_th.is_alive():
+        _perc.setdefault("_why", "the perception thread was still running at 180s")
+        print("  PERCEPTION      : PARTIAL — still running at 180s; %d of 6 landed"
+              % len([k for k in _perc if not k.startswith("_")]), flush=True)
+    import perception as _pcm
+    _ptxt, _pok, _ptot = _pcm.perception_lines(_perc)
+    print(_ptxt, flush=True)
+    # THE DENSITY LINE (Zac). The frame count and what it costs, because the
+    # adaptive rule is generous by construction: every frame within +-0.5s of
+    # an anchor is 30 frames per anchor at 30fps, and a clip with many shot
+    # changes multiplies that. The number is reported rather than described so
+    # a run that cannot afford it is visible before it is paid for.
+    _dm = _perc.get("frame_density") or {}
+    if _dm.get("state") == "MEASURED":
+        _per_sheet, _cols, _cw = rewatch_tiles(density_fps)
+        _sheets = (len(_dm["times"]) + _per_sheet - 1) // _per_sheet
+        _flat = int(_dur_for_detect * density_fps) + 1
+        print("  DENSITY         : MEASURED  %d frame(s) vs %d at a flat %.1ffps "
+              "(%.1fx) -> %d sheet(s) of %d; %d baseline + %d dense across %d span(s)"
+              % (len(_dm["times"]), _flat, density_fps,
+                 len(_dm["times"]) / float(_flat or 1), _sheets, _per_sheet,
+                 _dm["n_base"], _dm["n_dense"], len(_dm["dense_spans"])), flush=True)
+    else:
+        print("  DENSITY         : %s — %s"
+              % (_dm.get("state", "ABSENT"), str(_dm.get("why"))[:140]), flush=True)
     _first_message = pass1_message(prompt, _beats, "/craft/component_sheet.png",
                                    _watch_box, deciding=not bool(plan),
+                                   perception=_perc,
                                    face=_face_lines, platter=_platter, constraints=_constraints)
     out_first = _first_message          # into the record below, in full (section C)
     _turn_recs = []
@@ -7387,6 +7476,14 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
            # it can never answer where the setup came from. A cohort's warm
            # rate is unreadable without this, and a stale rate folded into the
            # cold one is a broken feature wearing a workload's clothes.
+           # THE SIGNALS THEMSELVES, not a count of them. A ledger that stored
+           # "6 signals" could not answer which one was absent on the run that
+           # edited badly.
+           "perception": {_k: {"state": _v.get("state"), "why": _v.get("why")}
+                          for _k, _v in _perc.items() if isinstance(_v, dict)},
+           "perception_measured": _pok,
+           "frame_density": {_k: (_perc.get("frame_density") or {}).get(_k)
+                             for _k in ("state", "n_base", "n_dense", "why")},
            "prestage_source": (_stage or {}).get("prestage_source", "reused"),
            "prestage_key": (_stage or {}).get("prestage_key"),
            "attached_at": (_stage or {}).get("attached_at"),
