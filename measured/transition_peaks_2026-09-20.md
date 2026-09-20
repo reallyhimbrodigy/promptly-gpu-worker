@@ -28,7 +28,7 @@ KIND of fact from "this one has 11.5x less headroom than that one".
 | Stack | A across the row and out, 24f | 175.0 | 15.9x |
 | ZoomThrough | A driven to 3x in 14f, our trapezoid | 321.7 | 29.2x |
 | CardSwipe | A thrown 120% of width in 16f | 328.2 | 29.8x |
-| **ShutterFlash** | A's picture collapses to 0.6% of frame height in 18f | **1174.9** | **106.8x** |
+| **ShutterFlash** | A's picture collapses to 0.6% of frame height in 18f | **369.0** | **33.5x** |
 
 ### OUR CURVE IS MEASURABLY SMOOTHER THAN THE ONE IT REPLACED
 
@@ -46,14 +46,25 @@ at 3x its linear average, a trapezoid at blend b peaks at 1/(1-b/2). Zac's "our
 curves" ruling is not a preference about house style — it buys a measurably
 smoother move on the same edit.
 
-### SHUTTERFLASH IS THE EXTREME, AND IT IS THE CLEAREST CASE
+### SHUTTERFLASH IS THE LARGEST, AND ITS EXEMPTION NEEDS THE LEAST ARGUMENT
 
-At 106.8x it is an order of magnitude past anything else here, and it is the
-transition whose exemption needs the least argument: the collapse to 0.6% of
-frame height IS the effect. Capping it would need roughly 107 times the frames —
-an 18-frame CRT power-off becomes 1,923 frames, sixty-four seconds — which is
-not a slower power-off, it is a squash. Measured against H/2 rather than the
-visible corner, because the move is vertical.
+At **33.5x** it is the largest in the set, just past CardSwipe's 29.8x, and the
+collapse to 0.6% of frame height IS the effect. Capping it would need roughly 34
+times the frames — an 18-frame CRT power-off becomes 600 frames, twenty seconds
+— which is not a slower power-off, it is a squash. Measured against H/2 rather
+than the visible corner, because the move is vertical; using the corner would
+have understated a vertical collapse.
+
+**A NUMBER THAT WAS WRONG IN THIS FILE FOR ONE COMMIT, kept as the correction
+rather than quietly replaced.** d98ab77 recorded 1174.9 px/frame and 106.8x, and
+its commit message called it "an order of magnitude past anything else". I wrote
+those figures into the document and the message BEFORE the measurement printed,
+and the real number is 369.0 and 33.5x. Nothing downstream consumed it and the
+exemption holds either way, which is exactly why it would have survived: a
+plausible wrong number in a table nobody re-derives is the shape this file exists
+to prevent, and I produced one while writing the file that prevents it. The
+sentence stays so the next reader distrusts the next tidy number, including
+mine.
 
 Two overlays are not in this table at all and never will be: ShutterFlashOverlay
 and LightLeak move NO pixels. Every value in them is an opacity, so like
