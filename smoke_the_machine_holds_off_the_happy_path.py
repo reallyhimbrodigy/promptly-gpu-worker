@@ -1976,8 +1976,11 @@ def main():
     _lib = _json.load(open("library_73.json", encoding="utf-8"))
     _fam = _lib.get("text overlay") or []
     check("the library carries the whole text-overlay family, and the count is corrected with a why",
-          sorted(_fam) == ["CaptionMatch", "LowerThird", "QuoteCard", "StickyNotes", "TornPaper"]
-          and sum(len(v) for v in _lib.values() if isinstance(v, list)) == 78
+          # THE FIVE FROM THE SCHEMA'S HISTORY, plus PlainText — the workhorse, which
+          # is not in that history because the enum never had a name for "just words".
+          sorted(_fam) == ["CaptionMatch", "LowerThird", "PlainText", "QuoteCard",
+                           "StickyNotes", "TornPaper"]
+          and sum(len(v) for v in _lib.values() if isinstance(v, list)) == 79
           and "73 -> 78" in (_lib.get("_why") or "")
           and "schema" in (_lib.get("_why") or ""),
           "%d items, family %s" % (sum(len(v) for v in _lib.values() if isinstance(v, list)), sorted(_fam)))
@@ -2162,6 +2165,48 @@ def main():
     check("every censused reader exists and can name an absence in its own return",
           not _shapeless, "; ".join(_shapeless) if _shapeless else
           "%d censused, %d dict-shaped, library_ids returns (ids, state, why)" % (len(_census), len(_census) - 1))
+
+    # ---- CAPTION-MATCH MATCHES, AND THE WORKHORSE HAS ITS OWN NAME ----
+    # For one day the references' most common shape (plain, medium, middle) was served
+    # by CaptionMatch, and only because that port was INCOMPLETE: it rendered a fixed
+    # sans-serif and never read the caption style it is named for. Fixing it would have
+    # silently removed the plain shape from the menu, so the workhorse gets its own
+    # component and the variant does the job it is named for.
+    _cmb = open("port/build/CaptionMatch.jsx", encoding="utf-8").read()
+    _cmb_code = _re.sub(r"^\s*//.*$", "", _re.sub(r"/\*.*?\*/", "", _cmb, flags=_re.S), flags=_re.M)
+    _nine = ("CleanCut", "Cove", "Gadzhi", "Lumen", "Prime", "Pulse",
+             "Quintessence", "TwoTone", "TypewriterReveal")
+    check("CaptionMatch reads the caption style and knows all nine, with a fallback",
+          "props.captionStyle" in _cmb_code
+          and all(_n in _cmb_code for _n in _nine)
+          and "styles[captionStyle] || styles.CleanCut" in _cmb_code
+          and any(q["key"] == "captionStyle" for q in J.PORTED_PROPS["CaptionMatch"]),
+          "%d of 9 styles named" % sum(1 for _n in _nine if _n in _cmb_code))
+    # THE SIGNATURES MUST ACTUALLY DIFFER, or "follows the style" renders identically
+    # and the property is decorative.
+    _sig = dict(_re.findall(r'(\w+): \["([^"]+)", (\d+), "(\w+)", (-?\d+)\]',
+                            _cmb_code.replace('", ', '", ')) and [] or [])
+    _rows = _re.findall(r'(\w+): \["([^"]+)", (\d+), "(\w+)", (-?\d+)\]', _cmb_code)
+    check("the nine styles carry genuinely different typography, not nine names for one look",
+          len(_rows) == 9 and len({(f, w, t) for _n, f, w, t, _ls in _rows}) >= 6,
+          "%d styles, %d distinct font/weight/case signatures"
+          % (len(_rows), len({(f, w, t) for _n, f, w, t, _ls in _rows})))
+    _pt = open("port/build/PlainText.jsx", encoding="utf-8").read()
+    _pt_code = _re.sub(r"^\s*//.*$", "", _re.sub(r"/\*.*?\*/", "", _pt, flags=_re.S), flags=_re.M)
+    check("PlainText is plain by construction: no card, no strip, no caption style",
+          "backgroundColor" not in _pt_code and "captionStyle" not in _pt_code
+          and "borderLeft" not in _pt_code and "clipPath" not in _pt_code
+          and not J.component_contract(_pt, J.PORTED_PROPS["PlainText"])
+          and {q["key"] for q in J.PORTED_PROPS["PlainText"]} >= {"size", "position"},
+          "nothing behind the words")
+    import json as _json2
+    _lib2 = _json2.load(open("library_73.json", encoding="utf-8"))
+    check("the library is 79, and the file says why the sixth variant exists",
+          sum(len(v) for v in _lib2.values() if isinstance(v, list)) == 79
+          and "PlainText" in (_lib2.get("text overlay") or [])
+          and "78 -> 79" in (_lib2.get("_why") or "")
+          and "incomplete" in (_lib2.get("_why") or ""),
+          "%d items" % sum(len(v) for v in _lib2.values() if isinstance(v, list)))
 
     # THE WORKING TREE, NOT THE COMMIT. red_proof_no_undefined_names builds an ISOLATED
     # worktree from HEAD, so it judges what is COMMITTED — and a run is launched from what

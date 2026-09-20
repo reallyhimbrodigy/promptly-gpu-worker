@@ -7,10 +7,16 @@
  * Three were retired from the enum while the record kept carrying their fields,
  * which is how a family reads as two variants and is five.
  *
- * Renders in the same register as the running captions, for mono-brand work
- * where matching the caption IS the brand. The old spec warns it is the wrong
- * pick otherwise - it says nothing a caption is not already saying, so it earns
- * its place only when the sameness is the point.
+ * Renders in the EDIT'S CHOSEN CAPTION STYLE, which is the whole point of the
+ * variant: mono-brand work where matching the caption IS the brand. The old spec
+ * warns it is the wrong pick otherwise.
+ *
+ * IT DID NOT DO THIS UNTIL 2026-09-19. The first port rendered a fixed sans-serif
+ * and never consulted the style, which made it accidentally PLAIN — the most common
+ * shape in the references, on the menu under a name promising something else. The
+ * style arrives as a property because a ChatCut component sees only item.props;
+ * the harness passes the edit's own choice. The nine signatures below are read from
+ * the renderer's own caption components, not invented.
  *
  * THE DIALS ARE VISIBLE. size and position are properties, defaulting to what the
  * references measure - medium, middle - so the platter shows the editor the two
@@ -44,14 +50,31 @@ const Component = ({ item }) => {
   const t = Math.min(Math.max(frame / Math.max(1, Math.round(0.28 * fps)), 0), 1);
   const ease = 1 - Math.pow(1 - t, 3);
   const text = String(props.text || "");
+  const captionStyle = props.captionStyle || "CleanCut";
   const pop = 0.94 + 0.06 * ease;
+  // THE NINE, from src/remotion/src/captions/<style>/: the font each one actually
+  // renders with, its weight, and whether it transforms case. A style this does not
+  // know falls back to CleanCut rather than silently rendering something else.
+  const styles = {
+    CleanCut: ["Inter, sans-serif", 700, "none", 0],
+    Cove: ["Montserrat, sans-serif", 700, "none", 0],
+    Gadzhi: ["Montserrat, sans-serif", 700, "uppercase", -1],
+    Lumen: ["Montserrat, sans-serif", 800, "none", 0],
+    Prime: ["Inter, sans-serif", 800, "lowercase", 0],
+    Pulse: ["DM Sans, sans-serif", 800, "none", 0],
+    Quintessence: ["Playfair Display, Georgia, serif", 700, "none", 0],
+    TwoTone: ["Montserrat, sans-serif", 900, "none", -1],
+    TypewriterReveal: ["Space Mono, monospace", 700, "none", 1],
+  };
+  const sty = styles[captionStyle] || styles.CleanCut;
   if (!text) {
     return (<div style={rootStyle}><div style={{ color: accent, fontSize: 40, fontFamily: "sans-serif" }}>NO TEXT</div></div>);
   }
   return (
     <div style={rootStyle}>
-      <div style={{ transform: "scale(" + pop + ")", color: textColor, fontFamily: "sans-serif",
-                    fontWeight: 900, fontSize: fontSize, lineHeight: 1.06, textAlign: "center",
+      <div style={{ transform: "scale(" + pop + ")", color: textColor, fontFamily: sty[0],
+                    fontWeight: sty[1], textTransform: sty[2], letterSpacing: sty[3],
+                    fontSize: fontSize, lineHeight: 1.06, textAlign: "center",
                     maxWidth: "94%", whiteSpace: "normal", overflowWrap: "break-word",
                     textShadow: "0 6px 22px rgba(0,0,0,0.55)" }}>
         {text}

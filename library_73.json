@@ -85,11 +85,12 @@
   "woosh-professional.mp3"
  ],
  "text overlay": [
+  "PlainText",
   "TornPaper",
   "StickyNotes",
   "QuoteCard",
   "LowerThird",
   "CaptionMatch"
  ],
- "_why": "COUNT CORRECTED 73 -> 78 on 2026-09-19. `text_overlays` was a FAMILY in the live pipeline and was missing from this file entirely. Its real variant list came from the schema's OWN HISTORY (handler.py @42df870: torn_paper, sticky_note, quote_card, lower_third, caption_match), not from the current enum — which had been pruned to two while _TextOverlay kept carrying topText/bottomText, quote/attribution and text, the fields of the three retired ones. A family reads as two variants and is five. The filename keeps its historical number; this key is the count."
+ "_why": "COUNT CORRECTED 73 -> 78 -> 79 on 2026-09-19. `text_overlays` was a FAMILY in the live pipeline and was missing from this file entirely. Its real variant list came from the schema's OWN HISTORY (handler.py @42df870: torn_paper, sticky_note, quote_card, lower_third, caption_match), not from the current enum — which had been pruned to two while _TextOverlay kept carrying topText/bottomText, quote/attribution and text, the fields of the three retired ones. A family reads as two variants and is five. The filename keeps its historical number; this key is the count. COUNT 78 -> 79 on 2026-09-19: PlainText added as the SIXTH variant. It is not in the old schema's list, and it is not a new idea either — it is the shape Builder-2 measured as the references' most common text (plain, medium, middle). CaptionMatch served that shape for one day only because its port was incomplete: it rendered a fixed sans-serif and never read the caption style it is named for. Once CaptionMatch honoured the edit's chosen style, the plain shape left the menu with it, so the workhorse gets its own component named for what it is."
 }

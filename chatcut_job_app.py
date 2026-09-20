@@ -8008,6 +8008,12 @@ PORTED_PROPS = {
     ],
     "CaptionMatch": [
         {"key": "text", "label": "Text", "type": "text", "defaultValue": ""},
+        # THE EDIT'S OWN CHOICE, passed in by the harness: a ChatCut component sees
+        # only item.props, so it cannot read the project's caption style itself.
+        {"key": "captionStyle", "label": "Caption style (matches the edit's captions)",
+         "type": "select", "defaultValue": "CleanCut",
+         "options": ["CleanCut", "Cove", "Gadzhi", "Lumen", "Prime", "Pulse",
+                     "Quintessence", "TwoTone", "TypewriterReveal"]},
         {"key": "size", "label": "Size", "type": "select", "defaultValue": "medium",
          "options": ["small", "medium", "large", "xlarge"]},
         {"key": "position", "label": "Position", "type": "select", "defaultValue": "middle",
@@ -8017,6 +8023,17 @@ PORTED_PROPS = {
     ],
     # NO textColor: each note carries its own paper colour and the ink is fixed dark.
     # A property this component cannot honour is a REFUSAL, not a harmless extra.
+    # THE WORKHORSE. Plain, medium, middle — what the references measure most often.
+    # It exists because CaptionMatch served that shape for one day only by NOT doing
+    # its job, and the moment it learned the caption style the plain shape went with it.
+    "PlainText": [
+        {"key": "text", "label": "Text", "type": "text", "defaultValue": ""},
+        {"key": "size", "label": "Size", "type": "select", "defaultValue": "medium",
+         "options": ["small", "medium", "large", "xlarge"]},
+        {"key": "position", "label": "Position", "type": "select", "defaultValue": "middle",
+         "options": ["top", "middle", "bottom"]},
+        {"key": "textColor", "label": "Text colour", "type": "color", "defaultValue": "#FFFFFF"},
+    ],
     "StickyNotes": [
         {"key": "notes", "label": "Notes — text|colour|rotation, separated by ;", "type": "text",
          "defaultValue": "Key takeaway|#FFE066|-3"},
@@ -8429,6 +8446,7 @@ def text_family_check(clip_url: str = "", at_s: float = 6.0, span_s: float = 3.0
         faults = component_faults(rb.get("items") or [], _pmap)
         import base64 as _b64
         row = {"state": "MEASURED", "item": iid, "overrides": overrides,
+               "frames_on_disk": list(f.values()),
                "faults": faults.get("faults"), "fault_state": faults.get("state"),
                "fault_why": faults.get("why"), "props_seen": _pmap, "props_misses": _pwhy,
                "b64": [_b64.b64encode(open(q, "rb").read()).decode() for q in list(f.values())[:2]]}
@@ -8436,11 +8454,46 @@ def text_family_check(clip_url: str = "", at_s: float = 6.0, span_s: float = 3.0
                           "clearing %s" % name)
         return row
 
-    # ── 1. the plain/medium/middle candidate, on a real frame ────────────
-    out["rendered"]["CaptionMatch"] = _place_and_shoot(
-        "CaptionMatch", {"text": "this is the moment", "size": "medium", "position": "middle",
-                         "textColor": "#FFFFFF", "accentColor": "#C8551F"}, "medium/middle")
-    print("  CaptionMatch    %s" % out["rendered"]["CaptionMatch"].get("state"), flush=True)
+    # ── 1a. CaptionMatch FOLLOWS THE EDIT'S CAPTION STYLE — red-proven ───
+    # Three styles with genuinely different typographic signatures, read from the
+    # renderer's own caption components: CleanCut (Inter 700), Gadzhi (Montserrat 700
+    # UPPERCASE) and Quintessence (Playfair serif). If the component ignored the
+    # property — as the first port did — all three would render identically, and
+    # that identity is what this proves does not happen.
+    for _cs in ("CleanCut", "Gadzhi", "Quintessence"):
+        out["rendered"]["CaptionMatch_" + _cs] = _place_and_shoot(
+            "CaptionMatch", {"text": "this is the moment", "captionStyle": _cs,
+                             "size": "medium", "position": "middle",
+                             "textColor": "#FFFFFF", "accentColor": "#C8551F"}, _cs)
+        print("  CaptionMatch %-13s %s" % (_cs, out["rendered"]["CaptionMatch_" + _cs].get("state")), flush=True)
+    _cm = {_cs: ((out["rendered"].get("CaptionMatch_" + _cs) or {}).get("frames_on_disk") or [])
+           for _cs in ("CleanCut", "Gadzhi", "Quintessence")}
+    _pairs = [("CleanCut", "Gadzhi"), ("CleanCut", "Quintessence"), ("Gadzhi", "Quintessence")]
+    _follow = {}
+    for _a, _b in _pairs:
+        _follow["%s vs %s" % (_a, _b)] = frame_diff_profile(_cm[_a], _cm[_b])
+    out["style_follows"] = {
+        "pairs": {k: {"state": v["state"], "differing": v.get("differing"),
+                      "max_abs": v.get("max_abs")} for k, v in _follow.items()},
+        "state": ("MEASURED" if all(v["state"] == "MEASURED" for v in _follow.values()) else "ABSENT"),
+    }
+    out["style_follows"]["follows"] = (
+        out["style_follows"]["state"] == "MEASURED"
+        and all(v.get("differing") for v in _follow.values()))
+    out["style_follows"]["why"] = (
+        "every style pair renders differently — the component reads the property"
+        if out["style_follows"]["follows"] else
+        "AT LEAST ONE PAIR IS IDENTICAL — the component is ignoring captionStyle, which is "
+        "the defect this proof exists to catch: %s"
+        % {k: v.get("differing") for k, v in _follow.items()})
+    print("  STYLE FOLLOWS   %s — %s" % ("YES" if out["style_follows"]["follows"] else "NO",
+                                         out["style_follows"]["why"][:150]), flush=True)
+
+    # ── 1b. the workhorse, plain/medium/middle, beside the bare frame ────
+    out["rendered"]["PlainText"] = _place_and_shoot(
+        "PlainText", {"text": "this is the moment", "size": "medium", "position": "middle",
+                      "textColor": "#FFFFFF"}, "plain/medium/middle")
+    print("  PlainText       %s" % out["rendered"]["PlainText"].get("state"), flush=True)
 
     # ── 2. the planted malformed entry ───────────────────────────────────
     bad = _place_and_shoot(
