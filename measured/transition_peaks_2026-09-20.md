@@ -28,6 +28,7 @@ KIND of fact from "this one has 11.5x less headroom than that one".
 | Stack | A across the row and out, 24f | 175.0 | 15.9x |
 | ZoomThrough | A driven to 3x in 14f, our trapezoid | 321.7 | 29.2x |
 | CardSwipe | A thrown 120% of width in 16f | 328.2 | 29.8x |
+| **ShutterFlash** | A's picture collapses to 0.6% of frame height in 18f | **1174.9** | **106.8x** |
 
 ### OUR CURVE IS MEASURABLY SMOOTHER THAN THE ONE IT REPLACED
 
@@ -44,6 +45,20 @@ is the trapezoid's stated property arriving on a real component: a cubic peaks
 at 3x its linear average, a trapezoid at blend b peaks at 1/(1-b/2). Zac's "our
 curves" ruling is not a preference about house style — it buys a measurably
 smoother move on the same edit.
+
+### SHUTTERFLASH IS THE EXTREME, AND IT IS THE CLEAREST CASE
+
+At 106.8x it is an order of magnitude past anything else here, and it is the
+transition whose exemption needs the least argument: the collapse to 0.6% of
+frame height IS the effect. Capping it would need roughly 107 times the frames —
+an 18-frame CRT power-off becomes 1,923 frames, sixty-four seconds — which is
+not a slower power-off, it is a squash. Measured against H/2 rather than the
+visible corner, because the move is vertical.
+
+Two overlays are not in this table at all and never will be: ShutterFlashOverlay
+and LightLeak move NO pixels. Every value in them is an opacity, so like
+DipToBlack they have no per-frame displacement to compare against a per-frame
+ceiling.
 
 ### CROSSFADEZOOM IS ALMOST INSIDE THE CEILING
 

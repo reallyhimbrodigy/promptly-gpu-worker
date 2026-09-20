@@ -354,5 +354,49 @@
    "defaultValue": 0.82
   }
  ],
- "_overlays": "A TIGHT-CUT OVERLAY carries NO clips and has no `correct`: it decorates a transparent root over whatever the timeline shows, and the cut underneath stays hard. That is why its table has no clip/srcFromA/srcFromB."
+ "_overlays": "A TIGHT-CUT OVERLAY carries NO clips and has no `correct`: it decorates a transparent root over whatever the timeline shows, and the cut underneath stays hard. That is why its table has no clip/srcFromA/srcFromB.",
+ "ShutterFlash": [
+  {
+   "key": "clip",
+   "label": "Clip",
+   "type": "video",
+   "defaultValue": ""
+  },
+  {
+   "key": "srcFromA",
+   "label": "Source start frame, outgoing",
+   "type": "number",
+   "defaultValue": 0
+  },
+  {
+   "key": "srcFromB",
+   "label": "Source start frame, incoming",
+   "type": "number",
+   "defaultValue": 0
+  },
+  {
+   "key": "seamRoom",
+   "label": "Frames before the cut this item covers",
+   "type": "number",
+   "defaultValue": 9
+  },
+  {
+   "key": "duration",
+   "label": "Transition duration (frames)",
+   "type": "number",
+   "defaultValue": 18
+  },
+  {
+   "key": "flashColor",
+   "label": "Beam and dot colour",
+   "type": "text",
+   "defaultValue": "#ffffff"
+  },
+  {
+   "key": "correct",
+   "label": "Rest calibration (CSS filter, from the harness)",
+   "type": "text",
+   "defaultValue": ""
+  }
+ ]
 }
