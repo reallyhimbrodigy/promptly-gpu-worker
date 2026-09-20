@@ -120,10 +120,30 @@ component's own counter-zoom, and it predicts: at f720 progress is 0.500, the
 centre and differs from it by exactly the zoom the component declares is the
 whole claim, and it is arithmetic rather than judgement.
 
-Eight of the nine are registered in the project under `cover` still; their frame
-rows above were measured that way and say so. The source is the deliverable and
-all nine are contain; re-registering the other eight is a paste of 74KB that
-buys one bit already bought by this seam, so it is offered rather than done.
+**ALL NINE ARE NOW REGISTERED UNDER `contain`** (Zac ruled it: 74KB of paste is
+nothing beside "the table says contain and the registry says cover"). Every
+update returned `isValid: true`; FilmStrip returned its injection warning again,
+which is how we know that rewrite is DETERMINISTIC and not a one-off.
+
+Verified from PIXELS, not from the echoes, on seven of the nine:
+
+| component | frame | band | vs base 536..1031 ctr 783.5 |
+|---|---|---|---|
+| DipToBlack | f116 | 536..1032 h=497 | ctr 784.0 — matches |
+| SlideOver | f240 | 536..1032 h=497 | ctr 784.0 — matches |
+| CardSwipe | f360 | 538..1033 h=496 | ctr 785.5, +2px = its designed translateY |
+| ZoomThrough | f475 | 423..1143 h=721 | ctr 783.0 — matches, scaled by its own zoom |
+| StepPush | f600 | 536..1032 h=497 | ctr 784.0 — matches |
+| CrossfadeZoom | f720 | 513..1054 h=542 | ctr 783.5, 496 x 1.0926 = 541.9 predicted |
+| ShutterFlash | f953 | 566..1002 h=437 | ctr 784.0, 496 x its 0.88 scaleY = 437 |
+
+**Stack and FilmStrip cannot be proved this way and that is stated rather than
+glossed.** Both paint full-frame decoration — Stack's ghost tiles and home
+indicator, FilmStrip's masked grid — so the lit band is their furniture at every
+frame, not their plate. FilmStrip is instead closed by READING its registered
+code back: `objectFit: "contain"` is in the registry, and the only difference
+from source is the two injected parameters. Stack rests on source plus an
+`isValid` echo, which is the weakest evidence in this table, and says so.
 
 **3a. What the fault was, kept because it was real.**
 Every transition mounts its own `<Video style={{objectFit:"cover"}}>` on a

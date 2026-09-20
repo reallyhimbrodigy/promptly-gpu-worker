@@ -151,6 +151,27 @@ export function deletionOnly(a, b) {
   return true;
 }
 
+/**
+ * WHAT IS ACTUALLY SENT — the component, not the file.
+ *
+ * Every ported body opens with a long doc header explaining the port. ChatCut
+ * stores only what `create_motion_graphic_from_code` was given, which begins at
+ * `const Component`. The CLI read the WHOLE FILE as its source side, so the
+ * header — 31 lines on FilmStrip — arrived as 31 unexplained removals and the
+ * verdict was DIVERGED on every component, for a reason that has nothing to do
+ * with the registry.
+ *
+ * IT SURVIVED AN EIGHT-LEG RED PROOF because every one of those legs called
+ * `classify()` with two strings it built itself. Nothing exercised the file
+ * read, so the proof could not see the defect and the first REAL pair found it
+ * immediately. That is the seventh way a mutation misleads — a red that is not
+ * about the property — and it was on my side of the instrument.
+ */
+export function componentOnly(text) {
+  const i = text.indexOf("const Component");
+  return i > 0 ? text.slice(i) : text;
+}
+
 export function classify(source, registered) {
   if (source === registered) {
     return { verdict: "IDENTICAL", differences: 0, sha: sha(source), detail: [] };
@@ -210,7 +231,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.error("usage: node port/registered_diff.mjs <Name> <registered-code-file>");
     process.exit(2);
   }
-  const source = readFileSync(join(ROOT, "port", "build", name + ".jsx"), "utf8");
+  const source = componentOnly(readFileSync(join(ROOT, "port", "build", name + ".jsx"), "utf8"));
   const registered = readFileSync(regPath, "utf8");
   const r = classify(source, registered);
   console.log(JSON.stringify({ name, ...r }, null, 1));

@@ -47,5 +47,38 @@ leg("injection plus an unrelated edit is DIVERGED", classify(BASE, both).verdict
 
 // 7. identical is untouched
 leg("identical source and registered is IDENTICAL", classify(BASE, BASE).verdict, "IDENTICAL");
-console.log(fail ? `\n${fail} LEG(S) FAILED` : "\nall 8 legs green");
+// ---- 9. THE CLI, END TO END. ------------------------------------------------
+// Legs 1-8 call classify() with two strings this file builds, so NONE of them
+// touches the CLI's own source-side read — and that is exactly where the defect
+// was: it read the WHOLE .jsx, doc header and all, while ChatCut stores only
+// the component, so every real pair came back DIVERGED with ~31 unexplained
+// removals. An eight-leg proof that never runs the shipped entrypoint is a
+// proof of the library, not of the tool.
+import { execFileSync } from "node:child_process";
+import { writeFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join as pjoin } from "node:path";
+import { componentOnly } from "./registered_diff.mjs";
+
+const dir = mkdtempSync(pjoin(tmpdir(), "b2-regdiff-"));
+const HEADER = "/* A doc header of the kind every ported body carries.\n * It is never sent to ChatCut.\n */\n";
+const cliSrc = componentOnly(BASE);
+const cliReg = sub(cliSrc, "({ n })", "({ n, item })");
+writeFileSync(pjoin(dir, "reg.jsx"), cliReg);
+
+// Stand in for port/build/<Name>.jsx: header + component, as the real files are.
+const fakeBuild = pjoin(process.cwd(), "port", "build", "__RedProofProbe.jsx");
+writeFileSync(fakeBuild, HEADER + cliSrc);
+let cliOut = "", cliCode = 0;
+try {
+  cliOut = execFileSync("node", ["port/registered_diff.mjs", "__RedProofProbe", pjoin(dir, "reg.jsx")],
+                        { encoding: "utf8" });
+} catch (e) { cliOut = (e.stdout || "") + (e.stderr || ""); cliCode = e.status; }
+const parsed = (() => { try { return JSON.parse(cliOut); } catch { return {}; } })();
+leg("the CLI strips the doc header before comparing", parsed.verdict, "STRIPPED");
+leg("  ...and the CLI exits 0 on an injection-only difference", String(cliCode), "0");
+leg("  ...and attributes it to the injection", `${parsed.explained && parsed.explained.injection}`, "1");
+try { execFileSync("rm", ["-f", fakeBuild]); } catch {}
+
+console.log(fail ? `\n${fail} LEG(S) FAILED` : "\nall 11 legs green");
 process.exit(fail ? 1 : 0);

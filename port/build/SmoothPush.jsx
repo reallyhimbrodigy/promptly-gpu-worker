@@ -387,6 +387,14 @@ const Component = ({ item }) => {
         style={{
           width: "100%",
           height: "100%",
+  // FIT EXCEPTION, AND IT IS TEMPORARY (Zac, 2026-09-20). The nine transitions
+  // are `contain` so their plate matches the letterboxed base track. THE ZOOMS
+  // STAY `cover` FOR TWO REASONS, both of which expire together: a contained
+  // zoom drags the letterbox EDGE through frame, and the velocity-cap
+  // calibration was measured against a COVERING plate.
+  // WHEN CANVAS-FOLLOWS-SOURCE LANDS, BOTH FITS ARE THE IDENTITY — a 1920x1080
+  // source in a 1920x1080 canvas has no bars for either to place — and this
+  // exception ENDS. Delete it then; do not re-argue it.
           objectFit: "cover",
           filter: correct,
           transform: `scale(${scale})`,
