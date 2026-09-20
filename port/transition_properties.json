@@ -1,41 +1,281 @@
 {
  "_what": "Property tables for the transitions Builder 2 ported, 2026-09-20. SEAM-ROOM and DURATION are the two dials on every one, per Zac: `seamRoom` is where the hard cut sits inside the item (frames from its start), `duration` is how long the transition runs, centred on that seam.",
- "_one_source": "Both sides are the SAME asset at two offsets — in this pipeline every clip is a seek into one file, which is exactly the two-video-layer capability measured by frame on 2026-09-19. `clip` is one asset id; `srcFromA` and `srcFromB` are the two source offsets.",
+ "_one_source": "Both sides are the SAME asset at two offsets \u2014 in this pipeline every clip is a seek into one file, which is exactly the two-video-layer capability measured by frame on 2026-09-19. `clip` is one asset id; `srcFromA` and `srcFromB` are the two source offsets.",
  "_contract": "Every key here is READ by the built blob and every props.x the blob reads is declared here. No hardcoded fallbacks: defaults live here and nowhere else.",
  "DipToBlack": [
-  {"key": "clip", "label": "Clip", "type": "video", "defaultValue": ""},
-  {"key": "srcFromA", "label": "Source start frame, outgoing", "type": "number", "defaultValue": 0},
-  {"key": "srcFromB", "label": "Source start frame, incoming", "type": "number", "defaultValue": 0},
-  {"key": "seamRoom", "label": "Frames before the cut this item covers", "type": "number", "defaultValue": 5},
-  {"key": "duration", "label": "Transition duration (frames)", "type": "number", "defaultValue": 10},
-  {"key": "correct", "label": "Rest calibration (CSS filter, from the harness)", "type": "text", "defaultValue": ""}
+  {
+   "key": "clip",
+   "label": "Clip",
+   "type": "video",
+   "defaultValue": ""
+  },
+  {
+   "key": "srcFromA",
+   "label": "Source start frame, outgoing",
+   "type": "number",
+   "defaultValue": 0
+  },
+  {
+   "key": "srcFromB",
+   "label": "Source start frame, incoming",
+   "type": "number",
+   "defaultValue": 0
+  },
+  {
+   "key": "seamRoom",
+   "label": "Frames before the cut this item covers",
+   "type": "number",
+   "defaultValue": 5
+  },
+  {
+   "key": "duration",
+   "label": "Transition duration (frames)",
+   "type": "number",
+   "defaultValue": 10
+  },
+  {
+   "key": "correct",
+   "label": "Rest calibration (CSS filter, from the harness)",
+   "type": "text",
+   "defaultValue": ""
+  }
  ],
  "SlideOver": [
-  {"key": "clip", "label": "Clip", "type": "video", "defaultValue": ""},
-  {"key": "srcFromA", "label": "Source start frame, outgoing", "type": "number", "defaultValue": 0},
-  {"key": "srcFromB", "label": "Source start frame, incoming", "type": "number", "defaultValue": 0},
-  {"key": "seamRoom", "label": "Frames before the cut this item covers", "type": "number", "defaultValue": 8},
-  {"key": "duration", "label": "Transition duration (frames)", "type": "number", "defaultValue": 16},
-  {"key": "direction", "label": "Slide direction (left or right)", "type": "text", "defaultValue": "left"},
-  {"key": "correct", "label": "Rest calibration (CSS filter, from the harness)", "type": "text", "defaultValue": ""}
+  {
+   "key": "clip",
+   "label": "Clip",
+   "type": "video",
+   "defaultValue": ""
+  },
+  {
+   "key": "srcFromA",
+   "label": "Source start frame, outgoing",
+   "type": "number",
+   "defaultValue": 0
+  },
+  {
+   "key": "srcFromB",
+   "label": "Source start frame, incoming",
+   "type": "number",
+   "defaultValue": 0
+  },
+  {
+   "key": "seamRoom",
+   "label": "Frames before the cut this item covers",
+   "type": "number",
+   "defaultValue": 8
+  },
+  {
+   "key": "duration",
+   "label": "Transition duration (frames)",
+   "type": "number",
+   "defaultValue": 16
+  },
+  {
+   "key": "direction",
+   "label": "Slide direction (left or right)",
+   "type": "text",
+   "defaultValue": "left"
+  },
+  {
+   "key": "correct",
+   "label": "Rest calibration (CSS filter, from the harness)",
+   "type": "text",
+   "defaultValue": ""
+  }
  ],
  "CardSwipe": [
-  {"key": "clip", "label": "Clip", "type": "video", "defaultValue": ""},
-  {"key": "srcFromA", "label": "Source start frame, outgoing", "type": "number", "defaultValue": 0},
-  {"key": "srcFromB", "label": "Source start frame, incoming", "type": "number", "defaultValue": 0},
-  {"key": "seamRoom", "label": "Frames before the cut this item covers", "type": "number", "defaultValue": 8},
-  {"key": "duration", "label": "Transition duration (frames)", "type": "number", "defaultValue": 16},
-  {"key": "direction", "label": "Throw direction (left or right)", "type": "text", "defaultValue": "left"},
-  {"key": "correct", "label": "Rest calibration (CSS filter, from the harness)", "type": "text", "defaultValue": ""}
+  {
+   "key": "clip",
+   "label": "Clip",
+   "type": "video",
+   "defaultValue": ""
+  },
+  {
+   "key": "srcFromA",
+   "label": "Source start frame, outgoing",
+   "type": "number",
+   "defaultValue": 0
+  },
+  {
+   "key": "srcFromB",
+   "label": "Source start frame, incoming",
+   "type": "number",
+   "defaultValue": 0
+  },
+  {
+   "key": "seamRoom",
+   "label": "Frames before the cut this item covers",
+   "type": "number",
+   "defaultValue": 8
+  },
+  {
+   "key": "duration",
+   "label": "Transition duration (frames)",
+   "type": "number",
+   "defaultValue": 16
+  },
+  {
+   "key": "direction",
+   "label": "Throw direction (left or right)",
+   "type": "text",
+   "defaultValue": "left"
+  },
+  {
+   "key": "correct",
+   "label": "Rest calibration (CSS filter, from the harness)",
+   "type": "text",
+   "defaultValue": ""
+  }
  ],
  "ZoomThrough": [
-  {"key": "clip", "label": "Clip", "type": "video", "defaultValue": ""},
-  {"key": "srcFromA", "label": "Source start frame, outgoing", "type": "number", "defaultValue": 0},
-  {"key": "srcFromB", "label": "Source start frame, incoming", "type": "number", "defaultValue": 0},
-  {"key": "seamRoom", "label": "Frames before the cut this item covers", "type": "number", "defaultValue": 7},
-  {"key": "duration", "label": "Transition duration (frames)", "type": "number", "defaultValue": 14},
-  {"key": "through", "label": "How far A is driven through (scale)", "type": "number", "defaultValue": 3},
-  {"key": "punch", "label": "PUNCH register (accelerate into the cut)", "type": "boolean", "defaultValue": false},
-  {"key": "correct", "label": "Rest calibration (CSS filter, from the harness)", "type": "text", "defaultValue": ""}
+  {
+   "key": "clip",
+   "label": "Clip",
+   "type": "video",
+   "defaultValue": ""
+  },
+  {
+   "key": "srcFromA",
+   "label": "Source start frame, outgoing",
+   "type": "number",
+   "defaultValue": 0
+  },
+  {
+   "key": "srcFromB",
+   "label": "Source start frame, incoming",
+   "type": "number",
+   "defaultValue": 0
+  },
+  {
+   "key": "seamRoom",
+   "label": "Frames before the cut this item covers",
+   "type": "number",
+   "defaultValue": 7
+  },
+  {
+   "key": "duration",
+   "label": "Transition duration (frames)",
+   "type": "number",
+   "defaultValue": 14
+  },
+  {
+   "key": "through",
+   "label": "How far A is driven through (scale)",
+   "type": "number",
+   "defaultValue": 3
+  },
+  {
+   "key": "punch",
+   "label": "PUNCH register (accelerate into the cut)",
+   "type": "boolean",
+   "defaultValue": false
+  },
+  {
+   "key": "correct",
+   "label": "Rest calibration (CSS filter, from the harness)",
+   "type": "text",
+   "defaultValue": ""
+  }
+ ],
+ "StepPush": [
+  {
+   "key": "clip",
+   "label": "Clip",
+   "type": "video",
+   "defaultValue": ""
+  },
+  {
+   "key": "srcFromA",
+   "label": "Source start frame, outgoing",
+   "type": "number",
+   "defaultValue": 0
+  },
+  {
+   "key": "srcFromB",
+   "label": "Source start frame, incoming",
+   "type": "number",
+   "defaultValue": 0
+  },
+  {
+   "key": "seamRoom",
+   "label": "Frames before the cut this item covers",
+   "type": "number",
+   "defaultValue": 9
+  },
+  {
+   "key": "duration",
+   "label": "Transition duration (frames)",
+   "type": "number",
+   "defaultValue": 18
+  },
+  {
+   "key": "direction",
+   "label": "Step direction (left, right, up or down)",
+   "type": "text",
+   "defaultValue": "left"
+  },
+  {
+   "key": "separatorShadow",
+   "label": "Shadow on the trailing edge",
+   "type": "boolean",
+   "defaultValue": true
+  },
+  {
+   "key": "punch",
+   "label": "PUNCH register (accelerate into the arriving slide)",
+   "type": "boolean",
+   "defaultValue": false
+  },
+  {
+   "key": "correct",
+   "label": "Rest calibration (CSS filter, from the harness)",
+   "type": "text",
+   "defaultValue": ""
+  }
+ ],
+ "CrossfadeZoom": [
+  {
+   "key": "clip",
+   "label": "Clip",
+   "type": "video",
+   "defaultValue": ""
+  },
+  {
+   "key": "srcFromA",
+   "label": "Source start frame, outgoing",
+   "type": "number",
+   "defaultValue": 0
+  },
+  {
+   "key": "srcFromB",
+   "label": "Source start frame, incoming",
+   "type": "number",
+   "defaultValue": 0
+  },
+  {
+   "key": "seamRoom",
+   "label": "Frames before the cut this item covers",
+   "type": "number",
+   "defaultValue": 10
+  },
+  {
+   "key": "duration",
+   "label": "Transition duration (frames)",
+   "type": "number",
+   "defaultValue": 20
+  },
+  {
+   "key": "zoom",
+   "label": "Counter-zoom magnification",
+   "type": "number",
+   "defaultValue": 1.12
+  },
+  {
+   "key": "correct",
+   "label": "Rest calibration (CSS filter, from the harness)",
+   "type": "text",
+   "defaultValue": ""
+  }
  ]
 }
