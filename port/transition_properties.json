@@ -277,5 +277,55 @@
    "type": "text",
    "defaultValue": ""
   }
+ ],
+ "Stack": [
+  {
+   "key": "clip",
+   "label": "Clip",
+   "type": "video",
+   "defaultValue": ""
+  },
+  {
+   "key": "srcFromA",
+   "label": "Source start frame, outgoing",
+   "type": "number",
+   "defaultValue": 0
+  },
+  {
+   "key": "srcFromB",
+   "label": "Source start frame, incoming",
+   "type": "number",
+   "defaultValue": 0
+  },
+  {
+   "key": "seamRoom",
+   "label": "Frames before the cut this item covers",
+   "type": "number",
+   "defaultValue": 12
+  },
+  {
+   "key": "duration",
+   "label": "Transition duration (frames)",
+   "type": "number",
+   "defaultValue": 24
+  },
+  {
+   "key": "cardScale",
+   "label": "Card size in the switcher",
+   "type": "number",
+   "defaultValue": 0.82
+  },
+  {
+   "key": "cardRadius",
+   "label": "Card corner radius (px)",
+   "type": "number",
+   "defaultValue": 40
+  },
+  {
+   "key": "correct",
+   "label": "Rest calibration (CSS filter, from the harness)",
+   "type": "text",
+   "defaultValue": ""
+  }
  ]
 }

@@ -25,6 +25,7 @@ KIND of fact from "this one has 11.5x less headroom than that one".
 | **CrossfadeZoom** | counter-zoom 1.0<->1.12 across 20f | **12.2** | **1.1x** |
 | StepPush | a full frame width in 18f, our trapezoid | 119.2 | 10.8x |
 | SlideOver | B slides a full frame width in 16f | 126.6 | 11.5x |
+| Stack | A across the row and out, 24f | 175.0 | 15.9x |
 | ZoomThrough | A driven to 3x in 14f, our trapezoid | 321.7 | 29.2x |
 | CardSwipe | A thrown 120% of width in 16f | 328.2 | 29.8x |
 
