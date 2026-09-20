@@ -12086,9 +12086,18 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
          model: str = "claude-sonnet-5", use_hands: bool = False,
          think_tokens: int = CANONICAL_THINK_TOKENS, effort: str = CANONICAL_EFFORT, prefix_ttl: str = "1h", no_watch: bool = False, density_fps: float = 2.0,
          run_bound: int = 0, light_prefix: bool = False, prestage_title: str = "", prestage_controls: str = "",
-         prestage_titles: str = "", transcript_file: str = "", brief_file: str = ""):
-    if not clip_url:
-        raise SystemExit("pass --clip-url")
+         prestage_titles: str = "", transcript_file: str = "", brief_file: str = "",
+         fixture: str = ""):
+    # THE SOURCE IS NAMED, NOT PASTED (Zac, 2026-09-20). A presigned URL on a
+    # command line expires, is not in the tree, and is unrecoverable the next
+    # morning — which is how this lane blocked a run asking for one. A NAME is
+    # durable and reviewable; the URL is derived here and never written down.
+    import fixtures as _fx
+    _src = _fx.resolve(fixture=fixture, clip_url=clip_url)
+    if _src["state"] != "MEASURED":
+        raise SystemExit("SOURCE %s: %s" % (_src["state"], _src["why"]))
+    clip_url = _src["url"]
+    print("  SOURCE          : %s  %s" % (_src["source"], _src["why"]), flush=True)
     if brief_file:
         # A PRODUCTION BRIEF FROM A FILE (Builder-2's fixture rows): quotes and newlines survive the
         # batch's `sh -c` launch this way; a brief on the command line would not.

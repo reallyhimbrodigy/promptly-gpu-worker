@@ -2852,6 +2852,48 @@ def main():
           and _pok == 1 and _ptot == 6 and "primary anchor" in _ptxt,
           "%d/%d measured, %d line(s)" % (_pok, _ptot, len(_ptxt.splitlines())))
 
+    # ---- FIXTURES BY NAME ----
+    import fixtures as FX
+    _fman = FX.load()
+    check("every fixture in the manifest carries an s3 key and measured geometry",
+          _fman["state"] == "MEASURED" and len(_fman["fixtures"]) >= 11
+          and all(f.get("s3_key") for f in _fman["fixtures"].values())
+          and all(f.get("width") and f.get("height") and f.get("duration")
+                  for f in _fman["fixtures"].values()),
+          "%d fixture(s); missing key=%s missing geometry=%s" % (
+              len(_fman["fixtures"]),
+              [n for n, f in _fman["fixtures"].items() if not f.get("s3_key")],
+              [n for n, f in _fman["fixtures"].items()
+               if not (f.get("width") and f.get("height") and f.get("duration"))]))
+    # AN UNKNOWN NAME IS REFUSED WITH THE KNOWN ONES NAMED. A typo returning
+    # None reaches curl as an empty URL and fails as a download error — the
+    # same symptom as an expired grant and as a deleted object, three causes
+    # behind one message, and the run becomes the debugger.
+    check("an unknown fixture is REFUSED and the refusal lists what exists",
+          FX.sign("nope")["state"] == "REFUSED"
+          and "talking_head" in FX.sign("nope")["why"]
+          and FX.resolve()["state"] == "REFUSED"
+          and FX.resolve(fixture="a", clip_url="b")["state"] == "REFUSED"
+          and FX.load("/nonexistent.json")["state"] == "ABSENT",
+          FX.sign("nope")["why"][:70])
+    # A RAW URL STILL WORKS AND IS LABELLED. Refusing it outright would break
+    # every probe entrypoint the day this landed, and a correct rule arriving
+    # as a wave of red gets reverted rather than investigated. The label is the
+    # number that goes to zero.
+    check("a raw URL is accepted and ledgered as raw_url, not silently equated with a fixture",
+          FX.resolve(clip_url="https://x/y.mp4")["source"] == "raw_url"
+          and "not reproducible" in FX.resolve(clip_url="https://x/y.mp4")["why"],
+          FX.resolve(clip_url="https://x/y.mp4")["why"][:70])
+    # THE TWO FIXTURES THE MORNING RUN NEEDS, ASSERTED BY NAME.
+    check("the talking-head fixture and Zac's clip are both in the manifest",
+          {"talking_head", "zac_blueshirt"} <= set(_fman["fixtures"])
+          and _fman["fixtures"]["talking_head"]["duration"] > 20
+          and _fman["fixtures"]["zac_blueshirt"]["width"] == 1080,
+          "talking_head %ss, zac_blueshirt %sx%s" % (
+              _fman["fixtures"]["talking_head"]["duration"],
+              _fman["fixtures"]["zac_blueshirt"]["width"],
+              _fman["fixtures"]["zac_blueshirt"]["height"]))
+
     if FAILS:
         print("\n%d FAILURE(S)" % len(FAILS))
         for f in FAILS:
