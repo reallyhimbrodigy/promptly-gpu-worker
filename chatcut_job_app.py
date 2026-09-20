@@ -4555,6 +4555,94 @@ _PACKED_PROPS = {
 }
 
 
+def item_props_from_inspect(envelope):
+    """A placed item's properties, out of inspect_item's PROSE. -> {state, props, why}
+
+    MEASURED 2026-09-19, after three runs that could not see them. inspect_item
+    answers with keys `_links`, `_meta`, `_text`, `content` — and the properties are
+    in the TEXT, twice:
+
+        Motion Graphic Effective Props:
+          notes="|#FFE066|-3; Second note" (override)
+          size="medium" (default)
+
+        Properties:
+          propertyOverrides: {"notes":"|#FFE066|-3; Second note"}
+
+    `_deep_find(env, "propertyOverrides")` can never succeed on that, because the
+    line is a STRING — which is written down in this file from an earlier round, and
+    I wrote the same bug underneath it anyway.
+
+    THE EFFECTIVE BLOCK IS PREFERRED over the override line: it carries defaults as
+    well as overrides, so a component relying on a default is judged on what it will
+    actually render rather than on what was explicitly passed.
+    """
+    if not isinstance(envelope, dict):
+        return {"state": "ABSENT", "props": {}, "why": "the response was not an object"}
+    txt = str(envelope.get("_text") or "")
+    if not txt:
+        for c in (envelope.get("content") or []):
+            if isinstance(c, dict) and c.get("type") == "text":
+                txt += c.get("text") or ""
+    if not txt:
+        return {"state": "ABSENT", "props": {},
+                "why": "inspect_item carried no text; keys=%s" % sorted(envelope)[:8]}
+    props, how = {}, None
+    m = re.search(r"(?:Motion Graphic )?Effective Props:\s*\n((?:\s+\S+=.*\n?)+)", txt)
+    if m:
+        for line in m.group(1).splitlines():
+            mm = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*(?:\((override|default)[^)]*\))?\s*$", line)
+            if not mm:
+                continue
+            raw = mm.group(2).strip()
+            if len(raw) >= 2 and raw[0] == raw[-1] == '"':
+                raw = raw[1:-1]
+            props[mm.group(1)] = raw
+        how = "Effective Props block (%d)" % len(props)
+    if not props:
+        m2 = re.search(r"propertyOverrides:\s*(\{.*?\})\s*$", txt, re.M)
+        if m2:
+            try:
+                props = json.loads(m2.group(1))
+                how = "propertyOverrides line (%d)" % len(props)
+            except ValueError:
+                return {"state": "FAILED", "props": {},
+                        "why": "the propertyOverrides line is not JSON: %s" % m2.group(1)[:200]}
+    if not props:
+        return {"state": "ABSENT", "props": {},
+                "why": ("inspect_item's text names no Effective Props block and no "
+                        "propertyOverrides line (%d chars read)" % len(txt))}
+    return {"state": "MEASURED", "props": props, "why": "read from the %s" % how}
+
+
+# ── EVERY READER THAT FEEDS A SEAM OR A VERDICT RETURNS A STATE ──────────────
+# ZAC'S RULE, 2026-09-19, earned three times in one day. A reader that answers with
+# a bare value cannot distinguish "I looked and there was nothing wrong" from "I
+# could not look", and the second silently renders as the first at the seam that
+# consumes it. Measured: component_faults returned [] on two paid runs with a
+# deliberately malformed entry sitting on the timeline, because it read a key the
+# read-back does not carry.
+#
+# THE RULE: a reader feeding a seam or a verdict returns a dict carrying `state`.
+# THE CHECK: a leg drives each one with a SOURCE MISSING THE KEY IT READS and
+# requires ABSENT — not an empty list, not a zero, not a None.
+#
+# Each entry is (function name, a kwargs builder for a source missing the key,
+# the state that source must produce). The smoke walks this table, so a reader
+# added to a seam without an entry is a gap the census names.
+STATEFUL_READERS = (
+    ("component_faults", "a timeline whose items expose no properties at all", "ABSENT"),
+    ("item_props_from_inspect", "an inspect_item answer with no text", "ABSENT"),
+    ("frame_diff_profile", "one side with no frames", "ABSENT"),
+    ("channel_offset", "one side with no frames", "ABSENT"),
+    ("rest_verdict", "no frames common to both reads", "ABSENT"),
+    ("before_timeline", "a read that returns no items", "ABSENT"),
+    ("library_ids", "an envelope carrying no ids", "ABSENT"),
+    ("write_effect", "a response naming none of adds/updates/deletes", "UNREADABLE"),
+    ("calibration_verdict", "a residual that was never measured", "ABSENT"),
+)
+
+
 def packed_prop_faults(key, raw):
     """Entries a packed property declares that cannot be read. PURE. -> [str]
 
@@ -5836,10 +5924,9 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
             try:
                 _ii = _mcp_call(tok, "inspect_item",
                                 {"projectId": _stage["projectId"], "itemId": it.get("id")}, expect=None)
-                _pv = (_deep_find(_ii, "propertyOverrides") or _deep_find(_ii, "effectiveProps")
-                       or _deep_find(_ii, "properties"))
-                if _pv:
-                    out[str(it.get("id"))] = _pv
+                _pr = item_props_from_inspect(_ii)
+                if _pr["state"] == "MEASURED":
+                    out[str(it.get("id"))] = _pr["props"]
             except Exception:                                     # noqa: BLE001
                 continue
         return out
@@ -5996,9 +6083,9 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         for it in [x for x in _items if str(x.get("id") or "").replace("-", "")[:10] != str(_base or "").replace("-", "")[:10]][:20]:
             try:
                 _ii = _mcp_call(tok, "inspect_item", {"projectId": _stage["projectId"], "itemId": it.get("id")}, expect=None)
-                _pv = _deep_find(_ii, "propertyOverrides") or _deep_find(_ii, "effectiveProps") or _deep_find(_ii, "properties")
-                if _pv:
-                    _props[str(it.get("id"))] = _pv
+                _pr = item_props_from_inspect(_ii)
+                if _pr["state"] == "MEASURED":
+                    _props[str(it.get("id"))] = _pr["props"]
             except Exception as _ie:                              # noqa: BLE001
                 _props[str(it.get("id"))] = {"inspect_item": "FAILED %s" % str(_ie)[:80]}
         mark("rewatch%d.props" % n)
@@ -8315,22 +8402,35 @@ def text_family_check(clip_url: str = "", at_s: float = 6.0, span_s: float = 3.0
         # THE VALUES LIVE BEHIND inspect_item, NOT ON THE READ-BACK ITEM. Reading the
         # item's own propertyOverrides returned nothing on two paid runs and reported
         # it as "no fault" both times.
-        _pmap = {}
+        # EVERY MISS CARRIES ITS REASON. The first version of this loop swallowed the
+        # exception and continued, so an empty map said nothing about WHY it was empty
+        # — the same failure-without-evidence this harness exists to prevent, written
+        # by me, three hours after fixing it in registration_refusal.
+        _pmap, _pwhy = {}, []
         for _it in (rb.get("items") or []):
+            _iid = str(_it.get("id") or "")
             try:
                 _ii = _mcp_call(tok, "inspect_item",
-                                {"projectId": pid, "itemId": _it.get("id")}, expect=None)
-                _pv = (_deep_find(_ii, "propertyOverrides") or _deep_find(_ii, "effectiveProps")
-                       or _deep_find(_ii, "properties"))
+                                {"projectId": pid, "itemId": _iid}, expect=None)
+                _pr = item_props_from_inspect(_ii)
+                _pv = _pr["props"] if _pr["state"] == "MEASURED" else None
                 if _pv:
-                    _pmap[str(_it.get("id"))] = _pv
-            except Exception:                                     # noqa: BLE001
-                continue
+                    _pmap[_iid] = _pv
+                else:
+                    _pwhy.append("%s: inspect_item answered with no propertyOverrides/"
+                                 "effectiveProps/properties; keys=%s text=%r"
+                                 % (_iid[:8], sorted(_ii)[:10] if isinstance(_ii, dict) else type(_ii).__name__,
+                                    str((_ii or {}).get("_text") or "")[:2400]))
+            except Exception as _pe:                              # noqa: BLE001
+                _pwhy.append("%s: inspect_item RAISED %s: %s"
+                             % (_iid[:8], type(_pe).__name__, str(_pe)[:300]))
+        for _w in _pwhy:
+            print("      PROPS MISS  %s" % _w[:2400], flush=True)
         faults = component_faults(rb.get("items") or [], _pmap)
         import base64 as _b64
         row = {"state": "MEASURED", "item": iid, "overrides": overrides,
                "faults": faults.get("faults"), "fault_state": faults.get("state"),
-               "fault_why": faults.get("why"), "props_seen": _pmap,
+               "fault_why": faults.get("why"), "props_seen": _pmap, "props_misses": _pwhy,
                "b64": [_b64.b64encode(open(q, "rb").read()).decode() for q in list(f.values())[:2]]}
         edit_item_checked(tok, {"projectId": pid, "deletes": [{"id": iid}]},
                           "clearing %s" % name)

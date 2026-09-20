@@ -2060,6 +2060,109 @@ def main():
           and "the export is withheld" in _app,
           "no error drawn; both seams present")
 
+    # ---- THE PROPERTIES ARE IN THE PROSE (measured 2026-09-19, after three runs) ----
+    # inspect_item answers with keys _links/_meta/_text/content and puts the values in
+    # the TEXT — an "Effective Props" block and a `propertyOverrides:` line. Walking the
+    # envelope for a propertyOverrides KEY can never succeed, which is written down in
+    # this repo from an earlier round; I wrote the same bug underneath it, and it cost
+    # three runs of reporting "no fault" about a malformed entry sitting on a timeline.
+    _ins = ("Timeline: Timeline [03088eef7e]\nItem: 2bbe2a3b1e\n"
+            "Type: motion-graphic | Track: V2\n\n"
+            "Motion Graphic Effective Props:\n"
+            "  notes=\"|#FFE066|-3; Second note|#9AE6B4|2\" (override)\n"
+            "  size=\"medium\" (default)\n  position=\"middle\" (default)\n\n"
+            "Properties:\n  from: 180\n"
+            "  propertyOverrides: {\"notes\":\"|#FFE066|-3; Second note|#9AE6B4|2\"}\n"
+            "  width: 1080")
+    _ip = J.item_props_from_inspect({"_text": _ins})
+    check("a placed item's properties are parsed out of inspect_item's prose, defaults included",
+          _ip["state"] == "MEASURED"
+          and _ip["props"].get("notes") == "|#FFE066|-3; Second note|#9AE6B4|2"
+          # THE EFFECTIVE BLOCK IS PREFERRED: it carries defaults, so a component
+          # relying on one is judged on what it will actually render.
+          and _ip["props"].get("size") == "medium" and _ip["props"].get("position") == "middle",
+          str(_ip["props"]))
+    check("the override line is the fallback, and a text-free answer is ABSENT",
+          J.item_props_from_inspect(
+              {"_text": 'Properties:\n  propertyOverrides: {"notes":"a|b|0"}'})["props"] == {"notes": "a|b|0"}
+          and J.item_props_from_inspect({"keys": 1})["state"] == "ABSENT"
+          and J.item_props_from_inspect(None)["state"] == "ABSENT",
+          "fallback + two absences")
+    # END TO END: the parsed props make the planted fault fire.
+    check("the parsed properties make a planted malformed entry FAULT",
+          J.component_faults([{"id": "2bbe2a3b1e", "itemType": "motion-graphic",
+                               "asset": {"name": "StickyNotes"}}],
+                             {"2bbe2a3b1e": _ip["props"]})["faults"],
+          str(J.component_faults([{"id": "2bbe2a3b1e", "itemType": "motion-graphic",
+                                   "asset": {"name": "StickyNotes"}},],
+                                 {"2bbe2a3b1e": _ip["props"]})["faults"])[:110])
+    # AND NO SITE WALKS THE ENVELOPE FOR A KEY THAT IS A STRING.
+    _appp = _re.sub(r"^\s*#.*$", "", open("chatcut_job_app.py", encoding="utf-8").read(), flags=_re.M)
+    check("no property site walks the envelope for a propertyOverrides key any more",
+          '_deep_find(_ii, "propertyOverrides")' not in _appp
+          and _appp.count("item_props_from_inspect(_ii)") == 3,
+          "%d sites parse the prose" % _appp.count("item_props_from_inspect(_ii)"))
+
+    # ---- EVERY SEAM-FEEDING READER RETURNS A STATE (Zac's rule, 2026-09-19) ----
+    # Earned three times in one day. A reader answering with a bare value cannot tell
+    # "I looked and nothing was wrong" from "I could not look", and the second renders
+    # as the first at the seam that consumes it. component_faults returned [] on TWO
+    # paid runs with a deliberately malformed entry on the timeline, because it read a
+    # key the read-back does not carry. Each reader below is DRIVEN with a source
+    # MISSING THE KEY IT READS and must answer ABSENT — never [], 0 or None.
+    _blank = _np.zeros((2, 2, 3), dtype="float64")
+    _rdr = lambda p: _blank
+    _DRIVEN = {
+        # reader                  a source missing the key it reads          expected
+        "component_faults":  (lambda: J.component_faults(
+            [{"id": "x", "itemType": "motion-graphic"}]), "ABSENT"),
+        "item_props_from_inspect": (lambda: J.item_props_from_inspect({"keys": 1}), "ABSENT"),
+        "frame_diff_profile": (lambda: J.frame_diff_profile([], ["b"], reader=_rdr), "ABSENT"),
+        "channel_offset":    (lambda: J.channel_offset([], ["b"], reader=_rdr), "ABSENT"),
+        "rest_verdict":      (lambda: J.rest_verdict({}, {0: "b"}, reader=_rdr), "ABSENT"),
+        "before_timeline":   (lambda: J.before_timeline("t", {}, reader=lambda a, b: {"items": []}), "ABSENT"),
+        "library_ids":       (lambda: J.library_ids({"nothing": "here"}), "ABSENT"),
+        "write_effect":      (lambda: J.write_effect({"adds": [1]}, {"_text": "ok"}), "UNREADABLE"),
+        "calibration_verdict": (lambda: J.calibration_verdict({"state": "ABSENT", "why": "n"}), "ABSENT"),
+    }
+    _state_of = lambda r: (r[1] if isinstance(r, tuple) else
+                           r.get("state") if isinstance(r, dict) else None)
+    _wrong = []
+    for _nm, _expect, _ in [(n, e, w) for n, w, e in J.STATEFUL_READERS]:
+        _drive = _DRIVEN.get(_nm)
+        if _drive is None:
+            _wrong.append("%s: in the census with no leg driving it" % _nm)
+            continue
+        try:
+            _got = _state_of(_drive[0]())
+        except Exception as _re_:                                 # noqa: BLE001
+            _wrong.append("%s: raised %s" % (_nm, type(_re_).__name__))
+            continue
+        if _got != _drive[1]:
+            _wrong.append("%s: answered %r on a source missing its key, expected %r"
+                          % (_nm, _got, _drive[1]))
+    check("every seam-feeding reader answers ABSENT on a source missing the key it reads",
+          not _wrong, "; ".join(_wrong[:3]) if _wrong else
+          "%d readers driven blind, all stated" % len(J.STATEFUL_READERS))
+    # AND THE CENSUS COVERS WHAT ACTUALLY FEEDS A SEAM. A reader wired into a seam
+    # without a census entry is the gap this rule exists to close, so the names are
+    # checked against the source rather than trusted.
+    _appc = open("chatcut_job_app.py", encoding="utf-8").read()
+    _census = {n for n, _w, _e in J.STATEFUL_READERS}
+    # THE PROPERTY, NOT THE SHAPE. This first demanded a dict carrying "state" and
+    # went red on library_ids, which returns (ids, state, why) — a reader that CAN say
+    # ABSENT, in a tuple. The rule is that a reader can express absence, not that it
+    # uses one container; testing the container is the reader-keyed-to-shape mistake
+    # this file already carries eight scars from.
+    import inspect as _insp2
+    _shapeless = [_n for _n in _census
+                  if not callable(getattr(J, _n, None))
+                  or not any(_w in _insp2.getsource(getattr(J, _n))
+                             for _w in ("ABSENT", "UNREADABLE"))]
+    check("every censused reader exists and can name an absence in its own return",
+          not _shapeless, "; ".join(_shapeless) if _shapeless else
+          "%d censused, %d dict-shaped, library_ids returns (ids, state, why)" % (len(_census), len(_census) - 1))
+
     # THE WORKING TREE, NOT THE COMMIT. red_proof_no_undefined_names builds an ISOLATED
     # worktree from HEAD, so it judges what is COMMITTED — and a run is launched from what
     # is on disk. A slice-based edit removed `place_theirs`, `place_ours` and PORTED_PROPS
