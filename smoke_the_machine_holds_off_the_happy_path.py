@@ -1939,6 +1939,31 @@ def main():
               and not J.component_contract(_blob, J.PORTED_PROPS[_n]),
               "correct declared and read")
 
+    # ---- THE CALIBRATION'S CADENCE (Zac, 2026-09-19) ----
+    # Per deploy, refreshed on the hourly ping, and NEVER on a job's critical path:
+    # measured at 52.4s wall, which against a 90s latency law is not a trade worth
+    # making for 1.7 levels. Drift beyond the tolerance is REPORTED, not silently
+    # re-measured — a correction that moves inside a job makes two jobs minutes apart
+    # carry different corrections with nothing saying so.
+    _now = 100000.0
+    check("a fresh calibration is USED, a stale one is refreshed by the PING not the job",
+          J.calibration_cadence(_now, {"state": "MEASURED", "levels": 1.72,
+                                       "at": _now - 600})["action"] == "USE"
+          and J.calibration_cadence(_now, {"state": "MEASURED", "levels": 1.72,
+                                           "at": _now - 4000})["action"] == "REFRESH",
+          "600s USE, 4000s REFRESH against a 3600s cadence")
+    check("drift past the tolerance is REPORTED, never re-measured on the job's path",
+          J.calibration_cadence(_now, {"state": "MEASURED", "levels": 2.60, "at": _now - 60,
+                                       "previous_levels": 1.72})["action"] == "DRIFT"
+          # the two calibrations actually measured moved 0.3135 — inside the bar
+          and J.calibration_cadence(_now, {"state": "MEASURED", "levels": 2.0363, "at": _now - 60,
+                                           "previous_levels": 1.7228})["action"] == "USE",
+          "0.88 reports, the observed 0.3135 does not")
+    check("with no calibration at all the correction is NOT applied and the run says so",
+          J.calibration_cadence(_now, None)["action"] == "ABSENT"
+          and "not applied" in J.calibration_cadence(_now, None)["why"],
+          J.calibration_cadence(_now, None)["why"][:90])
+
     # THE WORKING TREE, NOT THE COMMIT. red_proof_no_undefined_names builds an ISOLATED
     # worktree from HEAD, so it judges what is COMMITTED — and a run is launched from what
     # is on disk. A slice-based edit removed `place_theirs`, `place_ours` and PORTED_PROPS

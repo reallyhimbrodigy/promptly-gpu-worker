@@ -7846,6 +7846,53 @@ REST_VARIANTS = (
 )
 
 
+# ── THE CALIBRATION'S CADENCE (Zac, 2026-09-19) ──────────────────────────────
+# PER DEPLOY, REFRESHED ON THE HOURLY PING, and NEVER on a job's critical path.
+# Measured: 52.4 s wall, $0.0107 of container at cpu=4/mem=8192 — about $0.29 a day
+# at roughly 27 runs. On a job's path that would be 52 s against a 90 s latency law,
+# which is not a trade worth making for 1.7 levels.
+#
+# THE DRIFT RULE, AND IT IS A REPORT NOT A MOVE. If the measured drift BETWEEN two
+# calibrations exceeds the tolerance, the run does NOT quietly re-calibrate
+# mid-flight: it REPORTS. A correction that moves on its own inside a job makes two
+# jobs rendered minutes apart carry different corrections with nothing saying so,
+# and that is the class this repo calls a change that is real and wrong.
+CAL_STALE_AFTER_S = 3600.0        # one hour: the ping's own cadence
+CAL_DRIFT_TOLERANCE = 0.5         # levels — the same bar as the residual gate
+
+
+def calibration_cadence(now_s, last, drift_tol=CAL_DRIFT_TOLERANCE, stale_after_s=CAL_STALE_AFTER_S):
+    """Should this job calibrate, use the stored value, or report drift? PURE.
+
+    -> {action, age_s, why}
+       USE         a fresh calibration exists; the job uses it and spends nothing
+       REFRESH     it is older than the ping's cadence — the PING refreshes it, not
+                   the job; a job that finds it stale uses it and says so
+       DRIFT       consecutive calibrations moved by more than the tolerance: the
+                   value is REPORTED as unstable, never silently re-measured on the
+                   critical path
+       ABSENT      there is no calibration at all — the correction is not applied
+                   and the run says so, rather than applying a guess
+    """
+    if not last or (last.get("state") != "MEASURED") or last.get("levels") is None:
+        return {"action": "ABSENT", "age_s": None,
+                "why": "no stored calibration — the correction is not applied and the run says so"}
+    age = float(now_s) - float(last.get("at") or 0.0)
+    prev = last.get("previous_levels")
+    if prev is not None:
+        drift = abs(float(last["levels"]) - float(prev))
+        if drift > drift_tol:
+            return {"action": "DRIFT", "age_s": round(age, 1), "drift": round(drift, 4),
+                    "why": ("consecutive calibrations moved %.4f level(s), over the %.1f tolerance — "
+                            "REPORTED, not re-measured on this job's path" % (drift, drift_tol))}
+    if age > stale_after_s:
+        return {"action": "REFRESH", "age_s": round(age, 1),
+                "why": ("the calibration is %.0f s old, past the %.0f s ping cadence — the PING "
+                        "refreshes it; this job uses it and says so" % (age, stale_after_s))}
+    return {"action": "USE", "age_s": round(age, 1),
+            "why": "calibration is %.0f s old, inside the ping cadence" % age}
+
+
 def cal_css(levels):
     """The CSS filter that subtracts `levels` from every channel. PURE. -> str
 
