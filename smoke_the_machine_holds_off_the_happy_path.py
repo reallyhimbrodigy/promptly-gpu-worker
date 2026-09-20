@@ -3129,6 +3129,65 @@ def main():
           "free=%s pinned=%s top_p_dropped=%s"
           % (_app_free, _b_pin.get("temperature"), "top_p" not in _b_pin))
 
+    # ---- THE FACE DETECTOR'S NEGATIVE CONTROL (Zac, 2026-09-20) ----
+    # "The check doesn't count as existing until both hold": a clip with no
+    # face returns zero, a clip with one returns at least one on every frame.
+    # Without the negative half, a detector that boxes EVERYTHING passes every
+    # positive test ever written -- and this lane withholds an export on what
+    # that detector says, so it could terminate every run on a phantom.
+    #
+    # TESTED IN TWO PLACES ON PURPOSE. cv2 and the model live in the CONTAINER,
+    # not on this machine, so the laptop can only test the LOGIC -- driven here
+    # with an injected tracker, through the shipped function. The DETECTOR is
+    # proven in the container, where face_control() runs on every job and the
+    # run REFUSES if it fails. A leg that quietly passed here because cv2 was
+    # missing would be the absence-as-success shape guarding the detector that
+    # decides whether anyone sees their video.
+    import perception as _PCF
+    _cdir = "fixtures_control"
+    _clips = sorted(f for f in os.listdir(_cdir)) if os.path.isdir(_cdir) else []
+    check("the control clips are staged in the tree, both kinds",
+          sum(1 for c in _clips if c.startswith("noface")) >= 2
+          and any(c.startswith("oneface") for c in _clips),
+          "clips: %s" % ", ".join(_clips))
+
+    def _fake(kind):
+        def _t(path, model=None, every_n_frames=6, **kw):
+            _n = os.path.basename(path)
+            if kind == "honest":
+                _has = not _n.startswith("noface")
+            elif kind == "boxes_everything":
+                _has = True
+            else:                                   # blind
+                _has = False
+            return {"state": "MEASURED", "samples": 4, "hits": 4 if _has else 0,
+                    "boxes": [{"t": 0.0, "score": 0.9}] * (4 if _has else 0)}
+        return _t
+    _ok = _PCF.face_control(_cdir, model="m", tracker=_fake("honest"))
+    _all = _PCF.face_control(_cdir, model="m", tracker=_fake("boxes_everything"))
+    _none = _PCF.face_control(_cdir, model="m", tracker=_fake("blind"))
+    check("the control passes an honest detector and FAILS one that boxes everything",
+          _ok["state"] == "MEASURED" and _all["state"] == "FAILED"
+          and "no face and returned" in _all["why"],
+          "honest=%s boxes-everything=%s" % (_ok["state"], _all["why"][:60]))
+    check("the control FAILS a detector that finds nothing, so a blind one cannot judge placements",
+          _none["state"] == "FAILED" and "found none" in _none["why"],
+          _none["why"][:80])
+    check("a control that could not run is ABSENT, never a pass",
+          _PCF.face_control("/nonexistent/dir")["state"] == "ABSENT"
+          and _PCF.face_control(_cdir, tracker=lambda *a, **k: {"state": "FAILED"})["state"] == "FAILED",
+          _PCF.face_control("/nonexistent/dir")["why"][:70])
+    # AND THE CONTAINER ACTUALLY RUNS IT, AND REFUSES ON FAILURE.
+    _appsrc = open("chatcut_job_app.py", encoding="utf-8").read()
+    check("the run calls the face control and refuses when it fails",
+          "_pcc.face_control()" in _appsrc
+          and "failed its negative control" in _appsrc
+          and "fixtures_control" in _appsrc,
+          "wired=%s refuses=%s mounted=%s" % (
+              "_pcc.face_control()" in _appsrc,
+              "failed its negative control" in _appsrc,
+              '"/craft/fixtures_control"' in _appsrc))
+
     # ---- THE STANDING-RED CENSUS (Zac, 2026-09-20) ----
     _hist = merge_history(RESULTS_LOG, write=(os.environ.get("SMOKE_HISTORY") == "1"))
     print("\n  CHECK HISTORY   : %s — %s%s"

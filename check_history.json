@@ -1,2198 +1,2228 @@
 {
  "--effort <level> is sent when given and absent otherwise": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "--prefix-ttl reaches edit() from main on both launch paths": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "--tools restricts the block to the agent's surface, and that surface is the edit ops": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "...and an event with no message id is counted, not dropped": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "...and in seconds when they fit it": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "...and names the families it does contain": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "...tiled twenty to a sheet: two sheets for a 20s source": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "86 words over a ~20s narration become 7-10 beats": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "A TURN THAT RETURNS TEXT ONLY IS REFUSED BEFORE ANYTHING IS APPLIED (Haiku wrote its edit inside a ```json fence and called nothing)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "A VIOLATED CONSTRAINT AT CALL 2 IS TERMINAL AND REFUNDED \u2014 there is no third call to fix it in": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "AN EMPTY CATALOGUE READ IS ABSENT AND NAMES THE KEYS IT SAW \u2014 never MEASURED with an empty list": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "CaptionMatch is built, contract-clean, and exposes size and position as dials": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "CaptionMatch reads the caption style and knows all nine, with a fallback": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "LowerThird is built, contract-clean, and exposes size and position as dials": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "NO cap is applied to the body while thinking is uncontrolled \u2014 the proxy can, and edit() passes 0": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "ONE differing pixel is enough to make it a pair, with no threshold to calibrate": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "ONE unasked op fails a captions-only brief, and the fault names the item and its family": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "PlainText is plain by construction: no card, no strip, no caption style": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "QuoteCard is built, contract-clean, and exposes size and position as dials": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "SmoothPush takes the rest calibration as a property and hard-codes no level": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "Sonnet canonical \u2014 thinking disabled, effort low \u2014 is the DEFAULT for a job, and the ping carries the same pair": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "StagedPush takes the rest calibration as a property and hard-codes no level": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "StepZoom takes the rest calibration as a property and hard-codes no level": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "StickyNotes is built, contract-clean, and exposes size and position as dials": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "THE CAP IS STRUCTURAL: the machine only ever makes two calls, so a third cannot be requested": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "THE CAP IS TWO AND IT IS HARD: a run that keeps editing gets no third call": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "THE GATE: no builtin is named on any turn \u2014 Bash above all (a Bash call to load a disallowed skill killed a run, 2026-09-18)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "THE GATE: no read tool is named on any turn \u2014 the harness reads the timeline back and serves it": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "THE HARNESS'S READ-BACK OF THE FINISHED TIMELINE DECIDES: a fault there is terminal and refunded, never exported": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "ToolSearch is off for the run": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "TornPaper is built, contract-clean, and exposes size and position as dials": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "`finish` is on the agent's surface beside the edit ops, and captions are not": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "`one continuous take` is a checkable no-cuts constraint, and a cut-density note is not": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a 'no captions' brief and a timeline carrying a caption track is a fault naming the track": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a 'no captions' brief is extracted as a checkable constraint": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a -32602 refusal is returned in the validator's own words (path and message), and an ordinary answer is not a refusal": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a 0-byte source is FAILED, not a valid hash every failed download would share": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a 1 fps rewatch tiles larger than a 2 fps one, and the size follows the density": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a 20-frame sheet is JPEG under 400 KB (PNG sheets at ~1.5 MB pushed call 4 past the 32 MB request limit)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a 4xx from the API is the terminal API ERROR at that turn, carrying the status and the API's words, and is never retried": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a 4xx is named API ERROR, never TEXT ONLY \u2014 the API's own verdict is read before the model's behaviour": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a 5-minute keep-warm ping is refused (the ping exists for the 1h shape only)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a CONNECT to api.anthropic.com is terminated with the throwaway CA, recorded, fingerprinted and relayed": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a JSON-then-prose edit_item envelope parses (four landed plants read as 'no adds')": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a SigV4 expiry is read as UTC, not as local time minus the non-DST offset": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a brief can come from a file (quoting-safe for the batch)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a brief this extractor cannot read is UNCHECKED, never a clean read": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a brief-scoped `only` still reads, because nothing outside the family is asked for": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a call 2 that calls some other tool and SAYS export is NO VERDICT, not an export": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a call that does not read the prefix call 1 established is terminal": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a call-2 prefix write TERMINATES the run at call 2 rather than billing on": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a caption constraint is read in the languages this corpus actually contains, not only English": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a caption read that is ABSENT or FAILED is a fault, not a pass": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a card centred on the face FAULTS and text clear of it does NOT": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a category-scoped `only` never becomes a whole-timeline licence": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a claim REMOVES the record, so a second job on the same source misses": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a clean verify exports at call 2, whether call 2 finished or fixed": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a comma-wrapped filler is cut and the same word as content is kept": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a comparison whose two sides name the same files is a FAULT, not a zero": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a component whose properties could not be read is ABSENT, never a clean pass": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a container that outlives its export past the budget is a LEDGERED DEFECT with an owner page": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
+ },
+ "a control that could not run is ABSENT, never a pass": {
+  "first_seen": 1789938537.518888,
+  "greens": 1,
+  "last_green": 1789938537.518888,
+  "runs": 1
  },
  "a differing call 1 is answered 409 preflight_refused and never forwarded (no cold write paid)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a duration with no timeline end is UNVERIFIED (ABSENT), a fault": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a finish call at call 2 ends the run the way the word used to": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a fresh calibration is USED, a stale one is refreshed by the PING not the job": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a harness-side MCP call is bounded at 120s": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a job prestaging its own titles or controls goes COLD and says why": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a job takes --density-fps and edit() hands it to the rewatch instrument and the run line": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a key with any part missing is REFUSED, never hashed as the string 'None'": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a layer that is a no-op at rest is IDENTICAL, and ONE differing pixel is a FAULT": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a malformed packed entry is named, and a well-formed one is not": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a native caption item or native cards is a FAULT, and a clean timeline is not": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a one-sided pair is ABSENT and writes nothing": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a pair whose CONTROL differs is CONFOUNDED and is never delivered": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a ping's TTL is read from what it wrote: 1h -> 60 min, 5m -> 5 min, no split -> unknown": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a pixel-identical pair is IDENTICAL and is never delivered": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a placed item's properties are parsed out of inspect_item's prose, defaults included": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a plant counts as named only through an op that touched it": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a positional comparison of the same two maps would have lined up different moments": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a preemption retry reads what the timeline already holds": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a preflight refusal is the terminal PREFLIGHT REFUSED, carrying the diff": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a property declared and never read is caught, and so is a read that was never declared": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a property read into a binding that is never USED is caught": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a prose treatment yields families, never characters": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a raw URL is accepted and ledgered as raw_url, not silently equated with a fixture": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a read transcript with words is speech, and with none is no-speech": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a record past the TTL is EXPIRED, not a miss \u2014 a slow user and a broken cache differ": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a refusal always carries words, whatever shape the response took": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a refused preflight refuses the CLI's retry too, and nothing ever reaches upstream": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a registration without an id is returned as a refusal, never counted as registered": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a rest check with nothing to compare is ABSENT, never a pass": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a retry reuses the prior stage instead of re-prestaging": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a reused stage whose timeline holds items, or cannot be read, is a CONTAMINATED ARM terminal before any model call": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a second claim on one key reaches the ledger as a double claim": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a source with no audio stream is ABSENT, and a broken filter is FAILED": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a sourceRange in a foreign vocabulary FAILS and names its keys": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a structured brief (object or its JSON text) yields the same constraints; a taste brief yields none": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a transcript that did NOT complete is `other`, never no-speech, and carries why": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a turn that hits the cap is a NAMED terminal and its truncated tool call is never applied": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a turn's bound is what is left of the RUN budget, never a per-turn constant": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a verified record is MEASURED only when the timeline holds the base clip and nothing else": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a verify with no reader is FAILED \u2014 an unknown project is not a verified one": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a widened run bound is a PARAMETER, defaults to the law, and the record says when it was raised": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a winner that cannot beat a displaced copy of itself identifies nothing": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "a withheld export leaves the tail unitemised, not itemised as empty": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "an ONLY / do-not-alter brief is a CHECKABLE scope constraint naming the licensed family": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "an empty read is ABSENT and an errored read is FAILED \u2014 neither reads as nothing was touched": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "an empty timeline on a full-edit brief is a fault the agent is told": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "an entry count past what the component renders is named rather than dropped": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "an errored category is ABSENT with its message, and a non-object answer is FAILED": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "an errored detector is FAILED and an empty-but-successful read is not": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "an unknown fixture is REFUSED and the refusal lists what exists": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "an unknown style is REFUSED, never substituted, and no text is ABSENT": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "an unpicklable error is re-raised as plain text that survives the wire": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "an unread or absent comparison is ABSENT or FAILED, never a proven pair": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "an unreadable caption state is UNKNOWN, never read as off": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "an unreadable read-back says so rather than passing as an empty timeline": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "an unsigned URL is ABSENT and an unreadable date is FAILED, and neither is a number": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "an untrimmed item with NO sourceRange is DERIVED, not failed": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "an unwatchable render is named in the rewatch message, never omitted": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "and the keys are named when there is no text to quote": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "asset_id_from finds a nested assetId, an assetId in the prose after the JSON, and names nothing when there is none": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "asset_id_from reads the id out of a real accepted registration's content text, and it is not a refusal": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "attach and edit mount the same volume at the same path, spelled by constant": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "bare start/end stamps are read in ms when they exceed the source": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "blur/hide a region is reported UNCHECKED, never passed": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "both arms share one project, one upload and one timeline, placed in sequence": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "both seams pass a property map, not the items' own absent key": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "cache writes are priced 5m at $3.75/M and the rest at $6/M, by the measured split": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "call 2 finishing with no ops ends the run: ONE rewatch, two calls, exported": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "caption cards come from the beats' own spans, in the style the agent chose": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "caption_cards: MEASURED from a list or the API's count, ABSENT with the keys, FAILED on an error": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "cli_version reads `claude --version` in the container and names a failure; edit and keep_warm both record it": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "component registration runs on a pool while the source imports": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "drift past the tolerance is REPORTED, never re-measured on the job's path": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "dur is derived from the frame range when the item does not carry it": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "duration: at or under 30 fails at 35 and passes at 28; about 45 fails at 50 and passes at 47; exactly 60 passes at 60.4": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "durations: under/at least/exactly/about/a 15-second/cut down to, seconds and minutes, word numbers": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "each call records ttft, generation, tool and waiting seconds from the stream clock": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "each invocation closes stdin when the result event arrives": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "each of the four refusal classes is caught, and a COMMENT is not code": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "each placement writes its frames to its own directory": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "each review carries the job's cold-write rule and the API's own status": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "edit() hands the constraint check to the turn machine": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "edit() hands the machine the job's own t0": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "edit() hands them over": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "edit() marks the gate before it asks for the render, and passes the marker in": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "edit_captions is not in the agent's tool list, and the fault is at the withholding seam": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "every API call records which TTL it wrote (write_1h / write_5m)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "every CLI invocation is bounded by the run bound or what is left of it, never a smaller number": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "every built component has a property table, and the table has no orphans": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "every censused reader exists and can produce the state the census says it answers": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "every checkable constraint kind has a branch in the checker": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "every checkable constraint kind is stated to the agent in words, never as its kind name": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "every component that reads a typeface declares it as a font-TYPED property": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "every component this harness can send satisfies the contract we measured": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "every family the extractor can emit is one the read-back checker can classify": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "every fingerprint row carries what was sent beside the prefix: thinking, effort, max_tokens": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "every fixture in the manifest carries an s3 key and measured geometry": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "every font default is a family search_fonts confirmed present, and Georgia is not used": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "every key part changes the key \u2014 a part that does not is a collision waiting": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "every lane module imported at run time is mounted in the image": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "every perception detector answers its censused state on a source missing what it reads": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "every registration goes through the normaliser and a refusal is returned before any id is looked for": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "every seam-feeding reader answers ABSENT on a source missing the key it reads": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "every turn and the run are bounded, and the bound is terminal": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "every unmeasured entry is ATLAS PENDING with a reason and no invented line": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "every upstream leg is traced: status, first byte, bytes relayed, redacted key": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "every variant defaults to medium, and to middle except the lower third": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "face lines give x,y and the band per second": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "faces use YuNet and never fall back to res10 when the model is missing": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "false positives are counted from the control's own ops, not declared": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "families come from what landed, not from a vocabulary the agent must recite": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "fetch_frames fetches every URL at once with a bound per URL, names the failure, and the wall is the bound, not the sum": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "harness_export marks submit, render, download, upload in that order": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "harness_export polls to the file, downloads it, and keeps bytes + sha beside the record": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "hook and close are marked": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "hop 6 rows carry the asset NAME the envelope holds": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "id prefix compares strip hyphens in the gate": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "job and ping both hand the proxy their run-first text, and the job's first message really starts with it": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "kept_spans reads sourceRange{start,end} in microseconds": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "library_ids finds every id however the envelope nests it, and names the key it used": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "mcp.json points the CLI at the shim, strictly": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "missing geometry is ABSENT, never a pass": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "mode_rule no longer rides in the system prompt": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "native caption cards are the same fault (cleared with edit_captions); zero cards and no track is a pass": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "no Write of any record is asked for": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "no component names a typeface as a bare CSS string": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "no emitted inventory line ranks one component against another": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "no ffmpeg still extraction remains for seeing": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "no music, no text, and a coordinated 'captions or titles' are read": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "no music: a 30s audio item is a fault; a 1s sound effect is not": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "no property site walks the envelope for a propertyOverrides key any more": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "no text: a text-carrying overlay is a fault; the component text map decides, and no map counts every overlay": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "no tool sha at all reports ABSENT rather than DIFFERS": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "no word is lost or split across beats": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "no-cuts passes on one video item, fails on two, and an unreadable timeline is ABSENT not PASS": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "no-watch: turn 1 creates the session cold and every later turn resumes it; the record says which and whether it resumed": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "no_watch skips the resume (no --resume in the command), skips the watch-end breakpoint, and the record says so": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "only frames present on BOTH sides are compared, and the rest are named": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "only the BUILT blobs are mounted, and the component is read from them": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "only user-role messages count and the LAST match is the run's first message (a system-role 'skipping' once stole the mark)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "overlapping anchors merge into one dense span and the extra frames are counted": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "pass 1 serves the watch, and says so when it is absent": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "plan-keyed hops are N/A on the single-agent path, not failures": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "prestage phases reach the record": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "prestage reports its phases": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "read_record reads the one-file record": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "request MB per call is read from the trace file, not from a record field built later (it printed [] on every run)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "select options become {value, label} objects; other fields and already-object options pass through untouched": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "serve_mitm still starts and returns a port with daemon threads set": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "sheets are read off the volume \u2014 an absent or wrong-sized one is STALE, not a warm hit": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "sheets watched at another density are STALE \u2014 the project is fine, the pictures are not": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "source_beats hands the segmenter's output to the prompt": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "submit_export's vocabulary is gone from the item reader": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "temperature is pinned only when armed, and a pinned arm sets one sampler": {
   "first_seen": 1789937860.365227,
-  "greens": 1,
-  "last_green": 1789937860.365227,
-  "runs": 1
+  "greens": 2,
+  "last_green": 1789938537.518888,
+  "runs": 2
  },
  "the 120s turn law still reports when the run bound is raised": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the CLI command is strict, shimmed, and leaves --max-turns to the caller": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the CLI is routed by HTTPS_PROXY + NODE_EXTRA_CA_CERTS, never by ANTHROPIC_BASE_URL": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the OS line is pinned to a constant so the fleet's kernel string cannot vary the prefix": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the Skill is a precondition line, not the guide": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the Skill tool is withheld, not asked": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the WORKING tree carries no undefined name and no shadowed definition": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the agent's surface is exactly the edit ops and the turn-ender, with no caption tool": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the arm is deleted with the key edit_item accepts, and the read-back proves it": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the attempt number is read BEFORE prestage uses it": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the base item's echo is parsed (expect='adds'), not read off the envelope": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the base video item is placed by prestage": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the before-timeline carries the judge's four fields for EVERY item, in the spec's shape": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the before-timeline is captured BEFORE turn 1 and reaches the record": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the bill sums every result event, one per user turn": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the billing-header block is outside the system hash and counted; the first differing message is reported even when the system differs": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the cache gate fails a call that did not read the prefix, and passes one that did": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the cache gate is 0.95 x (call-1 read + write)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the cap's derivation is recorded from a measured full edit, not guessed (held, not applied)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the catalogue's foreign example keys never reach the platter (DropCard 'steps', RecordingFrame 'corner')": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the ceiling counts a message id once, however many events carry it": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the ceiling counts per API call inside each invocation": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the cold-write defect verdict compares against the ping's own TTL": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the comparative scanner actually catches the phrases it names": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the component renders no error text, and the fault reaches the rewatch AND the read-back": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the constraint check runs ONCE, at call 2, and its fault is the terminal": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
+ },
+ "the control FAILS a detector that finds nothing, so a blind one cannot judge placements": {
+  "first_seen": 1789938537.518888,
+  "greens": 1,
+  "last_green": 1789938537.518888,
+  "runs": 1
+ },
+ "the control clips are staged in the tree, both kinds": {
+  "first_seen": 1789938537.518888,
+  "greens": 1,
+  "last_green": 1789938537.518888,
+  "runs": 1
+ },
+ "the control passes an honest detector and FAILS one that boxes everything": {
+  "first_seen": 1789938537.518888,
+  "greens": 1,
+  "last_green": 1789938537.518888,
+  "runs": 1
  },
  "the control review runs before the plants land": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the correction is an exact affine: slope 1, intercept minus k levels": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the dead plan route is gone from main": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the deciding paragraph shows the exact add shape with the dieted why, names type motion-graphic, forbids the json field, routes captions to edit_captions, and never mentions /work/DONE": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the deciding prompt no longer names trackBoundFrom or a captions revision (turn 1's add was refused for them)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the default fetch bound is 15s, not 60": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the dispatch reloads the volume before looking, and commits after writing": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the export is WITHHELD after any terminal (the floor once exported the untouched source after a 400)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the export tail is itemised: gate + render + download + upload = the tail": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the face box comes from the detector's extent, or a named window round the centre": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the face is a font-TYPED property and the harness supplies the canonical name": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the face tolerance names its atlas source and the assumption it makes": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the fingerprint names every system block's sha and size (the billing header excluded)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the first message carries the platter and the face lines": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the first message tells the agent the constraints, after the inventory and the face": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the first rewatch offers export as the clean reply": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the floor asks whether there is a viewable edit": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the gate passes only when every channel is inside the tolerance": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the happy path is TWO API calls: place, then fix-or-finish, and the harness's read-back decides": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the history ledger is read-only unless writing is asked for": {
   "first_seen": 1789937860.365227,
-  "greens": 1,
-  "last_green": 1789937860.365227,
-  "runs": 1
+  "greens": 2,
+  "last_green": 1789938537.518888,
+  "runs": 2
  },
  "the image block's media type follows the extension": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the image installs a PINNED claude-code (name@CLI_PIN), and the pin is a version": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the inventory covers every library entry and every line cites a table": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the inventory's entry count is the library's, not a number in this file": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the job arms the preflight with the ping's stored system text": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the job arms the preflight with the ping's thinking and effort": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the job hands the proxy its run-first text only at prefix_ttl 1h (development: 5m, no injection)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the job never hands the proxy a thinking budget (the 2000 arm was refused with 400)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the job starts the transparent proxy and never names ANTHROPIC_BASE_URL": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the keep-warm ping and the rewatch probe exist as functions": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the ledger carries a per-call table and the CLI's own bill": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the ledger's cache sums are deduped by message id": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the library carries the whole text-overlay family, and the count is corrected with a why": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the library is 79, and the file says why the sixth variant exists": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the local entrypoints are recognised (the exclusion is not empty)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the nine styles carry genuinely different typography, not nine names for one look": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the no-preview sentence sits where the placement is decided, and no DONE mark is asked for anywhere the agent reads": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the no-speech and car stages run on the off arm, the arm the batch's ping carries (an adaptive stage against an off-arm ping was refused, retried, and paid)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the offset is measured signed and per channel, never as one absolute number": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the override line is the fallback, and a text-free answer is ABSENT": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the pair is labelled honestly on both sides, naming each component": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the pair samples a control window and a test window by frame number": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the paragraph asks for the why inside each op, and for no record": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the paragraph names the source's frames and the base item": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the paragraph no longer asks for a schema fetch": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the paragraph says every turn ends in a tool call and names finish": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the paragraph states the diet: a why under 12 words, no prose, payloads carrying only what the harness executes": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the parsed properties make a planted malformed entry FAULT": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the per-frame profile is returned in order and as long as the comparison": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the per-run line is printed with the model named and the rates stated": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the ping keeps its system segment verbatim and the job diffs its call-1 system against it, block by block": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the ping takes think_tokens and effort, sends MAX_THINKING_TOKENS=0 for the off arm, and passes effort to the command": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the ping's sentinel is distinctive, and the ping sends exactly it": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the planted labels contain none of the detector's words (the first probe scored its own labels)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the platter lists every registry component with the keys ChatCut accepts, the shared keys said once, EndCard end-only": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the ported filler regex still agrees with handler.py's, word for word": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the preflight passes an identical system (billing header aside), refuses a one-byte difference naming block and offset, and is skipped without a ping": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the preflight refuses a job whose thinking differs from the ping's (the API drops message entries on that change) and passes a match": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the presign clock reads the same in every timezone, including one at +05:30": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the probe reads the ping's entry through the same transparent proxy as a job, on the off arm": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the probe takes a density and hands it to the rewatch instrument": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the probe's two densities are two records, not one overwritten": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the prompt names the checkable constraints as checks and the unverifiable as the agent's to honor; none -> empty": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the proxy marks the watch's last block with a 1h breakpoint, raises the system markers to 1h, drops the CLI's second-to-last message marker, and stays within four": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the proxy reads stop_reason from the END of the stream (message_delta), not the head": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the proxy reads the API's cache_miss_reason out of message_start": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the proxy relays an SSE stream through to the client and strips accept-encoding upstream": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the proxy sets tool_choice any on a body that has tools, leaves one without tools alone, and only when armed": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the proxy's server marks its connection threads as daemons, so a tunnel cannot outlive the process": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the record is built after rewatch 1's thread has finished": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the record is derived from the read-back; the why is reply text": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the record keeps what was extracted, every read, and the faults by turn \u2014 in the dict the run assigns to out['turn_machine']": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the red proof BOUNDS every smoke it runs, and a hang is a harness failure with its own code": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the reference carries the style's OWN weight and case, not a fixed 700": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the reference standard and the held-to preamble are out of the first message": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the relay traces its phases in order: received, body_read, preflight, breakpoint, thinking, upstream_connected, request_sent, response_headers, first_chunk, relaying, upstream_eof, relay_closed": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the rendered constraint block names the licensed family and leaves no placeholder unfilled": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the response's thinking blocks are read per call and reported beside the output they are billed inside": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the rest frames sit INSIDE the span, where the component is actually placed": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the rewatch hands constraint violations to the next turn as faults": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the rewatch header names the density it was rendered at": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the rewatch instrument samples 2fps in <=9-frame preview_timeline calls and tiles 20 to a sheet": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the rewatch instrument uses that geometry rather than a fixed 180": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the rewatch is export -> import as an asset -> watch_asset": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the rewatch is one message, under five blocks with two sheets": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the rewatch watches through preview_timeline, never the export (paid once, for the final)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the route travels on the record, computed from the beats' own state": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the run bound is 300s and THE CAP IS TWO, hard": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
+ },
+ "the run calls the face control and refuses when it fails": {
+  "first_seen": 1789938537.518888,
+  "greens": 1,
+  "last_green": 1789938537.518888,
+  "runs": 1
  },
  "the run line carries the container's process clock beside the run wall, and the setup gap between them": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the run line carries the request size per call (request_mb)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the run line prints STAGES and CALL SPLIT": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the run line says whether the run had the watch (the no-watch verdict reads it)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the run records what it has before the steps that can still fail": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the saving is min(gap, setup) and is ABSENT when either input is missing": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the shim ADVERTISES `finish` and serves it itself, refusing a verdict that is not clean or export": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the shim cuts a tool to name and arguments": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the shim is told the same list, so tools/list cannot re-advertise what the flags removed": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the shim scrubs the proxy variables it inherits before its first ChatCut call (5 tools instead of 13 on the tunnelled ping)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the shim unwraps before it strips the whys (the strip sees the real ops)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the slimmed edit_item schema does not offer `json`, and a json-string call is unwrapped into real fields": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the source is watched through inspect_asset: 40 exact frames at 2fps in two calls": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the source watch and the rewatch both fetch through fetch_frames (never the serial 60s fetch)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the stage line names source_watch, each turn and rewatch (with parts) and the export tail from the marks": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the standing-red census names a check that has never once been green": {
   "first_seen": 1789937860.365227,
-  "greens": 1,
-  "last_green": 1789937860.365227,
-  "runs": 1
+  "greens": 2,
+  "last_green": 1789938537.518888,
+  "runs": 2
  },
  "the stream machine is gone from edit()": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the talking-head fixture and Zac's clip are both in the manifest": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the tool block is proven identical across calls from the proxy's own hash, not from the flags": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the tool list is identical on every turn (the tool block is in the cache key; a per-turn list is a cold write per run)": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the tool set is eight and import_media is the harness's": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the tool-block reader reads the fingerprint file and not a dict filled later": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the turn-1 block names every signal's state, including the ones that failed": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the verdict is the CALL, never a word in prose": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "the withhold fallback is gone with the marks it lifted": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "think_tokens=0 sends MAX_THINKING_TOKENS=0 (wire: thinking disabled), never the env var that only omits the field": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "thinking is bounded by default": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "turn 1 without an edit op is terminal, not a second try \u2014 even when it ends in a proper finish call": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "turn_clock exposes the kill and names who used it": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "two caption tracks on the same speech is a fault": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "upstream receives the REWRITTEN body and the fingerprint row records the breakpoint": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "with no calibration at all the correction is NOT applied and the run says so": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "with no duration given the unit is declared a GUESS, not a fact": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "with no run-first text found nothing is rewritten and the note says so": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "with the job's t0 400s ago the machine is RUN TIMEOUT before turn 1": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  },
  "with the property map the fault fires and names the item and its component": {
   "first_seen": 1789937810.224952,
-  "greens": 2,
-  "last_green": 1789937860.365227,
-  "runs": 2
+  "greens": 3,
+  "last_green": 1789938537.518888,
+  "runs": 3
  }
 }

@@ -308,6 +308,11 @@ JSON""",
     # module no check covers.
     .add_local_file(os.path.join(_HERE, "perception.py"),
                     "/root/perception.py", copy=True)
+    # THE CONTROL CLIPS. A FIXTURE BELONGS IN THE TREE so it drifts with the
+    # tree or fails loudly at merge; these are two seconds each and are what
+    # stands between a mis-scored detector and an export withheld on a phantom.
+    .add_local_dir(os.path.join(_HERE, "fixtures_control"),
+                   "/craft/fixtures_control", copy=True)
     # THE MEASURED BANDS THEMSELVES. verify_chain reads sheet/rows.json
     # relative to its own directory, and that file was never mounted — so in
     # the container `measured_bands()` returned {} and EVERY band fell through
@@ -7176,6 +7181,20 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     _face_lines = face_lines(_face_traj, _dur_for_detect or 0)
     # THE SFX ID SET, READ ONCE. Without it a placed sound cannot be told from
     # a placed piece of music, and no_sfx / no_music both become guesses.
+    # THE FACE DETECTOR'S NEGATIVE CONTROL, BEFORE IT IS TRUSTED TO WITHHOLD
+    # AN EXPORT. A detector that boxes everything passes every positive test
+    # ever written, and this lane terminates runs on what it says -- so it is
+    # proven in both directions on staged clips, in the container where it
+    # actually lives, on every job.
+    import perception as _pcc
+    _fctl = _pcc.face_control()
+    print("  FACE CONTROL    : %s — %s" % (_fctl["state"], _fctl["why"]), flush=True)
+    if _fctl["state"] == "FAILED":
+        raise RuntimeError(
+            "the face detector failed its negative control (%s). It is what "
+            "withholds an export on a face collision, so a detector that boxes "
+            "nothing or boxes everything must not be allowed to judge "
+            "placements." % _fctl["why"])
     _sfx_ids = sfx_asset_ids()
     print("  SFX ASSET IDS   : %s — %s" % (_sfx_ids["state"], _sfx_ids["why"]), flush=True)
     print("  PLATTER         : %d component(s), %d chars; FACE lines: %d" % (_n_platter, len(_platter), len(_face_lines)), flush=True)

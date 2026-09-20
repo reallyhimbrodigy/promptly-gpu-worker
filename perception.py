@@ -537,14 +537,42 @@ def face_track(path, every_n_frames=6, model=YUNET_MODEL, fps_hint=30.0,
         out["scaled_by"] = {"x": round(sx, 4), "y": round(sy, 4),
                             "from": [out["frame_w"], out["frame_h"]],
                             "to": [frame_w, frame_h]}
+        # THE FALSE-POSITIVE SURFACE, KEPT VISIBLE (Zac: LOOK, 2026-09-20).
+        # Drawn on ten frames of both fixtures: YuNet boxes the speaker's HAND
+        # at 0.70-0.81 while the real face scores 0.90-0.94. The REGION is
+        # unaffected because the trajectory takes the highest-scoring box per
+        # timestamp -- the hand loses to the face every time -- but the COUNTS
+        # are inflated by it, and if a real face were ever missed the hand
+        # would become "the face".
+        #
+        # THE THRESHOLD IS NOT MOVED ON THIS EVIDENCE. Real 0.90-0.94 against a
+        # hand at 0.70-0.81 separates cleanly on TWO CLIPS OF THE SAME PERSON
+        # IN ONE ROOM, which is one draw wearing two names. A bar fitted to
+        # that would be measuring this speaker. Instead the surface is
+        # REPORTED, the way scdet's sweep reports every detection below its
+        # own threshold, so the next reader sees the distribution rather than
+        # inheriting my guess.
+        multi = sum(1 for _t, _n in
+                    [(t, sum(1 for b in boxes if b["t"] == t))
+                     for t in sorted({b["t"] for b in boxes})] if _n > 1)
+        scores = sorted(b["score"] for b in boxes)
+        out["multi_frames"] = multi
+        out["score_floor"] = YUNET_SCORE
+        out["score_p10"] = scores[len(scores) // 10] if scores else None
+        out["score_p50"] = scores[len(scores) // 2] if scores else None
         out.update({"state": "MEASURED", "boxes": boxes, "hits": hits,
                     "samples": len(frames),
                     "faces_per_s": (round(len(boxes) / dur, 2) if dur else None),
                     "face_ratio": round(hits / len(frames), 3) if frames else None})
-        out["why"] = ("%d face(s) over %d sampled frame(s), %d with a face; "
-                      "%s faces/s" % (len(boxes), len(frames), hits,
-                                      out["faces_per_s"] if out["faces_per_s"] is not None
-                                      else "unknown (no duration)"))
+        out["why"] = ("%d box(es) over %d sampled frame(s), %d with at least one; "
+                      "%s faces/s; scores p10 %s p50 %s at a %.2f floor; %d frame(s) "
+                      "with more than one box%s"
+                      % (len(boxes), len(frames), hits,
+                         out["faces_per_s"] if out["faces_per_s"] is not None
+                         else "unknown (no duration)",
+                         out["score_p10"], out["score_p50"], YUNET_SCORE, multi,
+                         " — the region takes the highest-scoring box per frame"
+                         if multi else ""))
         return out
     finally:
         shutil.rmtree(fdir, ignore_errors=True)
@@ -697,3 +725,64 @@ PERCEPTION_READERS = (
     ("face_track", "no file, and no fallback to res10", "ABSENT"),
     ("frame_density", "no duration to spread frames over", "ABSENT"),
 )
+
+
+# ── THE FACE DETECTOR'S NEGATIVE CONTROL ───────────────────────────────────
+# Zac, 2026-09-20: "a clip with no face must return zero faces; a clip with one
+# must return one. The check doesn't count as existing until both hold."
+#
+# WHY BOTH HALVES. A detector that boxes EVERYTHING passes every positive test
+# ever written, and this lane's face-collision check terminates a run on what
+# that detector says -- so a detector without a negative control can withhold
+# every export on a phantom. Both of today's terminals were checked this way
+# before they were believed.
+#
+# IT RUNS IN THE CONTAINER, WHERE THE DETECTOR IS. cv2 and the model are in the
+# image and not on the developer's machine, so a smoke on the laptop can only
+# test the LOGIC (by injection) and not the detector. The container runs the
+# real thing on real clips before it lets a run proceed to judge placements.
+CONTROL_DIR = "/craft/fixtures_control"
+
+
+def face_control(control_dir=CONTROL_DIR, model=YUNET_MODEL, tracker=None):
+    """Both halves, on staged clips. -> {state, rows, why}
+
+    MEASURED only when a no-face clip returns zero AND a face clip returns at
+    least one on every sampled frame. Anything else is FAILED, and a FAILED
+    control means the face signal must not be trusted to withhold an export.
+    """
+    track = tracker or face_track
+    out = {"state": "ABSENT", "rows": {}, "why": "not attempted"}
+    if not os.path.isdir(control_dir):
+        return dict(out, why="no control clips at %s" % control_dir)
+    neg, pos, rows = [], [], {}
+    for fn in sorted(os.listdir(control_dir)):
+        if not fn.endswith(".mp4"):
+            continue
+        r = track(os.path.join(control_dir, fn), model=model, every_n_frames=6)
+        rows[fn] = {"state": r.get("state"), "boxes": len(r.get("boxes") or []),
+                    "hits": r.get("hits"), "samples": r.get("samples")}
+        (neg if fn.startswith("noface") else pos).append((fn, r))
+    out["rows"] = rows
+    if not neg or not pos:
+        return dict(out, why="the control needs at least one no-face clip and one "
+                             "face clip; found %d and %d" % (len(neg), len(pos)))
+    bad = []
+    for fn, r in neg:
+        if r.get("state") != "MEASURED":
+            bad.append("%s did not run (%s)" % (fn, r.get("state")))
+        elif (r.get("boxes") or []):
+            bad.append("%s has no face and returned %d box(es)" % (fn, len(r["boxes"])))
+    for fn, r in pos:
+        if r.get("state") != "MEASURED":
+            bad.append("%s did not run (%s)" % (fn, r.get("state")))
+        elif not r.get("samples"):
+            bad.append("%s sampled no frames" % fn)
+        elif r.get("hits", 0) < r.get("samples", 0):
+            bad.append("%s has a face and %d of %d frame(s) found none"
+                       % (fn, r["samples"] - r["hits"], r["samples"]))
+    if bad:
+        return {"state": "FAILED", "rows": rows, "why": "; ".join(bad[:3])}
+    return {"state": "MEASURED", "rows": rows,
+            "why": "%d no-face clip(s) returned zero, %d face clip(s) found a face "
+                   "on every sampled frame" % (len(neg), len(pos))}
