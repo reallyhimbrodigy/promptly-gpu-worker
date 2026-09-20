@@ -23,7 +23,7 @@
  *
  * Usage: node port/no_fallbacks.mjs
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { readsPropWithFallback } from "./registered_diff.mjs";
@@ -32,25 +32,30 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const BODIES = join(HERE, "bodies");
 
 /**
- * QUARANTINED, WITH AN OWNER AND A DATE — not exempt.
+ * QUARANTINED, WITH AN OWNER AND A DATE — not exempt. DATA, NOT CODE.
  *
- * All 13 bodies violated this rule the day it was written (89 sites). Landing
- * it unscoped would have turned nine of Builder-1's components red at once,
- * and "nine red proofs broke when the gate landed" reads as the gate being
- * wrong — a correct rule discarded on its first day for being right about
- * nothing. So it lands with the scoping already in.
+ * The list lives in `quarantine.json` beside the bodies directory, and is EMPTY
+ * when the file is absent. That is deliberate and it was learned the hard way:
+ * the first version hardcoded nine names, and when Builder-1 CLEARED all nine —
+ * the outcome the gate exists to produce — two legs of its own red proof went
+ * red on correct code. The proof had encoded a DECISION (who is pinned today)
+ * as though it were a PROPERTY (that quarantining works). A check that defends
+ * a decision breaks the moment the decision is correctly reversed.
  *
- * These nine are Builder-1's and are theirs to clear; the lane boundary says I
- * do not edit a body I did not author. The list SHRINKS and never grows: a
- * pinned body that has become clean FAILS this gate, so a stale pin cannot sit
- * here being read as a fact.
+ * As data, the red proof can build its own quarantine scenario in a temp
+ * directory without a second copy of this logic, and the live list can empty to
+ * nothing without falsifying anything.
+ *
+ * The list SHRINKS and never grows: a pinned body that has become clean FAILS
+ * this gate, so a stale pin cannot sit here being read as a fact.
  */
-const QUARANTINE = {
-  // EMPTY, 2026-09-20. All nine of Builder-1's bodies were cleared in one
-  // change and their pins removed with them, because this gate FAILS a clean
-  // body that is still pinned — a stale pin would otherwise sit here being read
-  // as a fact about code that no longer looks like that.
-};
+export function loadQuarantine(bodiesDir) {
+  const p = join(dirname(bodiesDir), "quarantine.json");
+  if (!existsSync(p)) return {};
+  const raw = JSON.parse(readFileSync(p, "utf8"));
+  // Underscore keys are notes, not components.
+  return Object.fromEntries(Object.entries(raw).filter(([k]) => !k.startsWith("_")));
+}
 
 /** Comments are not code — the rule is about what the component DOES. */
 export function codeLines(src) {
@@ -67,11 +72,12 @@ export function scan(src) {
 }
 
 export function run(dir = BODIES) {
+  const quarantine = loadQuarantine(dir);
   const names = readdirSync(dir).filter((f) => f.endsWith(".jsx")).map((f) => f.slice(0, -4)).sort();
   const rows = [];
   for (const n of names) {
     const hits = scan(readFileSync(join(dir, n + ".jsx"), "utf8"));
-    const pin = QUARANTINE[n];
+    const pin = quarantine[n];
     let state;
     if (hits.length === 0 && !pin) state = "CLEAN";
     else if (hits.length === 0 && pin) state = "PIN IS STALE";
