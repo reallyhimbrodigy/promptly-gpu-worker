@@ -7770,6 +7770,47 @@ def ported_code(name):
     return open(p, encoding="utf-8").read()
 
 
+REST_DIAGNOSTIC = """
+const Component = ({ item }) => {
+  const props = (item && item.props) || {};
+  const src = props.clip;
+  const srcFrom = Math.max(0, Math.round(Number(props.srcFrom) || 0));
+  const fit = props.fit || "cover";
+  const bg = props.bg || "none";
+  const wrap = props.wrap || "div";
+  const rootStyle = { position: "absolute", inset: 0, display: "flex",
+    alignItems: "center", justifyContent: "center", overflow: "hidden",
+    boxSizing: "border-box" };
+  if (bg !== "none") { rootStyle.backgroundColor = bg; }
+  const vid = { width: "100%", height: "100%", objectFit: fit };
+  if (wrap === "scaled") { vid.transform = "scale(1)"; vid.transformOrigin = "50% 50%"; }
+  if (!src) {
+    return (<div style={rootStyle}><div style={{ color: "#FFFFFF", fontSize: 48 }}>NO CLIP PROP</div></div>);
+  }
+  return (
+    <div style={rootStyle}>
+      <Video src={src} startFrom={srcFrom} muted volume={0} style={vid} />
+    </div>
+  );
+};
+"""
+REST_DIAGNOSTIC_PROPS = [
+    {"key": "clip", "label": "Clip", "type": "video", "defaultValue": ""},
+    {"key": "srcFrom", "label": "Source start frame", "type": "number", "defaultValue": 0},
+    {"key": "fit", "label": "objectFit", "type": "text", "defaultValue": "cover"},
+    {"key": "bg", "label": "Root background", "type": "text", "defaultValue": "none"},
+    {"key": "wrap", "label": "Transform", "type": "text", "defaultValue": "div"},
+]
+# EACH VARIANT CHANGES ONE THING. If the +2 offset survives all of them it is the
+# <Video> element's own colour path and not anything this component does.
+REST_VARIANTS = (
+    ("bare", {"fit": "cover", "bg": "none", "wrap": "div"}),
+    ("black_bg", {"fit": "cover", "bg": "#000000", "wrap": "div"}),
+    ("fill", {"fit": "fill", "bg": "none", "wrap": "div"}),
+    ("scale1", {"fit": "cover", "bg": "none", "wrap": "scaled"}),
+)
+
+
 def rest_verdict(base_by_frame, layer_by_frame, reader=None):
     """OUR LAYER AT REST AGAINST THE BARE SOURCE. PURE (reader injectable).
 
@@ -7808,6 +7849,86 @@ def rest_verdict(base_by_frame, layer_by_frame, reader=None):
             "profile": prof["profile"],
             "why": "all %d frame(s) pixel-identical at scale 1.0 — the layer is a no-op at rest%s"
                    % (prof["n"], dropped)}
+
+
+@app.function(image=IMG, timeout=2400, cpu=4, memory=8192,
+              secrets=[modal.Secret.from_name("chatcut-oauth")])
+def rest_matrix(clip_url: str = "", at_s: float = 12.0, span_s: float = 2.0):
+    """WHY OUR LAYER AT REST IS +2/255 BRIGHTER THAN THE BASE. No model calls.
+
+    MEASURED FIRST, 2026-09-19: SmoothPush at scale 1.0 differs from the bare source
+    on 8 of 9 frames, worst pixel 34, and the difference is a near-constant ADDITIVE
+    OFFSET of +2.0 across the whole tonal range — +1.76 in the blacks, +2.05 in the
+    midtones — which survives 16x downsampling, so it is not encode noise. A flat
+    offset is not a geometry error and not a gamma curve.
+
+    FOUR VARIANTS, ONE THING CHANGED EACH, all against the SAME bare read:
+      bare      no background, objectFit cover, no transform
+      black_bg  adds the root backgroundColor our ported components carry
+      fill      objectFit fill instead of cover
+      scale1    adds transform: scale(1), which every ported zoom applies
+
+    If the offset survives all four it belongs to the <Video> element's own colour
+    path and no styling of ours can remove it — which would be a finding about the
+    mechanism, not about our components, and it would decide whether the port can
+    meet the zero bar at all.
+    """
+    _t0 = time.time()
+    os.makedirs("/work", exist_ok=True)
+    subprocess.run(["curl", "-fsSL", "-o", "/work/source.mp4", clip_url], check=True, timeout=300)
+    tok = _access_token()
+    fps = 30.0
+    from_frame = max(0, int(round(at_s * fps)))
+    dur_frames = max(2, int(round(span_s * fps)))
+    probe = [from_frame + int(round(dur_frames * i / 4.0)) for i in range(5)]
+    out = {"state": "RUNNING", "variants": {}, "frames_asked": probe}
+
+    stage = prestage(tok, "", controls={}, source_path="/work/source.mp4",
+                     want_components=set(), titles=[])
+    pid, src_asset = stage["projectId"], stage.get("sourceAssetId")
+    out["project"] = pid
+    base_f, _m = frames_at(tok, pid, probe, "/work/mx_base")
+    print("  BARE SOURCE     %d of %d frame(s)" % (len(base_f), len(probe)), flush=True)
+
+    v = component_contract(REST_DIAGNOSTIC, REST_DIAGNOSTIC_PROPS)
+    if v:
+        out["state"] = "FAILED"; out["why"] = "contract: %s" % "; ".join(v)
+        RESULTS["rest-matrix"] = out
+        return out
+    asset = _mcp_call(tok, "create_motion_graphic_from_code", {
+        "projectId": pid, "name": "RestDiagnostic", "code": REST_DIAGNOSTIC,
+        "width": 1080, "height": 1920, "durationInFrames": dur_frames,
+        "properties": normalise_properties(REST_DIAGNOSTIC_PROPS)}, expect=None)
+    mg = asset_id_from(asset or {})
+    if not mg:
+        out["state"] = "FAILED"; out["why"] = registration_refusal(asset or {})
+        print("  REGISTER        REFUSED %s" % str(out["why"])[:220], flush=True)
+        RESULTS["rest-matrix"] = out
+        return out
+
+    for name, props in REST_VARIANTS:
+        row = {"props": props}
+        try:
+            r = edit_item_checked(tok, {"projectId": pid, "adds": [
+                {"type": "motion-graphic", "assetId": mg, "fromFrame": from_frame,
+                 "durationInFrames": dur_frames,
+                 "propertyOverrides": dict({"clip": src_asset, "srcFrom": from_frame}, **props)}]},
+                "placing the %s variant" % name)
+            iid = ((r.get("adds") or [{}])[0] or {}).get("id")
+            f, miss = frames_at(tok, pid, probe, "/work/mx_%s" % name)
+            row["verdict"] = rest_verdict(base_f, f)
+            row["missing"] = miss
+            edit_item_checked(tok, {"projectId": pid, "deletes": [{"id": iid}]},
+                              "clearing the %s variant" % name)
+        except Exception as e:                                    # noqa: BLE001
+            row["verdict"] = {"state": "FAILED", "why": str(e)[:300]}
+        out["variants"][name] = row
+        _v = row["verdict"]
+        print("  %-10s %-10s %s" % (name, _v.get("state"), str(_v.get("why"))[:110]), flush=True)
+    out["state"] = "MEASURED"
+    out["wall_s"] = round(time.time() - _t0, 1)
+    RESULTS["rest-matrix"] = out
+    return out
 
 
 @app.function(image=IMG, timeout=1800, cpu=4, memory=8192,

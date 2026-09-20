@@ -19,7 +19,7 @@ BAD=$(/usr/bin/grep -c "undefined name\|redefinition of unused" /tmp/bs/h_rest_p
 K="ab-sources/reliability-fixtures-v3/talking_head-f4195ca9.mp4"
 SRC=$(python3 presign.py "$K" | cut -f1); [ -n "$SRC" ] || { echo "presign failed"; exit 4; }
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$SRC"); [ "$CODE" = "200" ] || { echo "presign GET -> $CODE"; exit 4; }
-CMD="modal run --detach chatcut_job_app.py::zoom_rest --clip-url '$SRC' --at-s $AT --span-s $SPAN --component $COMP"
+CMD="modal run --detach chatcut_job_app.py::${FN:-zoom_rest} --clip-url '$SRC' --at-s $AT --span-s $SPAN --component $COMP"
 echo "$CMD" | sed "s|$SRC|<presigned>|"
 sh -c "$CMD" > "$LOG" 2>&1
 echo $? > "$RC"
