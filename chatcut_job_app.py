@@ -7717,6 +7717,56 @@ def frame_diff_profile(a_paths, b_paths, reader=None):
 
 
 PORTED_PROPS = {
+    "TornPaper": [
+        {"key": "topText", "label": "Top line", "type": "text", "defaultValue": ""},
+        {"key": "bottomText", "label": "Bottom line", "type": "text", "defaultValue": ""},
+        {"key": "size", "label": "Size", "type": "select", "defaultValue": "medium",
+         "options": ["small", "medium", "large", "xlarge"]},
+        {"key": "position", "label": "Position", "type": "select", "defaultValue": "middle",
+         "options": ["top", "middle", "bottom"]},
+        {"key": "textColor", "label": "Text colour", "type": "color", "defaultValue": "#FFFFFF"},
+        {"key": "accentColor", "label": "Accent colour", "type": "color", "defaultValue": "#C8551F"},
+    ],
+    "QuoteCard": [
+        {"key": "quote", "label": "Quote", "type": "text", "defaultValue": ""},
+        {"key": "attribution", "label": "Attribution (no em dash — the card adds it)", "type": "text", "defaultValue": ""},
+        {"key": "size", "label": "Size", "type": "select", "defaultValue": "medium",
+         "options": ["small", "medium", "large", "xlarge"]},
+        {"key": "position", "label": "Position", "type": "select", "defaultValue": "middle",
+         "options": ["top", "middle", "bottom"]},
+        {"key": "textColor", "label": "Text colour", "type": "color", "defaultValue": "#FFFFFF"},
+        {"key": "accentColor", "label": "Accent colour", "type": "color", "defaultValue": "#C8551F"},
+    ],
+    "LowerThird": [
+        {"key": "name", "label": "Name", "type": "text", "defaultValue": ""},
+        {"key": "title", "label": "Role or location", "type": "text", "defaultValue": ""},
+        {"key": "size", "label": "Size", "type": "select", "defaultValue": "medium",
+         "options": ["small", "medium", "large", "xlarge"]},
+        {"key": "position", "label": "Position", "type": "select", "defaultValue": "bottom",
+         "options": ["top", "middle", "bottom"]},
+        {"key": "textColor", "label": "Text colour", "type": "color", "defaultValue": "#FFFFFF"},
+        {"key": "accentColor", "label": "Accent colour", "type": "color", "defaultValue": "#C8551F"},
+    ],
+    "CaptionMatch": [
+        {"key": "text", "label": "Text", "type": "text", "defaultValue": ""},
+        {"key": "size", "label": "Size", "type": "select", "defaultValue": "medium",
+         "options": ["small", "medium", "large", "xlarge"]},
+        {"key": "position", "label": "Position", "type": "select", "defaultValue": "middle",
+         "options": ["top", "middle", "bottom"]},
+        {"key": "textColor", "label": "Text colour", "type": "color", "defaultValue": "#FFFFFF"},
+        {"key": "accentColor", "label": "Accent colour", "type": "color", "defaultValue": "#C8551F"},
+    ],
+    "StickyNotes": [
+        {"key": "notes", "label": "Notes — text|colour|rotation, separated by ;", "type": "text",
+         "defaultValue": "Key takeaway|#FFE066|-3"},
+        {"key": "size", "label": "Size", "type": "select", "defaultValue": "medium",
+         "options": ["small", "medium", "large", "xlarge"]},
+        {"key": "position", "label": "Position", "type": "select", "defaultValue": "middle",
+         "options": ["top", "middle", "bottom"]},
+        {"key": "textColor", "label": "Text colour", "type": "color", "defaultValue": "#FFFFFF"},
+        {"key": "accentColor", "label": "Accent colour", "type": "color", "defaultValue": "#C8551F"},
+    ],
+
     # WHAT A USER CAN EDIT ON A PORTED ZOOM. Every value a user may reasonably want to
     # change is a property, because a hardcoded one is not editable in ChatCut at all.
     "SmoothPush": [
@@ -8695,7 +8745,9 @@ def srclayer(clip_url: str = "", out: str = "/tmp/bs/source_layer.json"):
 def parity_sweep(clip_url: str = ""):
     """THE PARITY SWEEP (Zac, 2026-09-19). NO MODEL CALLS — ChatCut only.
 
-    Place each of the library's 73 items once on a fixture timeline and read it back. The 40 that are
+    Place each of the library's items once on a fixture timeline and read it back — 78 since the
+    text-overlay family was restored on 2026-09-19 (it was a live family absent from the file;
+    its five variants came from the schema's own history, not the pruned two-entry enum). The 40 that are
     registered components are covered by prestage and the placement below; the 33 that are NOT ours —
     7 zooms, 9 transitions, 2 tight-cut overlays, 15 sound effects — exist only if ChatCut offers them,
     so this ASKS THEIR CATALOGUE FIRST and then attempts a placement against what it answered.

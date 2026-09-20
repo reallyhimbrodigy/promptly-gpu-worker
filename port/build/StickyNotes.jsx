@@ -1,0 +1,80 @@
+/* StickyNotes - the sticky_note text overlay, ported from the old pipeline's family.
+ *
+ * WHY IT IS BACK. text_overlays was a FAMILY in the live pipeline and it is absent
+ * from the 73. The references place text most of the time; until this lands the
+ * agent cannot. The family's real list came from the SCHEMA'S OWN HISTORY, not the
+ * pruned enum: torn_paper, sticky_note, quote_card, lower_third, caption_match.
+ * Three were retired from the enum while the record kept carrying their fields,
+ * which is how a family reads as two variants and is five.
+ *
+ * One to three handwritten-style notes. Takeaways, tips, the educational beat.
+ * ChatCut's property schema has NO ARRAY type (text, number, color, boolean,
+ * select, font, image, video), so the notes arrive as text|color|rotation
+ * separated by semicolons, and a malformed entry is DROPPED AND NAMED in the
+ * frame rather than read as an empty note.
+ *
+ * THE DIALS ARE VISIBLE. size and position are properties, defaulting to what the
+ * references measure - medium, middle - so the platter shows the editor the two
+ * things it will most often want to change instead of burying them.
+ *
+ * NO VELOCITY CAP: this draws no video and performs no ramp. The cap bounds the
+ * per-frame displacement of a zoom on the source; there is no source here.
+ *
+ * CONTRACT (from ChatCut's validator): one top-level component, no top-level
+ * constants, a plain div root, values read through an identifier named props, and
+ * every declared property read at least once.
+ */
+const Component = ({ item }) => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const props = (item && item.props) || {};
+  const size = props.size || "medium";
+  const position = props.position || "middle";
+  const accent = props.accentColor || "#C8551F";
+  const textColor = props.textColor || "#FFFFFF";
+  // THE REFERENCE SCALE, the same ladder the component sheet already uses.
+  const fontSize = size === "xlarge" ? 168 : size === "large" ? 128 : size === "small" ? 72 : 96;
+  const justify = position === "top" ? "flex-start" : position === "bottom" ? "flex-end" : "center";
+  const pad = Math.round(fontSize * 0.9);
+  const rootStyle = { position: "absolute", inset: 0, display: "flex",
+    flexDirection: "column", alignItems: "center", justifyContent: justify,
+    overflow: "hidden", boxSizing: "border-box", padding: pad,
+    gap: Math.round(fontSize * 0.3) };
+  // Entrance eases POSITION, never opacity: this repo's caption law is
+  // FRAME-1-IS-FINAL for readable text, so the words are legible on frame one.
+  const t = Math.min(Math.max(frame / Math.max(1, Math.round(0.28 * fps)), 0), 1);
+  const ease = 1 - Math.pow(1 - t, 3);
+  const notesRaw = String(props.notes === undefined ? "" : props.notes);
+  const notes = [];
+  let dropped = 0;
+  for (const part of notesRaw.split(";")) {
+    if (!part.trim()) { continue; }
+    const bits = part.split("|");
+    if (!bits[0] || !bits[0].trim()) { dropped += 1; continue; }
+    const rot = Number(bits[2]);
+    notes.push({ text: bits[0].trim(),
+                 color: (bits[1] || "#FFE066").trim(),
+                 rotation: isFinite(rot) ? rot : 0 });
+  }
+  if (!notes.length) {
+    return (<div style={rootStyle}><div style={{ color: accent, fontSize: 40, fontFamily: "sans-serif" }}>NO NOTES</div></div>);
+  }
+  return (
+    <div style={rootStyle}>
+      {notes.slice(0, 3).map((n, i) => (
+        <div key={i} style={{
+          backgroundColor: n.color, color: "#141414", fontFamily: "Georgia, serif",
+          fontSize: Math.round(fontSize * 0.72), lineHeight: 1.16,
+          padding: Math.round(fontSize * 0.36), maxWidth: "76%",
+          whiteSpace: "normal", overflowWrap: "break-word",
+          boxShadow: "0 10px 26px rgba(0,0,0,0.4)",
+          transform: "rotate(" + n.rotation + "deg) translateY(" + ((1 - ease) * (26 + i * 10)) + "px)" }}>
+          {n.text}
+        </div>))}
+      {dropped > 0 ? (
+        <div style={{ color: "#FFD166", fontSize: 30, fontFamily: "sans-serif" }}>
+          {"NOTES: dropped " + dropped + " malformed entry(ies)"}
+        </div>) : null}
+    </div>
+  );
+};

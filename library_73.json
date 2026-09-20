@@ -83,5 +83,13 @@
   "transition-sfx.mp3",
   "wompwomp.mp3",
   "woosh-professional.mp3"
- ]
+ ],
+ "text overlay": [
+  "TornPaper",
+  "StickyNotes",
+  "QuoteCard",
+  "LowerThird",
+  "CaptionMatch"
+ ],
+ "_why": "COUNT CORRECTED 73 -> 78 on 2026-09-19. `text_overlays` was a FAMILY in the live pipeline and was missing from this file entirely. Its real variant list came from the schema's OWN HISTORY (handler.py @42df870: torn_paper, sticky_note, quote_card, lower_third, caption_match), not from the current enum — which had been pruned to two while _TextOverlay kept carrying topText/bottomText, quote/attribution and text, the fields of the three retired ones. A family reads as two variants and is five. The filename keeps its historical number; this key is the count."
 }

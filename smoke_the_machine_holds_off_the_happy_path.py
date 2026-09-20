@@ -1964,6 +1964,43 @@ def main():
           and "not applied" in J.calibration_cadence(_now, None)["why"],
           J.calibration_cadence(_now, None)["why"][:90])
 
+    # ---- THE TEXT-OVERLAY FAMILY IS BACK, AND IT IS FIVE (Zac, 2026-09-19) ----
+    # `text_overlays` was a FAMILY in the live pipeline and was absent from the library
+    # file entirely. Its real list came from the schema's OWN HISTORY — handler.py at
+    # 42df870 carried torn_paper, sticky_note, quote_card, lower_third, caption_match —
+    # while the CURRENT enum has been pruned to two and _TextOverlay still carries
+    # topText/bottomText, quote/attribution and text: the fields of the three retired
+    # ones. A family reads as two variants and is five, and the references place text
+    # most of the time, so until this landed the agent could not.
+    import json as _json
+    _lib = _json.load(open("library_73.json", encoding="utf-8"))
+    _fam = _lib.get("text overlay") or []
+    check("the library carries the whole text-overlay family, and the count is corrected with a why",
+          sorted(_fam) == ["CaptionMatch", "LowerThird", "QuoteCard", "StickyNotes", "TornPaper"]
+          and sum(len(v) for v in _lib.values() if isinstance(v, list)) == 78
+          and "73 -> 78" in (_lib.get("_why") or "")
+          and "schema" in (_lib.get("_why") or ""),
+          "%d items, family %s" % (sum(len(v) for v in _lib.values() if isinstance(v, list)), sorted(_fam)))
+    # EVERY VARIANT IS BUILT, CONTRACT-CLEAN, AND CARRIES THE TWO DIALS.
+    for _v in ("TornPaper", "StickyNotes", "QuoteCard", "LowerThird", "CaptionMatch"):
+        _blob = open("port/build/%s.jsx" % _v, encoding="utf-8").read()
+        _keys = {q["key"] for q in J.PORTED_PROPS[_v]}
+        check("%s is built, contract-clean, and exposes size and position as dials" % _v,
+              not J.component_contract(_blob, J.PORTED_PROPS[_v])
+              and {"size", "position"} <= _keys
+              and "NO VELOCITY CAP:" in _blob,
+              "keys %s" % sorted(_keys))
+    # THE DEFAULTS ARE WHAT THE REFERENCES MEASURE: medium, middle. LowerThird is the
+    # one exception and it is deliberate — a broadcast name card lives in the lower
+    # third, and the dial still moves it.
+    _defs = {v: {q["key"]: q.get("defaultValue") for q in J.PORTED_PROPS[v]}
+             for v in ("TornPaper", "StickyNotes", "QuoteCard", "LowerThird", "CaptionMatch")}
+    check("every variant defaults to medium, and to middle except the lower third",
+          all(d["size"] == "medium" for d in _defs.values())
+          and all(d["position"] == "middle" for v, d in _defs.items() if v != "LowerThird")
+          and _defs["LowerThird"]["position"] == "bottom",
+          str({v: (d["size"], d["position"]) for v, d in _defs.items()}))
+
     # THE WORKING TREE, NOT THE COMMIT. red_proof_no_undefined_names builds an ISOLATED
     # worktree from HEAD, so it judges what is COMMITTED — and a run is launched from what
     # is on disk. A slice-based edit removed `place_theirs`, `place_ours` and PORTED_PROPS

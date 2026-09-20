@@ -8,6 +8,9 @@ four hit DRIVEN legs — the mutant changes a return value, not a sentence.
 """
 import ast
 import io
+import os
+import json
+import glob
 import re
 import subprocess
 import sys
@@ -862,6 +865,21 @@ MUTATIONS = [
      '        return {"action": "USE", "age_s": None,',
      'with no calibration at all the correction is NOT applied and the run says so',
      '"action": "ABSENT", "age_s": None,'),
+    ('the library loses the text-overlay family again',
+     '"text overlay": [\n  "TornPaper",',
+     '"text overlay_GONE": [\n  "TornPaper",',
+     'the library carries the whole text-overlay family, and the count is corrected with a why',
+     '"text overlay"'),
+    ('a variant loses its size dial',
+     '        {"key": "size", "label": "Size", "type": "select", "defaultValue": "medium",\n         "options": ["small", "medium", "large", "xlarge"]},\n        {"key": "position", "label": "Position", "type": "select", "defaultValue": "middle",\n         "options": ["top", "middle", "bottom"]},\n        {"key": "textColor", "label": "Text colour", "type": "color", "defaultValue": "#FFFFFF"},\n        {"key": "accentColor", "label": "Accent colour", "type": "color", "defaultValue": "#C8551F"},\n    ],\n    "QuoteCard"',
+     '        {"key": "position", "label": "Position", "type": "select", "defaultValue": "middle",\n         "options": ["top", "middle", "bottom"]},\n        {"key": "textColor", "label": "Text colour", "type": "color", "defaultValue": "#FFFFFF"},\n        {"key": "accentColor", "label": "Accent colour", "type": "color", "defaultValue": "#C8551F"},\n    ],\n    "QuoteCard"',
+     'TornPaper is built, contract-clean, and exposes size and position as dials',
+     '"QuoteCard"'),
+    ("a variant's default drifts off what the references measure",
+     '{"key": "quote", "label": "Quote", "type": "text", "defaultValue": ""},\n        {"key": "attribution", "label": "Attribution (no em dash \u2014 the card adds it)", "type": "text", "defaultValue": ""},\n        {"key": "size", "label": "Size", "type": "select", "defaultValue": "medium",',
+     '{"key": "quote", "label": "Quote", "type": "text", "defaultValue": ""},\n        {"key": "attribution", "label": "Attribution (no em dash \u2014 the card adds it)", "type": "text", "defaultValue": ""},\n        {"key": "size", "label": "Size", "type": "select", "defaultValue": "large",',
+     "every variant defaults to medium, and to middle except the lower third",
+     '{"key": "quote", "label": "Quote"'),
     ("an unreadable brief goes back to reading as clean",
      '    if not out and (_nonascii > max(3, 0.02 * max(1, len(text)))):',
      '    if False:',
@@ -891,7 +909,14 @@ def leg_failed(out, leg):
 
 
 def main():
-    srcs = {t: io.open(t, encoding="utf-8").read() for t in ("chatcut_job_app.py", "chatcut_gate.py", "turn_clock.py", "mcp_shim.py", "api_proxy.py")}
+    # THE CHECKED SURFACE IS NO LONGER ONLY PYTHON. The library's count lives in a
+    # JSON file and the ported components are JSX built blobs; a mutation aimed at
+    # either would have found its anchor in no source and reported VACUOUS — a leg
+    # that cannot be driven red is not yet a check, which is this file's whole point.
+    _PY = ("chatcut_job_app.py", "chatcut_gate.py", "turn_clock.py", "mcp_shim.py", "api_proxy.py")
+    _OTHER = tuple(t for t in (["library_73.json"] + sorted(glob.glob("port/build/*.jsx"))
+                               + sorted(glob.glob("port/bodies/*.jsx"))) if os.path.exists(t))
+    srcs = {t: io.open(t, encoding="utf-8").read() for t in _PY + _OTHER}
 
     rc, out = run_smoke()
     if rc != 0:
@@ -901,7 +926,7 @@ def main():
 
     red, bad = 0, []
     for label, anchor, repl, leg, pre in MUTATIONS:
-        TARGET = next((t for t in ("chatcut_gate.py", "turn_clock.py", "mcp_shim.py", "api_proxy.py") if anchor in srcs[t]), "chatcut_job_app.py")
+        TARGET = next((t for t in list(_PY[1:]) + list(_OTHER) if anchor in srcs[t]), "chatcut_job_app.py")
         src = srcs[TARGET]
         if pre is not None and pre not in src:
             bad.append("VACUOUS: %s — %r absent from the source" % (label, pre))
@@ -912,9 +937,15 @@ def main():
             bad.append("HARNESS FAILURE: %s — anchor %s" % (label, mode))
             print("  [ANCHOR %s] %s" % (mode, label))
             continue
+        # PARSE-CHECK IN THE TARGET'S OWN LANGUAGE. ast.parse on a JSON or JSX
+        # mutant would fail for the wrong reason and report a harness failure where
+        # the mutation was fine.
         try:
-            ast.parse(mutant)
-        except SyntaxError as e:
+            if TARGET.endswith(".py"):
+                ast.parse(mutant)
+            elif TARGET.endswith(".json"):
+                json.loads(mutant)
+        except (SyntaxError, ValueError) as e:
             bad.append("HARNESS FAILURE: %s — will not parse: %s" % (label, e))
             print("  [UNPARSEABLE] %s" % label)
             continue
