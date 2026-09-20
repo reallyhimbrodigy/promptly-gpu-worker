@@ -1854,6 +1854,23 @@ def main():
           and '"removes"' not in _zp,
           "deletes/id + read-back verification")
 
+    # ---- A REFUSAL MUST CARRY ITS WORDS (measured 2026-09-19) ----
+    # registration_refusal matched ONE shape and returned None for every other, so a probe
+    # asking three capability questions recorded three REFUSED rows with `refusal: null` —
+    # three failures that could not say what they read, from the reader meant to serve the
+    # standing law. It never returns None now; "there was nothing to read" is the finding.
+    check("a refusal always carries words, whatever shape the response took",
+          "-32602" in J.registration_refusal({"_text": "MCP error -32602: Input validation error: x"})
+          and "component rejected" in J.registration_refusal({"_text": "component rejected: consts"})
+          and "no text at all" in J.registration_refusal({"result": {}, "ok": False})
+          and "not an object" in J.registration_refusal(None)
+          and "AbsoluteFill" in J.registration_refusal(
+              {"content": [{"type": "text", "text": "refused: AbsoluteFill"}]}),
+          "none of the five shapes returns None")
+    check("and the keys are named when there is no text to quote",
+          "'ok'" in J.registration_refusal({"result": {}, "ok": False}),
+          J.registration_refusal({"result": {}, "ok": False}))
+
     # THE WORKING TREE, NOT THE COMMIT. red_proof_no_undefined_names builds an ISOLATED
     # worktree from HEAD, so it judges what is COMMITTED — and a run is launched from what
     # is on disk. A slice-based edit removed `place_theirs`, `place_ours` and PORTED_PROPS

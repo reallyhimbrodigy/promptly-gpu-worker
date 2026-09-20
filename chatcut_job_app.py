@@ -4923,15 +4923,37 @@ def normalise_properties(props):
 
 
 def registration_refusal(envelope):
-    """The validator's own words out of a refused registration, or None. PURE."""
-    txt = str((envelope or {}).get("_text") or "") if isinstance(envelope, dict) else ""
+    """WHY A REGISTRATION CARRIED NO ASSET ID — always words, never None. PURE.
+
+    THIS RETURNED None FOR EVERY REFUSAL IT DID NOT RECOGNISE. It matched one
+    shape ("-32602" / "Input validation") and answered None for anything else, so
+    a probe that asked three capability questions recorded three REFUSED rows with
+    `refusal: null` — three failures that could not say what they read, which is
+    the standing law of this repo broken by the reader meant to serve it.
+
+    It now always carries evidence: the validator's words when they are there, the
+    response's own text when it is some other refusal, and the KEYS PRESENT when
+    there is no text at all — because "there was nothing to read" is itself the
+    finding, and naming it is what stops the next run being the debugger.
+    """
+    if not isinstance(envelope, dict):
+        return "the response was %s, not an object" % type(envelope).__name__
+    # AN ACCEPTED REGISTRATION IS NOT A REFUSAL. The function answers "why is there
+    # no assetId"; when there IS one there is nothing to answer, and saying anything
+    # would make every success read as a failure to a caller that checks truthiness.
+    if asset_id_from(envelope):
+        return None
+    txt = str(envelope.get("_text") or "")
     if not txt:
-        for c in ((envelope or {}).get("content") or []) if isinstance(envelope, dict) else []:
+        for c in (envelope.get("content") or []):
             if isinstance(c, dict) and c.get("type") == "text":
                 txt += c.get("text") or ""
+    if not txt:
+        return ("the response carried no text at all; keys present: %s"
+                % sorted(envelope)[:12])
     if "-32602" in txt or "Input validation" in txt:
         return txt[:900]
-    return None
+    return "no assetId, and the response said: %s" % txt[:900]
 
 
 def asset_id_from(envelope):
@@ -7459,6 +7481,10 @@ def mg_runtime_probe(clip_url: str = ""):
             row["registered"] = bool(mg)
             if not mg:
                 row["refusal"] = registration_refusal(a or {})
+                # AND THE RAW ENVELOPE, BOUNDED. A reader that does not recognise a
+                # shape is the likeliest thing to be wrong here — it already was once
+                # — so the bytes it read are kept beside its verdict.
+                row["raw"] = json.dumps(a, default=str)[:1200]
                 row["state"] = "REFUSED"
             else:
                 r = edit_item_checked(tok, {"projectId": pid, "adds": [
