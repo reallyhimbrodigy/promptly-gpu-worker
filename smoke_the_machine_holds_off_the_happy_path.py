@@ -34,10 +34,57 @@ import chatcut_gate as G                                         # noqa: E402
 FAILS = []
 
 
+RESULTS_LOG = []
+
+
 def check(name, ok, why=""):
     print("  %-56s %s" % (name, "ok" if ok else "FAIL"))
+    RESULTS_LOG.append((name, bool(ok)))
     if not ok:
         FAILS.append("%s :: %s" % (name, why))
+
+
+HISTORY_PATH = "check_history.json"
+
+
+def merge_history(results, path=HISTORY_PATH, now=None, write=False):
+    """Per-check green history. -> {state, never_green, history, why}
+
+    ZAC'S STANDING-RED RULE (2026-09-20): a check red on every run for a day is
+    FIXED OR DELETED, and the census reports checks that have NEVER been green.
+
+    Why it needs a ledger and not a glance: a permanent red becomes furniture.
+    This lane printed "TOOL BLOCK: DIFFERS across calls (0 shas)" on every run
+    it has ever done -- the reader read a dict populated 160 lines below its own
+    print -- and the line was read past for weeks and then quoted upward as a
+    finding. Nothing in any single run said "this has never once been green".
+
+    WRITE IS OPT-IN. The red proof runs this smoke ~198 times with the tree
+    deliberately mutated; letting that write history would fill the ledger with
+    induced failures and bury the real ones. A mutating harness and a durable
+    record cannot share a run.
+    """
+    import json as _j
+    import os as _o
+    import time as _t
+    now = _t.time() if now is None else now
+    try:
+        hist = _j.load(open(path, encoding="utf-8")) if _o.path.exists(path) else {}
+    except (OSError, ValueError) as e:
+        return {"state": "FAILED", "never_green": [], "history": {},
+                "why": "%s: %s" % (type(e).__name__, str(e)[:120])}
+    for name, ok in results:
+        row = hist.setdefault(name, {"runs": 0, "greens": 0,
+                                     "first_seen": now, "last_green": None})
+        row["runs"] += 1
+        if ok:
+            row["greens"] += 1
+            row["last_green"] = now
+    never = sorted(n for n, r in hist.items() if r.get("greens", 0) == 0)
+    if write:
+        _j.dump(hist, open(path, "w", encoding="utf-8"), indent=1, sort_keys=True)
+    return {"state": "MEASURED", "never_green": never, "history": hist,
+            "why": "%d check(s) tracked, %d never green" % (len(hist), len(never))}
 
 
 PROBE_ITEMS = [
@@ -3044,6 +3091,56 @@ def main():
           "this is \n                                           \"unread, not drifted\"" in _appsrc
           or "unread, not drifted" in _appsrc,
           "the absent branch names itself")
+
+    # THE CENSUS MUST BE ABLE TO SEE A STANDING RED. A tracker that reports
+    # "0 never green" because it cannot detect one is the furniture it exists
+    # to remove -- so it is driven against a check that is red twice running.
+    _tmpd = tempfile.mkdtemp(prefix="hist-")
+    _hp = os.path.join(_tmpd, "h.json")
+    merge_history([("always red", False), ("sometimes", False)], path=_hp, write=True)
+    _h2 = merge_history([("always red", False), ("sometimes", True)], path=_hp, write=True)
+    check("the standing-red census names a check that has never once been green",
+          _h2["never_green"] == ["always red"]
+          and _h2["history"]["always red"]["runs"] == 2
+          and _h2["history"]["always red"]["greens"] == 0
+          and _h2["history"]["sometimes"]["greens"] == 1
+          and _h2["history"]["sometimes"]["last_green"] is not None,
+          "never_green=%s" % _h2["never_green"])
+    # AND IT DOES NOT WRITE UNLESS ASKED. The red proof runs this smoke ~198
+    # times with the tree deliberately mutated; a ledger that recorded those
+    # would bury every real standing red under induced ones.
+    _hp2 = os.path.join(_tmpd, "h2.json")
+    merge_history([("x", False)], path=_hp2, write=False)
+    check("the history ledger is read-only unless writing is asked for",
+          not os.path.exists(_hp2)
+          and merge_history([("x", False)], path="/nonexistent/dir/h.json")["state"]
+              in ("MEASURED", "FAILED"),
+          "no file written at %s" % os.path.basename(_hp2))
+    # TEMPERATURE: PINNED FOR A PAIR, FREE FOR PRODUCTION (Zac).
+    import api_proxy as AP
+    _b_free, _app_free = AP.pin_temperature({"model": "m"}, pin="")
+    _b_pin, _app_pin = AP.pin_temperature({"model": "m", "top_p": 0.9,
+                                           "temperature": 1.0}, pin="0")
+    check("temperature is pinned only when armed, and a pinned arm sets one sampler",
+          _app_free is False and "temperature" not in _b_free
+          and _app_pin is True and _b_pin["temperature"] == 0.0
+          and "top_p" not in _b_pin
+          and AP.pin_temperature({}, pin="notanumber")[1] is False,
+          "free=%s pinned=%s top_p_dropped=%s"
+          % (_app_free, _b_pin.get("temperature"), "top_p" not in _b_pin))
+
+    # ---- THE STANDING-RED CENSUS (Zac, 2026-09-20) ----
+    _hist = merge_history(RESULTS_LOG, write=(os.environ.get("SMOKE_HISTORY") == "1"))
+    print("\n  CHECK HISTORY   : %s — %s%s"
+          % (_hist["state"], _hist["why"],
+             "" if os.environ.get("SMOKE_HISTORY") == "1"
+             else "  (read-only; set SMOKE_HISTORY=1 to record)"))
+    if _hist["never_green"]:
+        print("  NEVER GREEN     : %s" % ", ".join(_hist["never_green"][:8]))
+    check("no check has been red on every run it has ever had",
+          _hist["state"] == "MEASURED" and not _hist["never_green"],
+          "never green: %s" % ", ".join(_hist["never_green"][:5])
+          if _hist["never_green"] else "%d tracked" % len(_hist["history"]))
 
     if FAILS:
         print("\n%d FAILURE(S)" % len(FAILS))

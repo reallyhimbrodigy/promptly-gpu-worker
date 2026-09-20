@@ -139,6 +139,47 @@ PIN_OS_LINE = os.environ.get("API_PROXY_PIN_OS_LINE", "1") == "1"
 _OS_RE = re.compile(r"(?m)^( - OS Version: ).*$")
 
 
+# TEMPERATURE: PINNED FOR A PAIR, FREE FOR PRODUCTION (Zac, 2026-09-20).
+#
+# Production editing stays UNPINNED on purpose -- variety is a quality signal by
+# Zac's own rule, and a pinned editor makes the same cut on the same clip every
+# time, which is not what a good editor does.
+#
+# But every A/B PAIR that reaches Zac's eye runs at 0, because two draws at 1.0
+# can differ more than the thing being tested. A pair is supposed to differ by
+# ONE variable; at temperature 1.0 it differs by that variable plus the draw,
+# and nothing in the two videos says which one he is looking at. That is Rule 3
+# -- never send a pair not proven to differ BY THE VARIABLE -- with the sampler
+# as the confound rather than the construction.
+#
+# ARMED BY ENV, READ WHERE IT IS USED. The value that reaches the wire is
+# recorded in the ledger by the fingerprint, so a pair that claims to be pinned
+# and was not is visible in its own record rather than argued about later.
+PIN_TEMPERATURE = os.environ.get("PROMPTLY_PIN_TEMPERATURE", "").strip()
+
+
+def pin_temperature(body, pin=None):
+    """-> (body, applied). Set temperature when armed; never otherwise.
+
+    A BODY THAT ALREADY NAMES A TEMPERATURE IS STILL OVERWRITTEN when armed:
+    the point of the pin is that the pair is identical, and honouring an
+    upstream 1.0 would defeat it silently.
+    """
+    pin = PIN_TEMPERATURE if pin is None else pin
+    if pin in (None, "", False):
+        return body, False
+    try:
+        t = float(pin)
+    except (TypeError, ValueError):
+        return body, False
+    body["temperature"] = t
+    # top_p AND temperature TOGETHER ARE TWO SAMPLERS. Anthropic's API refuses
+    # both on some versions and, where it accepts them, the interaction is not
+    # what a reader assumes from "temperature 0". A pinned pair sets one dial.
+    body.pop("top_p", None)
+    return body, True
+
+
 def pin_os_line(body):
     """-> (body, changed). Every system block's 'OS Version' line becomes a constant."""
     if not PIN_OS_LINE or not isinstance(body.get("system"), list):
@@ -428,6 +469,11 @@ class H(http.server.BaseHTTPRequestHandler):
                         return
                 _was_tc = body.get("tool_choice")
                 body = apply_tool_choice(body)
+                body, _tpin = pin_temperature(body)
+                if _tpin:
+                    print("  PROXY TEMP      : pinned to %s on this call — this "
+                          "is an A/B arm, not a production edit" % body.get("temperature"),
+                          flush=True)
                 if body.get("tool_choice") != _was_tc:
                     _trace({"phase": "tool_choice", "was": _was_tc, "now": body.get("tool_choice"), "tools": len(body.get("tools") or [])})
                 if MAX_OUTPUT_TOKENS > 0:
