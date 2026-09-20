@@ -4603,26 +4603,47 @@ def packed_prop_faults(key, raw):
 
 
 def component_faults(items, props_by_id=None):
-    """Every placed component whose packed property cannot be read. PURE. -> [str]
+    """Packed properties that cannot be read, IN THREE STATES. PURE.
 
-    Read from the READ-BACK's own property values, so it judges what is on the
-    timeline rather than what was intended at placement.
+    -> {state, faults, checked, why}
+       MEASURED  property values were available and judged
+       ABSENT    no placed component exposed any properties — NOTHING is claimed
+       (an empty `faults` list with state MEASURED is a real all-clear)
+
+    WHY A STATE AND NOT A LIST, MEASURED 2026-09-19. The first version returned
+    [] and read the values from each item's own `propertyOverrides`. The read-back
+    does not carry that key — the harness gets properties from `inspect_item`, which
+    this repo already learned once ("walking it for a propertyOverrides KEY could
+    never succeed"). So a deliberately malformed entry was PLANTED, placed, and the
+    check returned [] — reported as "no fault" twice, on two paid runs, because an
+    empty list is indistinguishable from an absent measurement. A check that cannot
+    fail is not yet a check, and this is the third one today.
     """
     # The same two readers check_constraints uses, spelled here so this function
     # stays PURE and callable without it.
     _nm = lambda i: str(((i.get("asset") or {}) if isinstance(i.get("asset"), dict) else {}).get("name") or "")
     _i8 = lambda i: str(i.get("id") or "").replace("-", "")[:8]
-    faults = []
+    faults, checked = [], 0
     for it in (items or []):
         pid = str(it.get("id") or "")
         props = (it.get("propertyOverrides") or it.get("props")
-                 or (props_by_id or {}).get(pid) or {})
-        if not isinstance(props, dict):
+                 or (props_by_id or {}).get(pid)
+                 or (props_by_id or {}).get(pid.replace("-", "")[:10])
+                 or (props_by_id or {}).get(pid.replace("-", "")[:8]) or {})
+        if not isinstance(props, dict) or not props:
             continue
+        checked += 1
         for key, raw in props.items():
             for why in packed_prop_faults(key, raw):
                 faults.append("%s (%s): %s" % (_i8(it), _nm(it) or it.get("itemType"), why))
-    return faults
+    placed = [i for i in (items or []) if str(i.get("itemType") or "") == "motion-graphic"]
+    if not checked and placed:
+        return {"state": "ABSENT", "faults": [], "checked": 0,
+                "why": ("%d motion graphic(s) on the timeline and NONE exposed any properties — "
+                        "the packed-property check could not run, so nothing is claimed about it"
+                        % len(placed))}
+    return {"state": "MEASURED", "faults": faults, "checked": checked,
+            "why": "%d component(s) judged, %d unreadable entr(ies)" % (checked, len(faults))}
 
 
 def check_constraints(constraints, items, base_item_id, captions, end_s, props_by_id=None, text_carriers=None):
@@ -5800,6 +5821,29 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                else {"state": "MEASURED", "cards": 0, "why": "no caption constraint"})
         return check_constraints(_constraints, items, base, _cc, end_s, props, TEXT_CARRIERS)
 
+    def _props_for_items(items, cap=12):
+        """Properties for the placed components, from inspect_item. -> {id: props}
+
+        THE READ-BACK DOES NOT CARRY THEM. This repo already learned that walking a
+        read-back item for a `propertyOverrides` key can never succeed; the values
+        live behind inspect_item. Bounded, because this runs between turns and an
+        unbounded inspect pass would put the whole timeline on the agent's clock.
+        """
+        out = {}
+        _b = str(_stage.get("baseItemId") or "").replace("-", "")[:10]
+        for it in [x for x in (items or [])
+                   if str(x.get("id") or "").replace("-", "")[:10] != _b][:cap]:
+            try:
+                _ii = _mcp_call(tok, "inspect_item",
+                                {"projectId": _stage["projectId"], "itemId": it.get("id")}, expect=None)
+                _pv = (_deep_find(_ii, "propertyOverrides") or _deep_find(_ii, "effectiveProps")
+                       or _deep_find(_ii, "properties"))
+                if _pv:
+                    out[str(it.get("id"))] = _pv
+            except Exception:                                     # noqa: BLE001
+                continue
+        return out
+
     def _verify(n):
         """the brief's constraints against the timeline AS IT IS NOW — before an export the agent asked for is honored"""
         if not any(c.get("checkable") for c in _constraints):
@@ -5815,10 +5859,14 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
             # A PACKED PROPERTY THAT CANNOT BE READ IS A FAULT HERE, at the rewatch,
             # so the agent can fix it on its own next turn. It used to be a label the
             # component drew INTO the frame — the one place an error must never be.
-            _pf = component_faults(_iv)
-            if _pf:
-                _cf = _cf + ["COMPONENT PROPERTY UNREADABLE — %s" % f for f in _pf]
-                _rows = _rows + [{"kind": "component_props", "state": "FAIL", "read": f} for f in _pf]
+            _pfr = component_faults(_iv, _props_for_items(_iv))
+            if _pfr["state"] == "ABSENT":
+                _cf = _cf + ["COMPONENT PROPERTIES UNREAD — %s" % _pfr["why"]]
+                _rows = _rows + [{"kind": "component_props", "state": "ABSENT", "read": _pfr["why"]}]
+            elif _pfr["faults"]:
+                _cf = _cf + ["COMPONENT PROPERTY UNREADABLE — %s" % f for f in _pfr["faults"]]
+                _rows = _rows + [{"kind": "component_props", "state": "FAIL", "read": f}
+                                 for f in _pfr["faults"]]
         except Exception as _ve:                                  # noqa: BLE001
             _cf, _rows = ["constraints UNVERIFIED: the read failed (%s)" % str(_ve)[:100]], [{"kind": "read", "state": "FAILED", "read": str(_ve)[:100]}]
         _constraint_reads.append({"n": n, "faults": _cf, "rows": _rows})
@@ -5979,13 +6027,21 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         # AND AT THE READ-BACK, WHICH IS WHAT WITHHOLDS. The export is the one place
         # a malformed entry must never reach: an error in a user's video is worse
         # than an empty note, and worse still than a run that refuses to finish.
-        _pf_rw = component_faults(_items)
-        if _pf_rw:
-            _faults = _faults + ["COMPONENT PROPERTY UNREADABLE — %s" % f for f in _pf_rw]
+        # THE PROPERTY MAP THIS SEAM ALREADY BUILT, from inspect_item. Reading the
+        # items' own `propertyOverrides` here found nothing on two paid runs.
+        _pf_rw = component_faults(_items, _props)
+        if _pf_rw["state"] == "ABSENT":
+            _faults = _faults + ["COMPONENT PROPERTIES UNREAD — %s" % _pf_rw["why"]]
+            _crows_rw = _crows_rw + [{"kind": "component_props", "state": "ABSENT", "read": _pf_rw["why"]}]
+            print("  COMPONENT PROPS : ABSENT — %s" % _pf_rw["why"], flush=True)
+        elif _pf_rw["faults"]:
+            _faults = _faults + ["COMPONENT PROPERTY UNREADABLE — %s" % f for f in _pf_rw["faults"]]
             _crows_rw = _crows_rw + [{"kind": "component_props", "state": "FAIL", "read": f}
-                                     for f in _pf_rw]
+                                     for f in _pf_rw["faults"]]
             print("  COMPONENT PROPS : FAIL  %d unreadable entr(ies) — the export is withheld"
-                  % len(_pf_rw), flush=True)
+                  % len(_pf_rw["faults"]), flush=True)
+        else:
+            print("  COMPONENT PROPS : %s" % _pf_rw["why"], flush=True)
         if _constraints:
             print("  CONSTRAINTS rw%d : %s" % (n, constraint_line(_constraints, _crows_rw)), flush=True)
         _scan = []
@@ -8256,10 +8312,25 @@ def text_family_check(clip_url: str = "", at_s: float = 6.0, span_s: float = 3.0
         iid = ((r.get("adds") or [{}])[0] or {}).get("id")
         f, _ms = frames_at(tok, pid, probe, "/work/tf_%s" % name)
         rb = read_back(tok, stage)
-        faults = component_faults(rb.get("items") or [])
+        # THE VALUES LIVE BEHIND inspect_item, NOT ON THE READ-BACK ITEM. Reading the
+        # item's own propertyOverrides returned nothing on two paid runs and reported
+        # it as "no fault" both times.
+        _pmap = {}
+        for _it in (rb.get("items") or []):
+            try:
+                _ii = _mcp_call(tok, "inspect_item",
+                                {"projectId": pid, "itemId": _it.get("id")}, expect=None)
+                _pv = (_deep_find(_ii, "propertyOverrides") or _deep_find(_ii, "effectiveProps")
+                       or _deep_find(_ii, "properties"))
+                if _pv:
+                    _pmap[str(_it.get("id"))] = _pv
+            except Exception:                                     # noqa: BLE001
+                continue
+        faults = component_faults(rb.get("items") or [], _pmap)
         import base64 as _b64
         row = {"state": "MEASURED", "item": iid, "overrides": overrides,
-               "faults": faults,
+               "faults": faults.get("faults"), "fault_state": faults.get("state"),
+               "fault_why": faults.get("why"), "props_seen": _pmap,
                "b64": [_b64.b64encode(open(q, "rb").read()).decode() for q in list(f.values())[:2]]}
         edit_item_checked(tok, {"projectId": pid, "deletes": [{"id": iid}]},
                           "clearing %s" % name)
@@ -8278,11 +8349,14 @@ def text_family_check(clip_url: str = "", at_s: float = 6.0, span_s: float = 3.0
         "one entry deliberately malformed")
     out["rendered"]["StickyNotes_malformed"] = bad
     out["fault_check"] = {
+        "state": bad.get("fault_state"),
         "faults": bad.get("faults") or [],
         "fired": bool(bad.get("faults")),
         "why": ("the read-back named %d unreadable entr(ies); the export is withheld while any stands"
                 % len(bad.get("faults") or [])) if bad.get("faults") else
-               "NO FAULT FIRED — a malformed entry passed the read-back, which is the defect",
+               ("THE CHECK COULD NOT RUN — %s" % bad.get("fault_why"))
+               if bad.get("fault_state") == "ABSENT" else
+               "NO FAULT FIRED on a readable property set — a malformed entry passed, which is the defect",
     }
     print("  MALFORMED ENTRY %s — %s" % ("FAULT FIRED" if out["fault_check"]["fired"] else "NO FAULT",
                                          out["fault_check"]["why"]), flush=True)

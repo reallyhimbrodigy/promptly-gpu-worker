@@ -2021,13 +2021,31 @@ def main():
           "4 entries named, 3 clean")
     _bad_items = [{"id": "aaaaaaaa-1111", "itemType": "motion-graphic",
                    "asset": {"name": "StickyNotes"}, "propertyOverrides": {"notes": "|#FFE066|-3"}}]
-    check("the fault names the item and its component, read from the timeline's own properties",
-          J.component_faults(_bad_items)
-          and "aaaaaaaa" in J.component_faults(_bad_items)[0]
-          and "StickyNotes" in J.component_faults(_bad_items)[0]
-          and J.component_faults([{"id": "d", "itemType": "motion-graphic",
-                                   "propertyOverrides": {"notes": "ok|#fff|0"}}]) == [],
-          J.component_faults(_bad_items)[0][:110])
+    # THREE STATES, BECAUSE AN EMPTY LIST IS NOT AN ALL-CLEAR. Measured the hard way:
+    # a deliberately malformed entry was planted, placed, and the check returned [] on
+    # TWO paid runs — it read each item's own `propertyOverrides`, which the read-back
+    # does not carry (the values live behind inspect_item, a thing this repo had
+    # already learned once). An absent measurement read exactly like a clean one.
+    _no_props = [{"id": "aaaaaaaa-1111", "itemType": "motion-graphic", "asset": {"name": "StickyNotes"}}]
+    _with_bad = J.component_faults(_no_props, {"aaaaaaaa-1111": {"notes": "|#FFE066|-3"}})
+    _with_ok = J.component_faults(_no_props, {"aaaaaaaa-1111": {"notes": "ok|#fff|0"}})
+    check("a component whose properties could not be read is ABSENT, never a clean pass",
+          J.component_faults(_no_props)["state"] == "ABSENT"
+          and J.component_faults(_no_props)["faults"] == []
+          and "could not run" in J.component_faults(_no_props)["why"],
+          J.component_faults(_no_props)["why"][:100])
+    check("with the property map the fault fires and names the item and its component",
+          _with_bad["state"] == "MEASURED" and _with_bad["faults"]
+          and "aaaaaaaa" in _with_bad["faults"][0] and "StickyNotes" in _with_bad["faults"][0]
+          and _with_ok["state"] == "MEASURED" and _with_ok["faults"] == [],
+          _with_bad["faults"][0][:110])
+    # AND BOTH SEAMS ARE FED THE MAP THAT ACTUALLY HAS THE VALUES.
+    _appf = open("chatcut_job_app.py", encoding="utf-8").read()
+    check("both seams pass a property map, not the items' own absent key",
+          "component_faults(_iv, _props_for_items(_iv))" in _appf
+          and "component_faults(_items, _props)" in _appf
+          and "def _props_for_items(" in _appf,
+          "rewatch and read-back both fed")
     # THE ERROR IS NOT IN THE PICTURE, and the fault reaches BOTH seams.
     _sn = open("port/build/StickyNotes.jsx", encoding="utf-8").read()
     _sn_code = _re.sub(r"^\s*//.*$", "", _re.sub(r"/\*.*?\*/", "", _sn, flags=_re.S), flags=_re.M)
@@ -2037,8 +2055,8 @@ def main():
           # the moment a fourth caller appeared — a reader keyed to a number rather
           # than to the property, which is this repo's most repeated check failure.
           "malformed" not in _sn_code and "dropped" not in _sn_code
-          and "_pf = component_faults(_iv)" in _app           # the rewatch: the agent sees it
-          and "_pf_rw = component_faults(_items)" in _app     # the read-back: it withholds
+          and "_pfr = component_faults(_iv, _props_for_items(_iv))" in _app   # rewatch: the agent sees it
+          and "_pf_rw = component_faults(_items, _props)" in _app             # read-back: it withholds
           and "the export is withheld" in _app,
           "no error drawn; both seams present")
 
