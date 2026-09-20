@@ -1808,13 +1808,52 @@ def main():
           str(J.pair_differs(_mk(["a"]), _mk(["b"]), reader=_rd(_conf),
                              control_a=["c1"], control_b=["c2"])["why"])[:120])
     # AND THE ARMS SHARE ONE PROJECT, which is what makes a clean control reachable at all.
+    _src_z = open("chatcut_job_app.py", encoding="utf-8").read()
+    _zp2 = _src_z[_src_z.index("def zoom_pair("):]
+    _zp2 = _zp2[:_zp2.index("@app.function")]
+    _zp2 = _re.sub(r"^\s*#.*$", "", _zp2, flags=_re.M)
+    check("both arms share one project, one upload and one timeline, placed in sequence",
+          _zp2.count("prestage(") == 1 and '"deletes": [{"itemId": item_id}]' in _zp2
+          and "control_a=" in _zp2 and "frames_by_number(" in _src_z,
+          "prestage x%d, deletes=%s" % (_zp2.count("prestage("),
+                                        '"deletes": [{"itemId": item_id}]' in _zp2))
+    # ---- ALIGNMENT BY FRAME NUMBER (measured 2026-09-19) ----
+    # The grid sampler asked for 84 frames over 14s and returned 66 — and the 18 it lost
+    # were the TAIL, which is exactly where a zoom at 12s lives, so the span under test
+    # had no frames at all. Both passes then returned 66 and they were NOT the same 66,
+    # so a positional comparison lined up different moments and reported a difference
+    # that was nothing but misalignment. The control caught it: CONFOUNDED, withheld.
+    _a = {0: "a0", 30: "a30", 60: "a60"}
+    _b = {0: "b0", 60: "b60", 90: "b90"}
+    _ca, _cb, _oa, _ob = J.frames_by_number(_a, _b)
+    check("only frames present on BOTH sides are compared, and the rest are named",
+          _ca == ["a0", "a60"] and _cb == ["b0", "b60"] and _oa == [30] and _ob == [90],
+          "%s / %s / only_a=%s only_b=%s" % (_ca, _cb, _oa, _ob))
+    check("a positional comparison of the same two maps would have lined up different moments",
+          list(_a.values())[1] != _a[60] and _ca[1] == _a[60] and _cb[1] == _b[60],
+          "positional index 1 is frame 30 on one side and frame 60 on the other")
+    # AND THE PAIR RUN ASKS FOR TWO EXPLICIT WINDOWS, not a grid over the whole timeline.
+    # COMMENTS ARE NOT CODE — THE SECOND TIME TODAY. The contract check flagged
+    # SmoothPush for a mention of AbsoluteFill inside the comment forbidding it; this
+    # leg then failed because the comment explaining that `removes` was the WRONG key
+    # contains the word `removes`. Any check that reads source strips comments first.
     _zp = open("chatcut_job_app.py", encoding="utf-8").read()
     _zp = _zp[_zp.index("def zoom_pair("):]
     _zp = _zp[:_zp.index("@app.function")]
-    check("both arms share one project, one upload and one timeline, placed in sequence",
-          _zp.count("prestage(") == 1 and '"removes": [item_id]' in _zp
-          and "control_a=" in _zp and "def split_sheets" in _zp,
-          "prestage x%d, removes=%s" % (_zp.count("prestage("), '"removes": [item_id]' in _zp))
+    _zp = _re.sub(r"^\s*#.*$", "", _zp, flags=_re.M)
+    check("the pair samples a control window and a test window by frame number",
+          "ctrl_frames = [" in _zp and "test_frames = [" in _zp
+          and "frames_at(tok, pid, ctrl_frames" in _zp and "frames_at(tok, pid, test_frames" in _zp
+          and "_preview_frames(" not in _zp,
+          "explicit windows, grid sampler gone from zoom_pair")
+    # AND A DELETE IS PROVEN BY THE READ-BACK, NEVER BY THE RESPONSE. `removes` was not
+    # even the right key: edit_item answered 200 with empty adds/deletes/updates and the
+    # first arm stayed on the timeline under the second.
+    check("the arm is deleted with the key edit_item accepts, and the read-back proves it",
+          '"deletes": [{"itemId": item_id}]' in _zp and "STILL ON THE TIMELINE" in _zp
+          and '"removes"' not in _zp,
+          "deletes/itemId + read-back verification")
+
     # THE WORKING TREE, NOT THE COMMIT. red_proof_no_undefined_names builds an ISOLATED
     # worktree from HEAD, so it judges what is COMMITTED — and a run is launched from what
     # is on disk. A slice-based edit removed `place_theirs`, `place_ours` and PORTED_PROPS

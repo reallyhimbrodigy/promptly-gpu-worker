@@ -3343,6 +3343,63 @@ def _preview_frames(tok, pid, total_frames, fps=30, density_fps=2.0, mark=None, 
     return sheets, times
 
 
+def frames_at(tok, pid, frame_list, out_dir, per_call=9, workers=4):
+    """EXACTLY these frames, keyed BY FRAME NUMBER. -> ({frame: path}, missing:[frame])
+
+    WHY NOT `_preview_frames`, MEASURED 2026-09-19. That sampler asks for an even
+    grid over the whole timeline and takes what comes back. Asking for 84 frames
+    over 14s returned 66 — and the 18 it lost were the TAIL, which is exactly where
+    a zoom at 12s lives, so the span under test had no frames at all. Worse, two
+    passes each returned 66 and they were not the SAME 66, so a positional
+    comparison of the two lined up different moments and reported a difference that
+    was nothing but misalignment.
+
+    So this asks for a SHORT, EXPLICIT list and keys the answer by frame number. A
+    chunk that returns fewer URLs than it was asked for is RETRIED ONE FRAME AT A
+    TIME, because a short chunk cannot say WHICH frame is missing — and a frame
+    that never arrives is named in `missing` rather than quietly shifting its
+    neighbours into its place.
+    """
+    import urllib.request as _ur  # noqa: F401  (fetch_frames uses it)
+    from concurrent.futures import ThreadPoolExecutor
+    os.makedirs(out_dir, exist_ok=True)
+    want = sorted({int(f) for f in frame_list})
+
+    def _ask(fr):
+        r = _mcp_call(tok, "preview_timeline",
+                      {"projectId": pid, "views": ["viewer"], "viewerFrames": list(fr)}, expect=None)
+        return _frame_urls(json.dumps(r) + str(r.get("_text") or ""))
+
+    pairs = []                                   # (frame, url), alignment guaranteed
+    chunks = [want[k:k + per_call] for k in range(0, len(want), per_call)]
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            got = list(ex.map(_ask, chunks))
+    except Exception as e:                                        # noqa: BLE001
+        print("  FRAMES AT       : FAILED preview_timeline %s: %s" % (type(e).__name__, str(e)[:140]), flush=True)
+        return {}, list(want)
+    short = []
+    for ch, urls in zip(chunks, got):
+        if len(urls) == len(ch):
+            pairs.extend(zip(ch, urls))
+        else:
+            short.append((len(ch), len(urls)))
+            for f in ch:                          # one at a time: alignment is certain
+                u = _ask([f])
+                if len(u) == 1:
+                    pairs.append((f, u[0]))
+    if short:
+        print("  FRAMES AT       : %d short chunk(s) %s — retried one frame at a time"
+              % (len(short), short[:4]), flush=True)
+    fetched, _t = fetch_frames([u for _f, u in pairs], out_dir)
+    by_frame = {pairs[i][0]: pth for i, pth in fetched}
+    missing = [f for f in want if f not in by_frame]
+    print("  FRAMES AT       : %s  %d of %d frame(s)%s"
+          % ("MEASURED" if not missing else "PARTIAL", len(by_frame), len(want),
+             "" if not missing else "  MISSING %s" % missing[:8]), flush=True)
+    return by_frame, missing
+
+
 def _edit_frames(tok, pid, total_frames, n=EDIT_FRAMES_N, fps=30, mark=None):
     """Frames of the EDIT for pass 2 — from a real render, not the 9-frame cap.
 
@@ -7275,7 +7332,7 @@ def mg_runtime_probe(clip_url: str = ""):
     tok = _access_token()
     stage = prestage(tok, "", controls={}, source_path="/work/source.mp4",
                      want_components=set(), titles=[])
-    pid, base, src_asset = stage["projectId"], stage.get("baseItemId"), stage.get("sourceAssetId")
+    pid, src_asset = stage["projectId"], stage.get("sourceAssetId")
     out = {"state": "RUNNING", "project": pid, "capabilities": {}}
     print("  PRESTAGE        project=%s source=%s" % (str(pid)[:8], str(src_asset)[:12]), flush=True)
 
@@ -7412,6 +7469,20 @@ def stack_pair(top_path, bottom_path, labels, out_path, writer=None):
                 "why": "%dx%d, theirs above ours at matched times" % (out.width, out.height)}
     except Exception as e:                                        # noqa: BLE001
         return {"state": "FAILED", "path": None, "why": str(e)[:200]}
+
+
+def frames_by_number(a, b):
+    """Two {frame: path} maps -> (common_a, common_b, only_a, only_b), frame-ordered. PURE.
+
+    THE ALIGNMENT IS THE POINT. Comparing two lists positionally lines up the Nth
+    retrieved frame with the Nth retrieved frame, which is only the same moment if
+    both passes lost exactly the same frames. Measured 2026-09-19: they did not —
+    two passes returned 66 frames each and the sheets disagreed because they were
+    different moments, not different pictures.
+    """
+    common = sorted(set(a or {}) & set(b or {}))
+    return ([a[f] for f in common], [b[f] for f in common],
+            sorted(set(a or {}) - set(b or {})), sorted(set(b or {}) - set(a or {})))
 
 
 def frame_diff_profile(a_paths, b_paths, reader=None):
@@ -7566,31 +7637,20 @@ def zoom_pair(clip_url: str = "", at_s: float = 12.0, span_s: float = 2.0,
             print("  %-26s FAILED   %s" % (name, str(e)[:160]), flush=True)
             return None
 
-    def split_sheets(sheets, times, cut_frame):
-        """Sheets entirely BEFORE the zoom are the control; the rest are the test. PURE.
-
-        A sheet is a grid of consecutive frames, so a sheet whose LAST frame is
-        still before the zoom starts contains nothing under test and must come
-        back pixel-identical between the two passes.
-        """
-        if not sheets or not times:
-            return [], list(sheets or [])
-        per = max(1, (len(times) + len(sheets) - 1) // len(sheets))
-        ctrl, test = [], []
-        for i, sh in enumerate(sheets):
-            last = times[min(len(times) - 1, (i + 1) * per - 1)]
-            (ctrl if float(last) * fps < cut_frame else test).append(sh)
-        return ctrl, test
+    # TWO EXPLICIT WINDOWS, NOT A GRID OVER THE WHOLE TIMELINE. The control sits
+    # well before the zoom and must come back identical; the test covers the span.
+    # Short lists, asked for by number — the grid sampler lost its TAIL, which is
+    # precisely where a zoom at 12s lives.
+    ctrl_frames = [int(round(from_frame * (i + 1) / 10.0)) for i in range(9)]
+    test_frames = [from_frame + int(round(dur_frames * i / 12.0)) for i in range(13)]
 
     def arm(label, place):
-        """ONE PASS on the SHARED project: place, read the frames, then REMOVE.
+        """ONE PASS on the SHARED project: place, read the two windows, then DELETE.
 
         ONE PROJECT, NOT TWO. The first build gave each arm its own project, and
         the control proved that wrong: frames covering 0-7s, where neither arm has
         a zoom, came back with a mean absolute difference of 2.26 and peaks to 253,
-        because two projects are two uploads and two independent renders. Sharing
-        the project, the upload and the timeline leaves the curve as the only thing
-        that changed — and the control says so every run rather than being assumed.
+        because two projects are two uploads and two independent renders.
         """
         placed = step("%s: place" % label, lambda: place(pid, base, src_asset))
         a = {"placed": bool(placed)}
@@ -7599,27 +7659,37 @@ def zoom_pair(clip_url: str = "", at_s: float = 12.0, span_s: float = 2.0,
             return a
         item_id = ((placed.get("adds") or [{}])[0] or {}).get("id")
         a["item"] = item_id
-        try:
-            sheets, times = _preview_frames(tok, pid, from_frame + dur_frames, fps=fps,
-                                            density_fps=6.0, out_dir="/work/%s_frames" % label)
-            ctrl, test = split_sheets(sheets, times, from_frame)
-            a["frames"] = {"n": len(times), "sheets": test, "control": ctrl, "times": times}
-            a["state"] = "MEASURED"
-            print("  %-8s %d frame(s) -> %d control sheet(s) + %d test sheet(s)"
-                  % (label.upper(), len(times), len(ctrl), len(test)), flush=True)
-        except Exception as e:                                    # noqa: BLE001
-            a["frames"] = {"state": "FAILED", "why": str(e)[:200]}
-            a["state"] = "FAILED"; a["why"] = "the frames could not be read: %s" % str(e)[:160]
-        # REMOVED BEFORE THE NEXT ARM. Both arms cover the same span on the same
-        # timeline, so leaving one in place would put the second arm's zoom on top
-        # of the first and the frames would answer for neither.
+        ctrl, miss_c = frames_at(tok, pid, ctrl_frames, "/work/%s_control" % label)
+        test, miss_t = frames_at(tok, pid, test_frames, "/work/%s_test" % label)
+        a["control_by_frame"], a["test_by_frame"] = ctrl, test
+        a["missing"] = {"control": miss_c, "test": miss_t}
+        a["state"] = "MEASURED" if (ctrl and test) else "FAILED"
+        if a["state"] == "FAILED":
+            a["why"] = "a window came back empty (control %d, test %d)" % (len(ctrl), len(test))
+        print("  %-8s control %d/%d, test %d/%d"
+              % (label.upper(), len(ctrl), len(ctrl_frames), len(test), len(test_frames)), flush=True)
+        # DELETED BEFORE THE NEXT ARM. Both arms cover the same span on the same
+        # timeline, so leaving one in place puts the second arm's zoom on top of the
+        # first and the frames answer for neither.
         if item_id:
-            r = step("%s: remove" % label,
-                     lambda: _mcp_call(tok, "edit_item", {"projectId": pid, "removes": [item_id]}, expect=None))
-            a["removed"] = bool(r)
-            if not r:
+            # THE KEY IS `deletes`, AND THE ELEMENT IS {"itemId": ...}. My first
+            # version sent {"removes": [id]}: edit_item answered 200 with
+            # {"adds": [], "deletes": [], "updates": []} and NOTHING was deleted, so
+            # the second arm WAS measured on top of the first. A response is not a
+            # deletion — the read-back is. This shape is already used elsewhere in
+            # this file; I guessed instead of looking, which is the whole failure.
+            r = step("%s: delete" % label,
+                     lambda: _mcp_call(tok, "edit_item",
+                                       {"projectId": pid, "deletes": [{"itemId": item_id}]}, expect=None))
+            gone = item_id not in {str(i.get("id")) for i in (read_back(tok, stage).get("items") or [])}
+            a["removed"] = bool(gone)
+            print("  %-8s delete -> %s (read back: %s)"
+                  % (label.upper(), "accepted" if r else "refused",
+                     "gone" if gone else "STILL ON THE TIMELINE"), flush=True)
+            if not gone:
                 a["state"] = "FAILED"
-                a["why"] = "the arm could not be removed, so the next arm would be measured on top of it"
+                a["why"] = ("the arm is still on the timeline after the delete, so the next arm "
+                            "would be measured on top of it")
         return a
 
     # ── THEIRS: their preset, as an effect ON the base item ──────────────
@@ -7665,10 +7735,17 @@ def zoom_pair(clip_url: str = "", at_s: float = 12.0, span_s: float = 2.0,
     out["arms"]["ours"] = arm("ours", place_ours)
 
     # ── RULE 3, WITH A CONTROL: the difference must BE the zoom ───────────
-    out["differ"] = pair_differs(
-        out["arms"].get("theirs") or {}, out["arms"].get("ours") or {},
-        control_a=((out["arms"].get("theirs") or {}).get("frames") or {}).get("control"),
-        control_b=((out["arms"].get("ours") or {}).get("frames") or {}).get("control"))
+    _t, _o = out["arms"].get("theirs") or {}, out["arms"].get("ours") or {}
+    _ca, _cb, _oa, _ob = frames_by_number(_t.get("control_by_frame"), _o.get("control_by_frame"))
+    _ta, _tb, _xa, _xb = frames_by_number(_t.get("test_by_frame"), _o.get("test_by_frame"))
+    out["alignment"] = {"control_common": len(_ca), "test_common": len(_ta),
+                        "only_theirs": _oa + _xa, "only_ours": _ob + _xb}
+    print("  ALIGNED                    control %d common, test %d common%s"
+          % (len(_ca), len(_ta),
+             "" if not (_oa + _xa + _ob + _xb) else
+             "  (dropped: theirs %s, ours %s)" % (_oa + _xa, _ob + _xb)), flush=True)
+    out["differ"] = pair_differs({"frames": {"sheets": _ta}}, {"frames": {"sheets": _tb}},
+                                 control_a=_ca, control_b=_cb)
     print("  DIFFER                     %s — %s" % (out["differ"]["state"], out["differ"]["why"]), flush=True)
     if (out["differ"].get("control") or {}).get("state") == "MEASURED":
         print("  CONTROL                    %d sheet(s) outside the zoom, %d differing"
@@ -7683,8 +7760,11 @@ def zoom_pair(clip_url: str = "", at_s: float = 12.0, span_s: float = 2.0,
 
     # ── THE SIDE-BY-SIDE, LABELLED HONESTLY ──────────────────────────────
     _lab = pair_labels(theirs, "SmoothPush")
-    _ts = ((out["arms"]["theirs"].get("frames") or {}).get("sheets") or [None])[0]
-    _os = ((out["arms"]["ours"].get("frames") or {}).get("sheets") or [None])[0]
+    _common = sorted(set(_t.get("test_by_frame") or {}) & set(_o.get("test_by_frame") or {}))
+    _ts = (tile_sheets([("%.2fs" % (f / fps), (_t["test_by_frame"])[f]) for f in _common],
+                       "/work/sheet_theirs", per_sheet=20, cols=5, cell_w=180) or [None])[0]
+    _os = (tile_sheets([("%.2fs" % (f / fps), (_o["test_by_frame"])[f]) for f in _common],
+                       "/work/sheet_ours", per_sheet=20, cols=5, cell_w=180) or [None])[0]
     out["side_by_side"] = stack_pair(_ts, _os, _lab, "/work/zoom_pair.jpg")
     print("  SIDE BY SIDE               %s — %s" % (out["side_by_side"]["state"], out["side_by_side"]["why"]), flush=True)
     if out["side_by_side"]["state"] == "MEASURED":
