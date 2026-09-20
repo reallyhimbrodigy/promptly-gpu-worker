@@ -8075,6 +8075,55 @@ CAPTION_STYLE_FONT = {
 
 
 PORTED_PROPS = {
+    # ── Builder-2's four, from port/zoom_properties.json (224e35b) ──────────
+    # scale is SIZE and originX/originY is POSITION on all seven zooms; everything
+    # past those two is the component's own character. `correct` is declared text and
+    # empty by default — no component carries a calibration level.
+    "DepthPull": [
+        {'key': 'clip', 'label': 'Clip', 'type': 'video', 'defaultValue': ''},
+        {'key': 'srcFrom', 'label': 'Source start frame', 'type': 'number', 'defaultValue': 0},
+        {'key': 'scale', 'label': 'Scale (size)', 'type': 'number', 'defaultValue': 1.15},
+        {'key': 'originX', 'label': 'Origin X (position, 0-1)', 'type': 'number', 'defaultValue': 0.5},
+        {'key': 'originY', 'label': 'Origin Y (position, 0-1)', 'type': 'number', 'defaultValue': 0.45},
+        {'key': 'punch', 'label': 'PUNCH register (accelerate into the word)', 'type': 'boolean', 'defaultValue': False},
+        {'key': 'capped', 'label': 'Hold the 11px/frame ceiling', 'type': 'boolean', 'defaultValue': True},
+        {'key': 'edgeBlur', 'label': 'Edge blur at full pull (px)', 'type': 'number', 'defaultValue': 4},
+        {'key': 'frameLines', 'label': 'Draw the inner frame lines', 'type': 'boolean', 'defaultValue': True},
+        {'key': 'correct', 'label': 'Rest calibration (CSS filter, from the harness)', 'type': 'text', 'defaultValue': ''},
+    ],
+    "FocusWindow": [
+        {'key': 'clip', 'label': 'Clip', 'type': 'video', 'defaultValue': ''},
+        {'key': 'srcFrom', 'label': 'Source start frame', 'type': 'number', 'defaultValue': 0},
+        {'key': 'scale', 'label': 'Background scale (size)', 'type': 'number', 'defaultValue': 1.8},
+        {'key': 'originX', 'label': 'Origin X (position, 0-1)', 'type': 'number', 'defaultValue': 0.5},
+        {'key': 'originY', 'label': 'Origin Y (position, 0-1)', 'type': 'number', 'defaultValue': 0.4},
+        {'key': 'capped', 'label': 'Hold the 11px/frame ceiling', 'type': 'boolean', 'defaultValue': True},
+        {'key': 'windowScale', 'label': 'Inset window size (fraction of frame)', 'type': 'number', 'defaultValue': 0.72},
+        {'key': 'borderWidth', 'label': 'Window border width (px)', 'type': 'number', 'defaultValue': 0},
+        {'key': 'borderColor', 'label': 'Window border colour', 'type': 'text', 'defaultValue': 'transparent'},
+        {'key': 'correct', 'label': 'Rest calibration (CSS filter, from the harness)', 'type': 'text', 'defaultValue': ''},
+    ],
+    "LetterboxPush": [
+        {'key': 'clip', 'label': 'Clip', 'type': 'video', 'defaultValue': ''},
+        {'key': 'srcFrom', 'label': 'Source start frame', 'type': 'number', 'defaultValue': 0},
+        {'key': 'scale', 'label': 'Scale (size)', 'type': 'number', 'defaultValue': 1.2},
+        {'key': 'originX', 'label': 'Origin X (position, 0-1)', 'type': 'number', 'defaultValue': 0.5},
+        {'key': 'originY', 'label': 'Origin Y (position, 0-1)', 'type': 'number', 'defaultValue': 0.5},
+        {'key': 'punch', 'label': 'PUNCH register (accelerate into the word)', 'type': 'boolean', 'defaultValue': False},
+        {'key': 'capped', 'label': 'Hold the 11px/frame ceiling', 'type': 'boolean', 'defaultValue': True},
+        {'key': 'maxBarHeight', 'label': 'Bar height at full push (fraction of height)', 'type': 'number', 'defaultValue': 0.12},
+        {'key': 'correct', 'label': 'Rest calibration (CSS filter, from the harness)', 'type': 'text', 'defaultValue': ''},
+    ],
+    "SnapReframe": [
+        {'key': 'clip', 'label': 'Clip', 'type': 'video', 'defaultValue': ''},
+        {'key': 'srcFrom', 'label': 'Source start frame', 'type': 'number', 'defaultValue': 0},
+        {'key': 'scale', 'label': 'Scale (size)', 'type': 'number', 'defaultValue': 1.3},
+        {'key': 'originX', 'label': 'Origin X (position, 0-1)', 'type': 'number', 'defaultValue': 0.5},
+        {'key': 'originY', 'label': 'Origin Y (position, 0-1)', 'type': 'number', 'defaultValue': 0.5},
+        {'key': 'capped', 'label': 'Hold the 11px/frame ceiling', 'type': 'boolean', 'defaultValue': True},
+        {'key': 'correct', 'label': 'Rest calibration (CSS filter, from the harness)', 'type': 'text', 'defaultValue': ''},
+    ],
+
     "TornPaper": [
         {"key": "fontFamily", "label": "Typeface", "type": "font",
          "defaultValue": "Montserrat"},
