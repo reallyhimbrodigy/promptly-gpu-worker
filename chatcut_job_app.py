@@ -3331,6 +3331,21 @@ def fetch_frames(urls, out_dir, timeout_s=FETCH_TIMEOUT_S, workers=8, name="f"):
     return [(r[0], r[1]) for r in rows if r[1]], timing
 
 
+def rewatch_tiles(density_fps):
+    """Sheet geometry for a rewatch at this density. PURE. -> (per_sheet, cols, cell_w)
+
+    ZAC'S RULING: at 1 fps the rewatch uses LARGER TILES. It is not a new constant —
+    it follows from the density. Halving the frame rate halves the frames, so each
+    one can be ~1.7x wider inside the same sheet, and a caption or a face is legible
+    at 300px where it is not at 180. Spending the saved frames on SIZE is the whole
+    point of dropping to 1 fps; keeping 180px tiles would bank the saving and hand
+    the agent the same unreadable thumbnails, fewer of them.
+    """
+    if float(density_fps or 0) <= 1.5:
+        return 9, 3, 300
+    return 20, 5, 180
+
+
 def _preview_frames(tok, pid, total_frames, fps=30, density_fps=2.0, mark=None, per_call=9, workers=5, out_dir=None):
     """THE REWATCH INSTRUMENT, PICKED (ruling 5, measured 2026-09-17 on one
     scratch timeline carrying three planted defects, 40 frames each):
@@ -3374,11 +3389,13 @@ def _preview_frames(tok, pid, total_frames, fps=30, density_fps=2.0, mark=None, 
         return [], []
     times = [round(frames[i] / float(fps), 2) if i < len(frames) else -1 for i, _p in got]
     entries = [("%.1fs" % t, pth) for t, (_i, pth) in zip(times, got)]
-    sheets = tile_sheets(entries, os.path.join(out_dir, "sheets"), per_sheet=20, cols=5, cell_w=180)
+    _ps, _cols, _cw = rewatch_tiles(density_fps)
+    sheets = tile_sheets(entries, os.path.join(out_dir, "sheets"), per_sheet=_ps, cols=_cols, cell_w=_cw)
     if mark:
         mark("tile")
-    print("  REWATCH FRAMES  : MEASURED  preview_timeline x%d parallel, %d of %d frame(s) at %.1ffps over %.1fs -> %d sheet(s)"
-          % (len(chunks), len(got), n, density_fps, dur, len(sheets)), flush=True)
+    print("  REWATCH FRAMES  : MEASURED  preview_timeline x%d parallel, %d of %d frame(s) at %.1ffps over %.1fs "
+          "-> %d sheet(s) at %dpx tiles (%d per sheet, %d cols)"
+          % (len(chunks), len(got), n, density_fps, dur, len(sheets), _cw, _ps, _cols), flush=True)
     return sheets, times
 
 

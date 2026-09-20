@@ -2352,6 +2352,21 @@ def main():
           and J.ROUTES == ("speech", "no-speech", "other"),
           "wired at the record")
 
+    # ---- ITEM 2: 1 fps REWATCH USES LARGER TILES (Zac's ruling) ----
+    # Halving the frame rate halves the frames, so each can be wider inside the same
+    # sheet. Keeping 180px tiles at 1 fps would BANK the saving and hand the agent the
+    # same unreadable thumbnails, fewer of them — the point of dropping to 1 fps is to
+    # spend the saved frames on SIZE.
+    check("a 1 fps rewatch tiles larger than a 2 fps one, and the size follows the density",
+          J.rewatch_tiles(1.0)[2] > J.rewatch_tiles(2.0)[2]
+          and J.rewatch_tiles(1.0) == (9, 3, 300) and J.rewatch_tiles(2.0) == (20, 5, 180)
+          and J.rewatch_tiles(0.5) == J.rewatch_tiles(1.0),
+          "1fps %s vs 2fps %s" % (J.rewatch_tiles(1.0), J.rewatch_tiles(2.0)))
+    check("the rewatch instrument uses that geometry rather than a fixed 180",
+          "_ps, _cols, _cw = rewatch_tiles(density_fps)" in open("chatcut_job_app.py", encoding="utf-8").read()
+          and "cell_w=_cw" in open("chatcut_job_app.py", encoding="utf-8").read(),
+          "wired into _preview_frames")
+
     # THE WORKING TREE, NOT THE COMMIT. red_proof_no_undefined_names builds an ISOLATED
     # worktree from HEAD, so it judges what is COMMITTED — and a run is launched from what
     # is on disk. A slice-based edit removed `place_theirs`, `place_ours` and PORTED_PROPS
