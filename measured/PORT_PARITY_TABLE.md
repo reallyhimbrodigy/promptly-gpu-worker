@@ -136,14 +136,28 @@ Verified from PIXELS, not from the echoes, on seven of the nine:
 | StepPush | f600 | 536..1032 h=497 | ctr 784.0 — matches |
 | CrossfadeZoom | f720 | 513..1054 h=542 | ctr 783.5, 496 x 1.0926 = 541.9 predicted |
 | ShutterFlash | f953 | 566..1002 h=437 | ctr 784.0, 496 x its 0.88 scaleY = 437 |
+| Stack | f828 | 536..1032 h=497 | ctr 784.0 — matches |
 
-**Stack and FilmStrip cannot be proved this way and that is stated rather than
-glossed.** Both paint full-frame decoration — Stack's ghost tiles and home
-indicator, FilmStrip's masked grid — so the lit band is their furniture at every
-frame, not their plate. FilmStrip is instead closed by READING its registered
-code back: `objectFit: "contain"` is in the registry, and the only difference
-from source is the two injected parameters. Stack rests on source plus an
-`isValid` echo, which is the weakest evidence in this table, and says so.
+**STACK'S ROW WAS THE WEAKEST IN THIS TABLE AND IS NOT ANY MORE — I HAD PICKED
+THE WRONG FRAME.** f830 read 571..1553, which is the component's furniture: at
+progress 0.083 the ghost tiles are fading in and the home indicator is lit at
+row 1553. At **f828, progress is exactly 0**, and every decoration clamps off —
+`ghostOpacity` and `bgOpacity` both interpolate from 0, `opacityB` is 0, and
+plate A sits alone at scale 1 with radius 0. One frame, chosen from the
+component's own curves rather than from the middle of the transition, and it
+lands on the base track's band. "A frame cannot prove it" was a claim about the
+frame I had tried, not about the component.
+
+**FilmStrip is the one row no frame can reach, and the reason is specific.** Its
+tile carries `boxShadow: inset 0 0 0 1.25px rgba(255,255,255,0.85)` — a hard
+0.85-alpha white border that is NOT gated by `frameOpacity`. So the lit band
+marks the TILE at every frame: at progress 0 the tile is the whole viewport and
+the border lights rows 0 and 1567; later it is the 0.77-width square, with the
+masked grid and six ghost tiles beside it. The band can never isolate the plate
+inside. FilmStrip is instead closed by READING the registry back:
+`objectFit: "contain"` is present, and the only difference from source is the
+two injected parameters — which `registered_diff` now reports as STRIPPED,
+injection 2, on the real pair.
 
 **3a. What the fault was, kept because it was real.**
 Every transition mounts its own `<Video style={{objectFit:"cover"}}>` on a
