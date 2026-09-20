@@ -2307,6 +2307,27 @@ def main():
           _defaults and _defaults <= _confirmed and "Georgia" not in _defaults,
           "defaults %s" % sorted(_defaults))
 
+    # ---- AN ARGMAX OVER NOISE IS NOT A DISCRIMINATION (measured 2026-09-19) ----
+    # Nine caption styles were matched against five candidate faces. FIVE of them
+    # scored 0.02-0.05 against EVERY candidate — the glyph mask and the references were
+    # essentially disjoint — so the "winner" was noise and the mismatch said nothing
+    # about which face rendered. Two causes, both mine: the references were all at
+    # weight 700 while the styles render at 700/800/900, and none applied the style's
+    # CASE, so an UPPERCASE frame was compared against lowercase references.
+    check("a winner that cannot beat a displaced copy of itself identifies nothing",
+          J.face_verdict({"Inter": 0.020, "Playfair Display": 0.021}, "Inter",
+                         null=0.021)["state"] == "ABSENT"
+          and J.face_verdict({"Inter": 0.49, "Lora": 0.35}, "Inter", null=0.20)["state"] == "MEASURED"
+          and J.face_verdict({"Inter": 0.49, "Lora": 0.35}, "Inter", null=0.20)["matched"] is True,
+          J.face_verdict({"Inter": 0.02, "Playfair Display": 0.021}, "Inter", null=0.021)["why"][:100])
+    check("the reference carries the style's OWN weight and case, not a fixed 700",
+          J.CAPTION_STYLE_WEIGHT_CASE["Gadzhi"] == (700, "uppercase")
+          and J.CAPTION_STYLE_WEIGHT_CASE["TwoTone"] == (900, "none")
+          and J.CAPTION_STYLE_WEIGHT_CASE["Prime"] == (800, "lowercase")
+          and set(J.CAPTION_STYLE_WEIGHT_CASE) == set(J.CAPTION_STYLE_FONT)
+          and J.CAPTION_STYLE_WEIGHT_CASE_WEIGHTS == [700, 800, 900],
+          "weights %s" % J.CAPTION_STYLE_WEIGHT_CASE_WEIGHTS)
+
     # THE WORKING TREE, NOT THE COMMIT. red_proof_no_undefined_names builds an ISOLATED
     # worktree from HEAD, so it judges what is COMMITTED — and a run is launched from what
     # is on disk. A slice-based edit removed `place_theirs`, `place_ours` and PORTED_PROPS

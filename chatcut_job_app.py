@@ -7997,6 +7997,17 @@ def frame_diff_profile(a_paths, b_paths, reader=None):
 # the names are the CANONICAL ones search_fonts returns ("Inter", "Playfair Display"
 # — both confirmed present in ChatCut's catalogue). The harness passes this; the
 # component does not guess, because only a declared `font` property loads a face.
+# THE WEIGHT AND CASE EACH STYLE RENDERS AT, mirroring the component's own table.
+# A reference at 700 against a frame at 900 differs by WEIGHT, not by face, and the
+# argmax then answers a question nobody asked.
+CAPTION_STYLE_WEIGHT_CASE = {
+    "CleanCut": (700, "none"), "Cove": (700, "none"), "Gadzhi": (700, "uppercase"),
+    "Lumen": (800, "none"), "Prime": (800, "lowercase"), "Pulse": (800, "none"),
+    "Quintessence": (700, "none"), "TwoTone": (900, "none"), "TypewriterReveal": (700, "none"),
+}
+CAPTION_STYLE_WEIGHT_CASE_WEIGHTS = sorted({w for w, _c in CAPTION_STYLE_WEIGHT_CASE.values()})
+
+
 CAPTION_STYLE_FONT = {
     "CleanCut": "Inter", "Cove": "Montserrat", "Gadzhi": "Montserrat",
     "Lumen": "Montserrat", "Prime": "Inter", "Pulse": "DM Sans",
@@ -8556,7 +8567,7 @@ def mask_iou(m1, m2):
     return (inter / union) if union else -1.0
 
 
-def face_verdict(scores, specified):
+def face_verdict(scores, specified, null=None):
     """Which face the glyphs most resemble, against which the style names. PURE.
 
     -> {state, best, specified, matched, margin, why}
@@ -8574,8 +8585,22 @@ def face_verdict(scores, specified):
     best = max(usable, key=usable.get)
     rest = sorted((v for k, v in usable.items() if k != best), reverse=True)
     margin = round(usable[best] - (rest[0] if rest else 0.0), 4)
+    # AN ARGMAX OVER SCORES THAT ARE ALL ~0 IS NOT A DISCRIMINATION. Measured
+    # 2026-09-19: five of nine styles scored 0.02-0.05 against EVERY candidate face —
+    # the glyph mask and the references were essentially disjoint, so the winner was
+    # noise and the "mismatch" said nothing about which face rendered. The guard is a
+    # NULL MODEL, not a constant: the same reference displaced by a line, which is
+    # what "no real alignment" scores. A winner that cannot beat its own displaced
+    # copy has not identified anything.
+    if null is not None and usable[best] <= null:
+        return {"state": "ABSENT", "best": best, "specified": specified, "matched": None,
+                "margin": margin, "null": round(float(null), 4),
+                "why": ("the best face scores %.4f and a DISPLACED reference scores %.4f — the "
+                        "glyphs do not align with any candidate, so nothing is discriminated "
+                        "and no face is claimed" % (usable[best], null))}
     return {"state": "MEASURED", "best": best, "specified": specified,
             "matched": best == specified, "margin": margin,
+            "null": None if null is None else round(float(null), 4),
             "why": ("the glyphs match %r best (IoU %.3f, next %.3f, margin %.3f); the style "
                     "specifies %r — %s"
                     % (best, usable[best], rest[0] if rest else 0.0, margin, specified,
@@ -8646,9 +8671,20 @@ def caption_face_check(clip_url: str = "", at_s: float = 6.0, span_s: float = 2.
         return out
     bare_path = list(bare.values())[0]
 
-    # ── the candidate faces, fetched once ────────────────────────────────
+    # ── the candidate faces, at EVERY weight the nine styles use ─────────
+    # A reference at 700 compared against a frame rendered at 900 differs by WEIGHT,
+    # not by face, and the argmax then answers a question nobody asked. Same for case:
+    # comparing an UPPERCASE frame against lowercase references leaves the masks
+    # disjoint, which is exactly what five of nine styles measured.
     families = sorted(set(CAPTION_STYLE_FONT.values()))
     for fam in families:
+        for _w in sorted(CAPTION_STYLE_WEIGHT_CASE_WEIGHTS):
+            g = google_ttf(fam, _w)
+            out["fonts"]["%s@%d" % (fam, _w)] = {"state": g["state"], "why": g["why"],
+                                                 "have": g["state"] == "MEASURED"}
+            if g["state"] == "MEASURED":
+                out["fonts"]["%s@%d" % (fam, _w)]["_path"] = g["path"]
+            print("  FONT %-18s w%d %-9s %s" % (fam, _w, g["state"], str(g["why"])[:70]), flush=True)
         g = google_ttf(fam, 700)
         out["fonts"][fam] = {k: v for k, v in g.items() if k != "path"}
         out["fonts"][fam]["have"] = g["state"] == "MEASURED"
@@ -8670,23 +8706,25 @@ def caption_face_check(clip_url: str = "", at_s: float = 6.0, span_s: float = 2.
     # component's 96px at 1080 wide becomes 96 * (_w/1080) here.
     _fs = max(8, int(round(96.0 * _w / 1080.0)))
 
-    def _local_mask(fam):
+    def _local_mask(fam, weight, case, dx=0, dy=0):
+        """The same string, in `fam` at the style's OWN weight and case. -> mask|None"""
+        path = (out["fonts"].get("%s@%d" % (fam, weight)) or {}).get("_path")
+        if not path:
+            return None
         img = _PI.new("L", (_w, _h), 0)
         try:
-            fnt = _PF.truetype(usable[fam], _fs)
+            fnt = _PF.truetype(path, _fs)
         except Exception:                                         # noqa: BLE001
             return None
+        txt = text.upper() if case == "uppercase" else text.lower() if case == "lowercase" else text
         d = _PD.Draw(img)
         try:
-            bb = d.textbbox((0, 0), text, font=fnt)
+            bb = d.textbbox((0, 0), txt, font=fnt)
         except Exception:                                         # noqa: BLE001
             return None
-        d.text(((_w - (bb[2] - bb[0])) / 2 - bb[0], (_h - (bb[3] - bb[1])) / 2 - bb[1]),
-               text, font=fnt, fill=255)
+        d.text(((_w - (bb[2] - bb[0])) / 2 - bb[0] + dx, (_h - (bb[3] - bb[1])) / 2 - bb[1] + dy),
+               txt, font=fnt, fill=255)
         return _np.asarray(img) > 128
-
-    locals_ = {f: _local_mask(f) for f in usable}
-    out["local_rendered"] = sorted(f for f, m in locals_.items() if m is not None)
 
     for style, fam in sorted(CAPTION_STYLE_FONT.items()):
         row = {"specified": fam}
@@ -8721,9 +8759,19 @@ def caption_face_check(clip_url: str = "", at_s: float = 6.0, span_s: float = 2.
                 row["state"] = gm["state"]; row["why"] = gm["why"]
                 out["styles"][style] = row
                 continue
-            scores = {fm: mask_iou(gm["mask"], m) for fm, m in locals_.items() if m is not None}
+            _wt, _case = CAPTION_STYLE_WEIGHT_CASE.get(style, (700, "none"))
+            refs = {fm: _local_mask(fm, _wt, _case) for fm in families}
+            scores = {fm: mask_iou(gm["mask"], m) for fm, m in refs.items() if m is not None}
             row["scores"] = {k: round(v, 4) for k, v in scores.items()}
-            row.update(face_verdict(scores, fam))
+            row["weight_case"] = [_wt, _case]
+            # THE NULL: the best score reachable BY ACCIDENT. The specified face's own
+            # reference, displaced far enough that any overlap is coincidence. A winner
+            # that cannot beat a displaced copy of itself has identified nothing.
+            _nulls = [mask_iou(gm["mask"], _local_mask(fam, _wt, _case, dx=_dx, dy=_dy))
+                      for _dx, _dy in ((0, _fs), (0, -_fs), (_fs * 3, 0), (-_fs * 3, 0))]
+            _nulls = [x for x in _nulls if x is not None and x >= 0]
+            row["null"] = round(max(_nulls), 4) if _nulls else None
+            row.update(face_verdict(scores, fam, null=(max(_nulls) if _nulls else None)))
             print("  %-16s %-12s best=%-18s margin=%s  %s"
                   % (style, row.get("state"), row.get("best"), row.get("margin"),
                      "MATCH" if row.get("matched") else "MISMATCH"), flush=True)
