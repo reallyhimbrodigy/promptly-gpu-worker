@@ -1461,8 +1461,15 @@ def main():
           not (_named & _BUILTINS), "named builtins: %s" % sorted(_named & _BUILTINS))
     check("THE GATE: no read tool is named on any turn — the harness reads the timeline back and serves it",
           not (_named & _READS), "named reads: %s" % sorted(_named & _READS))
-    check("the agent's surface is exactly the edit ops and the turn-ender",
-          _named == {"mcp__chatcut__edit_item", "mcp__chatcut__edit_captions", "mcp__chatcut__finish"}, str(sorted(_named)))
+    # edit_captions LEFT THE SURFACE (Zac, item 3, 2026-09-19). The harness drives
+    # captions from the transcript's own timings and ChatCut's native track stays off,
+    # so the tool is not the agent's to call. These two legs asserted the OLD list and
+    # went red on a CORRECT change — a check defending a decision rather than a
+    # property, which is a standing class in this file. They assert the property now:
+    # edit ops plus the turn-ender, and NO caption tool.
+    check("the agent's surface is exactly the edit ops and the turn-ender, with no caption tool",
+          _named == {"mcp__chatcut__edit_item", "mcp__chatcut__finish"}
+          and not any("caption" in n for n in _named), str(sorted(_named)))
     check("the shim is told the same list, so tools/list cannot re-advertise what the flags removed",
           "'MCP_SHIM_ALLOW': ','.join(AGENT_TOOLS)" in ast.unparse(next(n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.FunctionDef) and n.name == "write_cli_context")))
     # THE CAP: derived, applied on the wire, and terminal rather than silent
@@ -1529,7 +1536,9 @@ def main():
           and (_bad.get("error") or {}).get("code") == -32602
           and MS2.FINISH_TOOL["inputSchema"]["properties"]["verdict"]["enum"] == ["clean", "export"],
           "listed=%s bad=%s" % (_listed, json.dumps(_bad)[:90]))
-    check("`finish` is on the agent's surface beside the edit ops", J.AGENT_TOOLS == ["edit_item", "edit_captions", "finish"], str(J.AGENT_TOOLS))
+    check("`finish` is on the agent's surface beside the edit ops, and captions are not",
+          J.AGENT_TOOLS == ["edit_item", "finish"]
+          and "finish" in J.AGENT_TOOLS and "edit_captions" not in J.AGENT_TOOLS, str(J.AGENT_TOOLS))
     # DRIVEN, NOT GREPPED: a presence check reads the same under `if False:`. The proxy's own function is
     # called with a body and the result inspected.
     _pxb = {"model": "m", "tools": [{"name": "edit_item"}], "messages": []}
@@ -2130,6 +2139,8 @@ def main():
         "box_overlap_fraction": (lambda: J.box_overlap_fraction([0, 0, 0, 0], [1, 1, 2, 2]), "ABSENT"),
         # one of the two boxes missing: nothing is claimed either way
         "face_collision": (lambda: J.face_collision(None, [1, 1, 2, 2]), "ABSENT"),
+        "caption_plan": (lambda: J.caption_plan([], "Gadzhi", "bottom"), "ABSENT"),
+        "native_caption_fault": (lambda: J.native_caption_fault([], {"state": "FAILED"}), "FAILED"),
         "frame_diff_profile": (lambda: J.frame_diff_profile([], ["b"], reader=_rdr), "ABSENT"),
         "channel_offset":    (lambda: J.channel_offset([], ["b"], reader=_rdr), "ABSENT"),
         "rest_verdict":      (lambda: J.rest_verdict({}, {0: "b"}, reader=_rdr), "ABSENT"),
@@ -2406,6 +2417,48 @@ def main():
           and "ATLAS" in J.FACE_OVERLAP_SOURCE and "11%" in J.FACE_OVERLAP_SOURCE
           and "FREQUENCY" in J.FACE_OVERLAP_SOURCE and "assumption" in J.FACE_OVERLAP_SOURCE,
           J.FACE_OVERLAP_SOURCE[:90])
+
+    # ---- ITEM 3: THE HARNESS DRIVES CAPTIONS, ChatCut's TRACK STAYS OFF ----
+    # The agent picks one of the nine styles and where it sits — that is editorial.
+    # WHEN each card appears is not a choice at all, it is the transcript, and a model
+    # asked to retype word timings gets some wrong while spending a turn on it.
+    _cb = [{"i": 0, "t_start": 0.0, "t_end": 0.5, "text": "this is the", "role": "hook"},
+           {"i": 1, "t_start": 0.9, "t_end": 2.0, "text": "moment right here", "role": "close"}]
+    _cp = J.caption_plan(_cb, "Gadzhi", "bottom")
+    check("caption cards come from the beats' own spans, in the style the agent chose",
+          _cp["state"] == "MEASURED" and len(_cp["adds"]) == 2
+          and _cp["adds"][0]["fromFrame"] == 0 and _cp["adds"][0]["durationInFrames"] == 15
+          and _cp["adds"][1]["fromFrame"] == 27 and _cp["adds"][1]["durationInFrames"] == 33
+          and _cp["adds"][0]["propertyOverrides"]["captionStyle"] == "Gadzhi"
+          # and the face follows the style, from the confirmed set
+          and _cp["adds"][0]["propertyOverrides"]["fontFamily"] == "Montserrat",
+          _cp["why"])
+    check("an unknown style is REFUSED, never substituted, and no text is ABSENT",
+          J.caption_plan(_cb, "Helvetica", "bottom")["state"] == "FAILED"
+          and "refused rather than substituted" in J.caption_plan(_cb, "Helvetica", "bottom")["why"]
+          and J.caption_plan(_cb, "Gadzhi", "nowhere")["state"] == "FAILED"
+          and J.caption_plan([], "Gadzhi", "bottom")["state"] == "ABSENT",
+          "refuse / refuse / absent")
+    # THE RED PROOF ZAC NAMED: a native track on a timeline is a FAULT.
+    check("a native caption item or native cards is a FAULT, and a clean timeline is not",
+          J.native_caption_fault([{"id": "abc", "itemType": "caption"}],
+                                 {"state": "MEASURED", "cards": 0})["fault"] is True
+          and J.native_caption_fault([], {"state": "MEASURED", "cards": 4})["fault"] is True
+          and J.native_caption_fault([{"id": "d", "itemType": "motion-graphic",
+                                       "asset": {"name": "caption:TwoTone"}}],
+                                     {"state": "MEASURED", "cards": 0})["fault"] is True
+          and J.native_caption_fault([], {"state": "MEASURED", "cards": 0})["fault"] is False,
+          "item / cards / caption-named asset all fault; clean does not")
+    check("an unreadable caption state is UNKNOWN, never read as off",
+          J.native_caption_fault([], {"state": "FAILED", "why": "timeout"})["fault"] is None
+          and J.native_caption_fault([], {"state": "FAILED", "why": "t"})["state"] == "FAILED"
+          and "not the same as off" in J.native_caption_fault([], {})["why"],
+          J.native_caption_fault([], {"state": "FAILED", "why": "timeout"})["why"][:90])
+    # AND THE TOOL IS GONE, which makes it a property rather than a preference.
+    check("edit_captions is not in the agent's tool list, and the fault is at the withholding seam",
+          "edit_captions" not in J.AGENT_TOOLS and J.AGENT_TOOLS == ["edit_item", "finish"]
+          and "NATIVE CAPTION TRACK" in open("chatcut_job_app.py", encoding="utf-8").read(),
+          "tools %s" % J.AGENT_TOOLS)
 
     # THE WORKING TREE, NOT THE COMMIT. red_proof_no_undefined_names builds an ISOLATED
     # worktree from HEAD, so it judges what is COMMITTED — and a run is launched from what

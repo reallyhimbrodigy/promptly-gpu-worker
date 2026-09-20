@@ -31,21 +31,21 @@ const Component = ({ item }) => {
   const props = (item && item.props) || {};
   const src = props.clip;
   // THE SOURCE OFFSET IS AN INPUT, NOT AN ASSUMPTION — and BOTH plates take it.
-  const srcFrom = Math.max(0, Math.round(Number(props.srcFrom) || 0));
+  const srcFrom = Math.max(0, Math.round(Number(props.srcFrom)));
   // SIZE and POSITION are the same two dials on every ported zoom. Here `scale`
   // is the BACKGROUND magnification — the thing that moves.
-  const targetScale = Number(props.scale) || 1.8;
-  const originX = props.originX === undefined ? 0.5 : Number(props.originX);
-  const originY = props.originY === undefined ? 0.4 : Number(props.originY);
-  const capped = props.capped === undefined ? true : props.capped !== false;
-  const windowScale = props.windowScale === undefined ? 0.72 : Number(props.windowScale);
-  const borderWidth = props.borderWidth === undefined ? 0 : Number(props.borderWidth);
-  const borderColor = props.borderColor || "transparent";
+  const targetScale = Number(props.scale);
+  const originX = Number(props.originX);
+  const originY = Number(props.originY);
+  const capped = !(props.capped === false || props.capped === "false");
+  const windowScale = Number(props.windowScale);
+  const borderWidth = Number(props.borderWidth);
+  const borderColor = props.borderColor;
   // THE REST CALIBRATION, SUPPLIED BY THE HARNESS — never a number written here.
   // It MOVES between runs (2.0363 then 1.7228 levels). BOTH plates wear it: the
   // window sits directly on top of the background, so a correction on one and
   // not the other would put a visible level seam at the window's own edge.
-  const correct = props.correct || "";
+  const correct = props.correct;
   const rootStyle = { position: "absolute", inset: 0, display: "flex",
     alignItems: "center", justifyContent: "center", overflow: "hidden",
     boxSizing: "border-box", backgroundColor: "#000000" };
@@ -114,7 +114,7 @@ const Component = ({ item }) => {
           width: "100%",
           height: "100%",
           objectFit: "cover",
-          filter: correct || undefined,
+          filter: correct,
           transform: `scale(${currentBgScale})`,
           transformOrigin: `${originX * 100}% ${originY * 100}%`,
         }}
@@ -145,7 +145,7 @@ const Component = ({ item }) => {
               position: "absolute",
               top: "50%",
               left: "50%",
-              filter: correct || undefined,
+              filter: correct,
               transform: "translate(-50%, -50%)",
             }}
           />

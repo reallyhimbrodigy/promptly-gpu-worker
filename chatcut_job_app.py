@@ -820,7 +820,13 @@ OUTPUT_CAP_TOKENS = 2 * 1108
 # including Bash, Read, Write, Glob and Grep — because cli_command NAMED them in --tools. 4 of 11 runs
 # died at turn 1 on an orientation call (--max-turns 1 ends the turn at the first tool call), one of them
 # a Bash call to load a skill this lane disallows. "No shell" had been prompt-only.
-AGENT_TOOLS = ["edit_item", "edit_captions", "finish"]
+# edit_captions IS NOT THE AGENT'S (Zac, item 3). The harness drives captions from
+# the transcript's own timings, and ChatCut's native track stays off. On the item-2
+# run the agent's FIRST tool call was edit_captions(action="enable") — turning on a
+# second caption layer underneath whatever we place, in a style we do not set and at
+# a time we do not choose. Instructing it not to would be a preference; removing the
+# tool makes it a property. Same law that removed browse_library rather than asking.
+AGENT_TOOLS = ["edit_item", "finish"]
 
 NEEDED_TOOLS = [
     # THE SINGLE AGENT'S SURFACE, 2026-09-16. It now DECIDES as well as places,
@@ -3937,6 +3943,99 @@ def rendered_defects(edit_path, spans=None, source_path=None, fps=30.0,
 # called preview_timeline — scoring FAILED for the intended behaviour.
 
 
+CAPTION_STYLES = ("CleanCut", "Cove", "Gadzhi", "Lumen", "Prime", "Pulse",
+                  "Quintessence", "TwoTone", "TypewriterReveal")
+CAPTION_POSITIONS = ("top", "middle", "bottom")
+
+
+def caption_plan(beats, style, position, fps=30.0, component="CaptionMatch", asset_id=""):
+    """CAPTION ITEMS FROM THE TRANSCRIPT'S OWN TIMINGS. PURE.
+
+    -> {state, adds, why}
+
+    THE AGENT PICKS THE STYLE AND WHERE IT SITS; THE HARNESS DRIVES THE REST.
+    Which of the nine, and top/middle/bottom, is an editorial choice and belongs to
+    the agent. WHEN each card appears is not a choice at all — it is the transcript,
+    and a model asked to retype word timings will get some of them wrong while
+    spending a turn doing it. This repo already measured that: handing over the words
+    it was deriving was SUBTRACTION, and one turn of 206s and one of 277s were spent
+    on exactly that kind of derivation.
+
+    ONE CARD PER BEAT, spanning the beat's own start and end. A beat is the unit the
+    transcript already segments on (dead air first, then any run over max_beat_s), so
+    the cards break where the speech breaks rather than on a clock.
+
+    AN UNKNOWN STYLE IS REFUSED, NOT SUBSTITUTED. Falling back to a default would
+    render an edit in a style nobody chose and report success.
+    """
+    if style not in CAPTION_STYLES:
+        return {"state": "FAILED", "adds": [],
+                "why": "%r is not one of the nine caption styles %s — refused rather than "
+                       "substituted, because a silent default renders an edit nobody chose"
+                       % (style, list(CAPTION_STYLES))}
+    if position not in CAPTION_POSITIONS:
+        return {"state": "FAILED", "adds": [],
+                "why": "%r is not a caption position %s" % (position, list(CAPTION_POSITIONS))}
+    rows = [b for b in (beats or []) if str(b.get("text") or "").strip()]
+    if not rows:
+        return {"state": "ABSENT", "adds": [],
+                "why": "no beat carries text — there is nothing to caption, and an empty "
+                       "caption track is not the same as a silent clip"}
+    f = float(fps or 30.0)
+    adds = []
+    for b in rows:
+        t0 = float(b.get("t_start") or 0.0)
+        t1 = float(b.get("t_end") or t0)
+        frm = max(0, int(round(t0 * f)))
+        dur = max(1, int(round((t1 - t0) * f)))
+        adds.append({"type": "motion-graphic", "assetId": asset_id,
+                     "fromFrame": frm, "durationInFrames": dur,
+                     "propertyOverrides": {"text": str(b["text"]).strip(),
+                                           "captionStyle": style,
+                                           "fontFamily": CAPTION_STYLE_FONT.get(style, "Inter"),
+                                           "position": position, "size": "medium"}})
+    return {"state": "MEASURED", "adds": adds,
+            "why": "%d card(s) from %d beat(s), %s at %s, spans from the transcript"
+                   % (len(adds), len(rows), style, position)}
+
+
+def native_caption_fault(items, cap_read):
+    """ChatCut's OWN caption track must be absent. PURE. -> {state, fault, why}
+
+    THE HARNESS DRIVES CAPTIONS OR ChatCut DOES — NEVER BOTH. Two caption layers on
+    one timeline show the same words twice, and the second one is not ours to style,
+    position or time. Measured on the item-2 run: the agent's first tool call was
+    edit_captions(action="enable"), which turns ChatCut's track on underneath
+    whatever we place.
+
+    AN UNREADABLE CAPTION STATE IS NOT ABSENCE. A read that failed cannot say the
+    track is off, and saying so anyway is the shape that let an empty transcript
+    score as fine.
+    """
+    cap = cap_read or {}
+    st = str(cap.get("state") or "ABSENT").upper()
+    native = [i for i in (items or [])
+              if str(i.get("itemType") or "") == "caption"
+              or str(((i.get("asset") or {}) if isinstance(i.get("asset"), dict) else {}).get("name") or "").startswith("caption:")]
+    if native:
+        return {"state": "MEASURED", "fault": True,
+                "why": "%d native caption item(s) on the timeline: %s — the harness drives "
+                       "captions, so ChatCut's own track must be off"
+                       % (len(native), ", ".join(str(i.get("id"))[:8] for i in native[:4]))}
+    if st != "MEASURED":
+        return {"state": st if st in ("ABSENT", "FAILED") else "ABSENT", "fault": None,
+                "why": "the native caption state could not be read (%s: %s) — whether "
+                       "ChatCut's track is on is UNKNOWN, which is not the same as off"
+                       % (st, str(cap.get("why"))[:120])}
+    n = int(cap.get("cards") or 0)
+    if n:
+        return {"state": "MEASURED", "fault": True,
+                "why": "read_captions holds %d native caption card(s) — clear them with "
+                       "edit_captions before the export" % n}
+    return {"state": "MEASURED", "fault": False,
+            "why": "no native caption item and 0 native cards — the harness owns the captions"}
+
+
 def segment_beats(words, gap_s=0.35, max_beat_s=3.0):
     """Cut the transcript into BEATS — the unit the agent rules on.
 
@@ -4789,6 +4888,8 @@ STATEFUL_READERS = (
     ("face_box", "a detection point with nothing found", "ABSENT"),
     ("box_overlap_fraction", "a placement box with no area", "ABSENT"),
     ("face_collision", "one of the two boxes missing", "ABSENT"),
+    ("caption_plan", "no beat carrying text", "ABSENT"),
+    ("native_caption_fault", "a caption state that could not be read", "ABSENT"),
     ("glyph_mask", "two frames with nothing drawn between them", "ABSENT"),
     ("face_verdict", "fewer than two candidate faces rendered", "ABSENT"),
     ("frame_diff_profile", "one side with no frames", "ABSENT"),
@@ -6274,6 +6375,23 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         # than an empty note, and worse still than a run that refuses to finish.
         # THE PROPERTY MAP THIS SEAM ALREADY BUILT, from inspect_item. Reading the
         # items' own `propertyOverrides` here found nothing on two paid runs.
+        # ChatCut's OWN CAPTION TRACK MUST BE OFF (item 3). Two caption layers show
+        # the same words twice and the second is not ours to style, position or time.
+        try:
+            _cc_native = caption_cards(tok, _stage)
+        except Exception as _cce:                                 # noqa: BLE001
+            _cc_native = {"state": "FAILED", "cards": None,
+                          "why": "%s: %s" % (type(_cce).__name__, str(_cce)[:120])}
+        _nc = native_caption_fault(_items, _cc_native)
+        if _nc["fault"]:
+            _faults = _faults + ["NATIVE CAPTION TRACK — %s" % _nc["why"]]
+            print("  NATIVE CAPTIONS : FAULT — %s" % _nc["why"], flush=True)
+        elif _nc["fault"] is None:
+            _faults = _faults + ["NATIVE CAPTION STATE UNREAD — %s" % _nc["why"]]
+            print("  NATIVE CAPTIONS : %s — %s" % (_nc["state"], _nc["why"]), flush=True)
+        else:
+            print("  NATIVE CAPTIONS : %s" % _nc["why"], flush=True)
+
         _pf_rw = component_faults(_items, _props)
         if _pf_rw["state"] == "ABSENT":
             _faults = _faults + ["COMPONENT PROPERTIES UNREAD — %s" % _pf_rw["why"]]

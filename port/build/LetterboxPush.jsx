@@ -29,20 +29,20 @@ const Component = ({ item }) => {
   const src = props.clip;
   // THE SOURCE OFFSET IS AN INPUT, NOT AN ASSUMPTION — and BOTH layers take it,
   // or the plate behind the bars would play a different moment than the push.
-  const srcFrom = Math.max(0, Math.round(Number(props.srcFrom) || 0));
+  const srcFrom = Math.max(0, Math.round(Number(props.srcFrom)));
   // SIZE and POSITION are the same two dials on every ported zoom.
-  const targetScale = Number(props.scale) || 1.2;
-  const originX = props.originX === undefined ? 0.5 : Number(props.originX);
-  const originY = props.originY === undefined ? 0.5 : Number(props.originY);
+  const targetScale = Number(props.scale);
+  const originX = Number(props.originX);
+  const originY = Number(props.originY);
   const punch = props.punch === true || props.punch === "true";
-  const capped = props.capped === undefined ? true : props.capped !== false;
-  const maxBarHeight = props.maxBarHeight === undefined ? 0.12 : Number(props.maxBarHeight);
+  const capped = !(props.capped === false || props.capped === "false");
+  const maxBarHeight = Number(props.maxBarHeight);
   // THE REST CALIBRATION, SUPPLIED BY THE HARNESS — never a number written here.
   // It MOVES between runs (2.0363 then 1.7228 levels). SVG filters are inert in
   // this runtime; the harness sends `brightness(b) contrast(c)`, slope 1 and a
   // pure offset. BOTH layers wear it, or the bars would sit at a different level
   // than the push they frame.
-  const correct = props.correct || "";
+  const correct = props.correct;
   const rootStyle = { position: "absolute", inset: 0, display: "flex",
     alignItems: "center", justifyContent: "center", overflow: "hidden",
     boxSizing: "border-box", backgroundColor: "#000000" };
@@ -364,7 +364,7 @@ const Component = ({ item }) => {
   const scale = 1 + (peakScale - 1) * barProgress;
   const barHeight = maxBarHeight * height * barProgress;
   const plate = { width: "100%", height: "100%", objectFit: "cover",
-    filter: correct || undefined };
+    filter: correct };
 
   if (!src) {
     return (
@@ -394,7 +394,7 @@ const Component = ({ item }) => {
             position: "absolute",
             top: -barHeight,
             left: 0,
-            filter: correct || undefined,
+            filter: correct,
             transform: `scale(${scale})`,
             transformOrigin: `${originX * 100}% ${originY * 100}%`,
           }}

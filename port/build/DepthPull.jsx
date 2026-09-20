@@ -32,22 +32,22 @@ const Component = ({ item }) => {
   const props = (item && item.props) || {};
   const src = props.clip;
   // THE SOURCE OFFSET IS AN INPUT, NOT AN ASSUMPTION.
-  const srcFrom = Math.max(0, Math.round(Number(props.srcFrom) || 0));
+  const srcFrom = Math.max(0, Math.round(Number(props.srcFrom)));
   // SIZE and POSITION are the same two dials on every ported zoom.
-  const targetScale = Number(props.scale) || 1.15;
-  const originX = props.originX === undefined ? 0.5 : Number(props.originX);
-  const originY = props.originY === undefined ? 0.45 : Number(props.originY);
+  const targetScale = Number(props.scale);
+  const originX = Number(props.originX);
+  const originY = Number(props.originY);
   const punch = props.punch === true || props.punch === "true";
-  const capped = props.capped === undefined ? true : props.capped !== false;
-  const edgeBlur = props.edgeBlur === undefined ? 4 : Number(props.edgeBlur);
-  const frameLines = props.frameLines === undefined ? true : props.frameLines !== false;
+  const capped = !(props.capped === false || props.capped === "false");
+  const edgeBlur = Number(props.edgeBlur);
+  const frameLines = !(props.frameLines === false || props.frameLines === "false");
   // THE REST CALIBRATION, SUPPLIED BY THE HARNESS — never a number written here.
   // It MOVES between runs (2.0363 then 1.7228 levels). It sits on the <Video>
   // itself, BEFORE this component's own depth grade, because the offset it
   // corrects belongs to the video path and the grade is ours on top of it. At
   // rest the grade is exactly neutral, so the corrected plate is what matches
   // the base item.
-  const correct = props.correct || "";
+  const correct = props.correct;
   const rootStyle = { position: "absolute", inset: 0, display: "flex",
     alignItems: "center", justifyContent: "center", overflow: "hidden",
     boxSizing: "border-box", backgroundColor: "#000000" };

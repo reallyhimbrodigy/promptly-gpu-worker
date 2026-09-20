@@ -35,12 +35,12 @@ const Component = ({ item }) => {
   // THE SOURCE OFFSET IS AN INPUT, NOT AN ASSUMPTION. A layer that hardcodes
   // startFrom={0} plays the opening frame wherever it sits, so a reframe at 12s
   // would show second 0 — worse than no reframe.
-  const srcFrom = Math.max(0, Math.round(Number(props.srcFrom) || 0));
+  const srcFrom = Math.max(0, Math.round(Number(props.srcFrom)));
   // SIZE and POSITION are the same two dials on every ported zoom.
-  const targetScale = Number(props.scale) || 1.3;
-  const originX = props.originX === undefined ? 0.5 : Number(props.originX);
-  const originY = props.originY === undefined ? 0.5 : Number(props.originY);
-  const capped = props.capped === undefined ? true : props.capped !== false;
+  const targetScale = Number(props.scale);
+  const originX = Number(props.originX);
+  const originY = Number(props.originY);
+  const capped = !(props.capped === false || props.capped === "false");
   // THE REST CALIBRATION, SUPPLIED BY THE HARNESS — never a number written here.
   // Our layer renders the source measurably brighter than the base item does: a
   // flat additive offset that belongs to the <Video> path, not to us. It MOVES
@@ -48,7 +48,7 @@ const Component = ({ item }) => {
   // and is never baked in. SVG filters are inert in this runtime; the harness
   // sends `brightness(b) contrast(c)`, which composes to slope 1 and a pure
   // offset.
-  const correct = props.correct || "";
+  const correct = props.correct;
   const rootStyle = { position: "absolute", inset: 0, display: "flex",
     alignItems: "center", justifyContent: "center", overflow: "hidden",
     boxSizing: "border-box", backgroundColor: "#000000" };
@@ -113,7 +113,7 @@ const Component = ({ item }) => {
           width: "100%",
           height: "100%",
           objectFit: "cover",
-          filter: correct || undefined,
+          filter: correct,
           transform: `scale(${scale})`,
           transformOrigin: `${originX * 100}% ${originY * 100}%`,
         }}
