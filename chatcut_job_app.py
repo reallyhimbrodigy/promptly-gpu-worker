@@ -7522,12 +7522,26 @@ def mg_runtime_probe(clip_url: str = ""):
                     "placing the %s capability probe" % name)
                 row["placed"] = bool((r.get("adds") or [{}])[0].get("id"))
                 row["item"] = ((r.get("adds") or [{}])[0] or {}).get("id")
-                row["state"] = "MEASURED" if row["placed"] else "FAILED"
+                # ACCEPTED IS NOT DRAWN. The validator accepting a component says the
+                # code is legal, not that two <Video> layers actually appear — and a
+                # pixel check cannot tell rendering from rendering-EMPTY. So one frame
+                # comes back with the verdict, and the answer is the frame.
+                if row["placed"]:
+                    _f, _miss = frames_at(tok, pid, [15, 40], "/work/cap_%s" % name)
+                    row["frame"] = "MEASURED" if _f else "ABSENT"
+                    row["frames_missing"] = _miss
+                    import base64 as _b64
+                    row["b64"] = [_b64.b64encode(open(_p, "rb").read()).decode()
+                                  for _p in list(_f.values())[:2]]
+                row["state"] = "MEASURED" if (row["placed"] and row.get("frame") == "MEASURED") else "FAILED"
+                if row["state"] == "FAILED" and row["placed"]:
+                    row["why"] = "placed, but no frame came back — accepted is not drawn"
         except Exception as e:                                    # noqa: BLE001
             row["state"] = "REFUSED"; row["refusal"] = str(e)[:400]
         out["capabilities"][name] = row
-        print("  %-20s %-9s %s" % (name, row["state"],
-                                   str(row.get("refusal") or row.get("item") or "")[:120]), flush=True)
+        print("  %-20s %-9s %s%s" % (name, row["state"],
+                                     str(row.get("refusal") or row.get("item") or "")[:90],
+                                     "  frame=%s" % row.get("frame") if row.get("placed") else ""), flush=True)
         # ONE COMPONENT ON THE TIMELINE AT A TIME: they all cover the frame, so a
         # second placement would hide the first and the frame would answer for the
         # wrong component. Removed before the next is placed.
@@ -7540,7 +7554,9 @@ def mg_runtime_probe(clip_url: str = ""):
     out["wall_s"] = round(time.time() - _t0, 1)
     out["state"] = "MEASURED"
     RESULTS["mg-runtime-probe"] = out
-    return out
+    return {"state": out["state"], "wall_s": out["wall_s"], "project": out["project"],
+            "capabilities": {k: {kk: vv for kk, vv in v.items() if kk != "b64"}
+                             for k, v in out["capabilities"].items()}}
 
 
 def pair_differs(arm_a, arm_b, reader=None, control_a=None, control_b=None):
