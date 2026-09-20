@@ -3188,6 +3188,55 @@ def main():
               "failed its negative control" in _appsrc,
               '"/craft/fixtures_control"' in _appsrc))
 
+    # ---- WHERE THE PING'S PREFIX STOPS MATCHING THE JOB'S ----
+    # The ping writes 200,142 tokens at 1h; the job's call 1 read 14,414, which
+    # is system+tools and nothing else. So they agree on the system block and
+    # diverge in the messages before the breakpoint -- and nothing could say
+    # WHERE, because neither side kept its message shas where the other could
+    # see them. Two wrong diagnoses today came out of that gap.
+    def _fp(sysh, toolh, msgs):
+        return [{"n": 1, "fp": {"system": {"sha": sysh}, "tools": {"sha": toolh},
+                                "messages": [{"role": r, "sha": h, "bytes": b}
+                                             for r, h, b in msgs]}}]
+    _pshape = J.prefix_shape(_fp("S1", "T1", [("user", "a", 10), ("assistant", "b", 20),
+                                              ("user", "c", 30)]))
+    check("a prefix shape carries the system, the tools and every message sha",
+          _pshape["state"] == "MEASURED" and _pshape["system"] == "S1"
+          and _pshape["tools"] == "T1" and len(_pshape["messages"]) == 3
+          and J.prefix_shape([])["state"] == "ABSENT",
+          _pshape["why"])
+    _same = J.prefix_shape(_fp("S1", "T1", [("user", "a", 10), ("assistant", "b", 20),
+                                            ("user", "c", 30)]))
+    _difm = J.prefix_shape(_fp("S1", "T1", [("user", "a", 10), ("assistant", "X", 21),
+                                            ("user", "c", 30)]))
+    _difs = J.prefix_shape(_fp("S2", "T1", [("user", "a", 10)]))
+    check("the divergence names the FIRST differing message and which side of the breakpoint it is on",
+          J.prefix_divergence(_pshape, _same)["at"] is None
+          and J.prefix_divergence(_pshape, _difm)["at"] == 1
+          and "BEFORE the breakpoint" in J.prefix_divergence(_pshape, _difm, breakpoint_at=2)["why"]
+          and "after the breakpoint" in J.prefix_divergence(_pshape, _difm, breakpoint_at=0)["why"],
+          J.prefix_divergence(_pshape, _difm, breakpoint_at=2)["why"][:90])
+    check("a differing system block is named as such, and nothing after it can hit",
+          J.prefix_divergence(_pshape, _difs)["at"] == "system"
+          and "nothing" in J.prefix_divergence(_pshape, _difs)["why"]
+          and J.prefix_divergence(None, _pshape)["state"] == "ABSENT"
+          and "did not store one" in J.prefix_divergence(None, _pshape)["why"],
+          J.prefix_divergence(_pshape, _difs)["why"][:80])
+    # A SHORTER PING PREFIX IS NOT A MISMATCH, it is a smaller cache key.
+    _short = J.prefix_shape(_fp("S1", "T1", [("user", "a", 10)]))
+    check("a ping whose prefix is a strict prefix of the job's is reported as shorter, not as differing",
+          J.prefix_divergence(_short, _pshape)["at"] == 1
+          and "shorter prefix" in J.prefix_divergence(_short, _pshape)["why"],
+          J.prefix_divergence(_short, _pshape)["why"][:80])
+    # AND BOTH SIDES ACTUALLY RECORD IT.
+    _psrc = open("chatcut_job_app.py", encoding="utf-8").read()
+    check("the ping stores its prefix shape and the job reads it back to compare",
+          'rec["prefix_shape"] = prefix_shape(' in _psrc
+          and "_report_divergence()" in _psrc
+          and '"prefix_divergence"' in _psrc,
+          "ping stores=%s job compares=%s" % (
+              'rec["prefix_shape"]' in _psrc, "_report_divergence()" in _psrc))
+
     # ---- THE RUN RECORD IS ARCHIVED, IN THE RUN (Zac, 2026-09-20) ----
     # The only SCORED record this lane ever produced is gone from every disk.
     # A record that lives in a container filesystem, a Dict and a /tmp log is

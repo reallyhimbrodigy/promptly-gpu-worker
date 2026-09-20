@@ -3790,6 +3790,82 @@ RECORD_BUCKET_ENV = ("S3_BUCKET_NAME", "SUPABASE_S3_BUCKET")
 RECORD_PREFIX = "agentic-editor/run-records"
 
 
+def prefix_shape(fp_rows):
+    """The cacheable prefix of one call, as shas. -> {state, system, tools, messages, why}
+
+    WHAT A CACHE KEY ACTUALLY IS, recorded so two calls can be COMPARED rather
+    than argued about. The ping writes 200,142 tokens at 1h and the job's call 1
+    reads 14,414 -- which is system+tools and nothing else -- so the two
+    prefixes agree on the system block and diverge somewhere in the messages
+    before the breakpoint. Nothing anywhere said WHERE, because neither side
+    kept its message shas where the other could see them.
+    """
+    out = {"state": "ABSENT", "system": None, "tools": None, "messages": [],
+           "why": "not attempted"}
+    rows = fp_rows or []
+    first = next((r for r in rows if (r.get("n") in (1, "1")) or r is rows[0]), None)
+    if not first:
+        return dict(out, why="no fingerprinted call")
+    fp = first.get("fp") or {}
+    msgs = fp.get("messages") or []
+    return {"state": "MEASURED",
+            "system": (fp.get("system") or {}).get("sha"),
+            "tools": (fp.get("tools") or {}).get("sha"),
+            "messages": [{"i": i, "role": m.get("role"), "sha": m.get("sha"),
+                          "bytes": m.get("bytes")}
+                         for i, m in enumerate(msgs)],
+            "why": "system %s, tools %s, %d message(s)"
+                   % (str((fp.get("system") or {}).get("sha"))[:12],
+                      str((fp.get("tools") or {}).get("sha"))[:12], len(msgs))}
+
+
+def prefix_divergence(ping, job, breakpoint_at=None):
+    """Where the ping's prefix stops matching the job's. -> {state, at, why}
+
+    NAMES THE FIRST DIVERGENT MESSAGE, because "the prefixes differ" is not
+    actionable and "message 7 of 25 differs, 2.2 MB on one side and 1.1 MB on
+    the other" is. A divergence AFTER the breakpoint is harmless and is reported
+    as such rather than as a fault -- only the bytes before the breakpoint are
+    the cache key.
+    """
+    out = {"state": "ABSENT", "at": None, "why": "not attempted"}
+    if not ping or ping.get("state") != "MEASURED":
+        return dict(out, why="no ping prefix recorded — the ping did not store one")
+    if not job or job.get("state") != "MEASURED":
+        return dict(out, why="no job prefix to compare")
+    if ping.get("system") != job.get("system"):
+        return {"state": "MEASURED", "at": "system",
+                "why": "the SYSTEM block differs (ping %s vs job %s) — nothing "
+                       "after it can hit"
+                       % (str(ping["system"])[:12], str(job["system"])[:12])}
+    if ping.get("tools") != job.get("tools"):
+        return {"state": "MEASURED", "at": "tools",
+                "why": "the TOOL block differs (ping %s vs job %s)"
+                       % (str(ping["tools"])[:12], str(job["tools"])[:12])}
+    pm, jm = ping["messages"], job["messages"]
+    for i in range(min(len(pm), len(jm))):
+        if pm[i]["sha"] != jm[i]["sha"]:
+            where = ("BEFORE the breakpoint at %s — this is why the job could "
+                     "not read the ping's entry" % breakpoint_at) \
+                if (breakpoint_at is None or i <= breakpoint_at) else \
+                ("after the breakpoint at %s — harmless, the cache key ends "
+                 "earlier" % breakpoint_at)
+            return {"state": "MEASURED", "at": i,
+                    "why": "message %d of %d first differs (%s %s/%sB vs %s %s/%sB), %s"
+                           % (i, min(len(pm), len(jm)), pm[i]["role"],
+                              str(pm[i]["sha"])[:10], pm[i]["bytes"],
+                              jm[i]["role"], str(jm[i]["sha"])[:10], jm[i]["bytes"],
+                              where)}
+    if len(pm) != len(jm):
+        return {"state": "MEASURED", "at": min(len(pm), len(jm)),
+                "why": "every shared message matches; the ping has %d and the "
+                       "job has %d — the shorter prefix is what can be cached"
+                       % (len(pm), len(jm))}
+    return {"state": "MEASURED", "at": None,
+            "why": "the ping and the job carry an identical prefix (%d message(s))"
+                   % len(pm)}
+
+
 def archive_record(record, run_id, bucket=None, putter=None, env=None):
     """The run record to S3, IN THE RUN. -> {state, key, sha, bytes, why}
 
@@ -7523,6 +7599,28 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     else:
         print("  DENSITY         : %s — %s"
               % (_dm.get("state", "ABSENT"), str(_dm.get("why"))[:140]), flush=True)
+    # ── WHERE THE PING'S PREFIX STOPS MATCHING THIS JOB'S ─────────────────
+    # Reported from the JOB's side, against the ping's stored shape, because a
+    # cache miss with no cause named is the thing that produced two wrong
+    # diagnoses today already.
+    def _report_divergence():
+        try:
+            _ping = (WARM.get("last") or {}).get("prefix_shape")
+        except Exception as _we:                                  # noqa: BLE001
+            print("  PING PREFIX     : ABSENT — could not read the warm record (%s)"
+                  % str(_we)[:80], flush=True)
+            return None
+        _job = prefix_shape(_read_prefix_rows())
+        _bp = None
+        for _r in (_read_prefix_rows() or []):
+            _b = (_r.get("fp") or {}).get("breakpoint") or _r.get("breakpoint") or {}
+            if _b.get("watch_end_message") is not None:
+                _bp = _b["watch_end_message"]
+                break
+        _dv = prefix_divergence(_ping, _job, breakpoint_at=_bp)
+        print("  PREFIX DIVERGE  : %s — %s" % (_dv["state"], _dv["why"]), flush=True)
+        return {"ping": _ping, "job": _job, "divergence": _dv, "breakpoint": _bp}
+
     # ── THE TURN-1 MESSAGE, DECOMPOSED BEFORE IT IS SENT (Zac) ────────────
     # Printed here rather than derived later, because the only number anyone
     # had was the total on the wire, and every argument about what to cut was
@@ -7548,6 +7646,7 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                                    face=_face_lines, platter=_platter, constraints=_constraints)
     _parts = _report_parts(_first_message if isinstance(_first_message, list)
                            else (_first_message or {}).get("content") or [])
+    _divg = _report_divergence()
     out_first = _first_message          # into the record below, in full (section C)
     _turn_recs = []
 
@@ -7920,6 +8019,7 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
            "perception": {_k: {"state": _v.get("state"), "why": _v.get("why")}
                           for _k, _v in _perc.items() if isinstance(_v, dict)},
            "perception_measured": _pok,
+           "prefix_divergence": _divg,
            "turn1_parts": {"by_part": _parts.get("by_part"),
                            "estimated_total": _parts.get("total"),
                            "state": _parts.get("state"), "why": _parts.get("why")},
@@ -8793,6 +8893,15 @@ def keep_warm(model: str = "claude-sonnet-5", proxy: bool = True, base_url: str 
         except Exception as _ce:                                  # noqa: BLE001
             rec["cli_timeline"] = "ABSENT %s" % str(_ce)[:80]
         print("  CLI EVENTS      : n=%s %s | timeline %s" % (rec.get("cli_event_count"), json.dumps(rec["cli_events"])[:700], json.dumps(rec["cli_timeline"])[:400]), flush=True)
+    # THE PING'S OWN PREFIX SHAPE, STORED WHERE THE JOB CAN READ IT.
+    # The ping writes 200,142 tokens at 1h and the job's call 1 read 14,414 --
+    # system+tools and nothing else -- so the two prefixes agree on the system
+    # block and diverge in the messages before the breakpoint. Neither side
+    # kept its message shas where the other could see them, so nothing could
+    # say WHERE. This is that record.
+    rec["prefix_shape"] = prefix_shape(_read_prefix_rows("/work/warm_fp.jsonl"))
+    print("  PING PREFIX     : %s — %s"
+          % (rec["prefix_shape"]["state"], rec["prefix_shape"]["why"]), flush=True)
     WARM["last"] = rec
     print("  WARM            : read=%s write=%s (1h %s / 5m %s) out=%s thinking=%s wall=%.1fs rc=%s cli=%s reply=%r"
           % (rec["read"], rec["write"], rec["write_1h"], rec["write_5m"], rec["out"], rec["thinking"], wall, rc, rec["cli_version"], rec["reply_head"][:120]), flush=True)
