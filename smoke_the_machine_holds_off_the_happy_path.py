@@ -1871,6 +1871,37 @@ def main():
           "'ok'" in J.registration_refusal({"result": {}, "ok": False}),
           J.registration_refusal({"result": {}, "ok": False}))
 
+    # ---- THE LAYER AT REST (Zac's ruling, 2026-09-19) ----
+    # A zoom component at scale 1.0 must be pixel-identical to the source. One that is
+    # not changes every frame OUTSIDE its own move, which is tampering by another name —
+    # and it would do so on every job that places one. The bar is EXACTLY ZERO: this
+    # repo's determinism law is byte-identity on a fixed plan, and "our layer at rest"
+    # is a fixed plan against the same decoded source in the same project.
+    _rz = _np.zeros((4, 4, 3), dtype="int16")
+    _r1 = _rz.copy(); _r1[2, 2, 1] = 3
+    _rsame = {"b0": _rz, "b30": _rz.copy(), "l0": _rz.copy(), "l30": _rz.copy()}
+    _rdiff = {"b0": _rz, "b30": _rz.copy(), "l0": _rz.copy(), "l30": _r1}
+    check("a layer that is a no-op at rest is IDENTICAL, and ONE differing pixel is a FAULT",
+          J.rest_verdict({0: "b0", 30: "b30"}, {0: "l0", 30: "l30"},
+                         reader=_rd(_rsame))["state"] == "IDENTICAL"
+          and J.rest_verdict({0: "b0", 30: "b30"}, {0: "l0", 30: "l30"},
+                             reader=_rd(_rdiff))["state"] == "DIFFERS",
+          J.rest_verdict({0: "b0", 30: "b30"}, {0: "l0", 30: "l30"}, reader=_rd(_rdiff))["why"][:110])
+    check("a rest check with nothing to compare is ABSENT, never a pass",
+          J.rest_verdict({}, {0: "l0"}, reader=_rd(_rsame))["state"] == "ABSENT"
+          and J.rest_verdict({0: "b0"}, {}, reader=_rd(_rsame))["state"] == "ABSENT",
+          "both directions ABSENT")
+    # AND IT IS MEASURED INSIDE THE SPAN. Outside it the component is not placed and
+    # the two reads would agree trivially — a control that cannot fail.
+    _zr = open("chatcut_job_app.py", encoding="utf-8").read()
+    _zr = _zr[_zr.index("def zoom_rest("):]
+    _zr = _zr[:_zr.index("@app.function")]
+    _zr = _re.sub(r"^\s*#.*$", "", _zr, flags=_re.M)
+    check("the rest frames sit INSIDE the span, where the component is actually placed",
+          "probe_frames = [from_frame + " in _zr and '"scale": 1.0' in _zr
+          and "edit_item_checked(" in _zr,
+          "frames inside the span, scale 1.0, writes echo-checked")
+
     # THE WORKING TREE, NOT THE COMMIT. red_proof_no_undefined_names builds an ISOLATED
     # worktree from HEAD, so it judges what is COMMITTED — and a run is launched from what
     # is on disk. A slice-based edit removed `place_theirs`, `place_ours` and PORTED_PROPS

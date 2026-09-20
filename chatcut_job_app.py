@@ -7770,6 +7770,139 @@ def ported_code(name):
     return open(p, encoding="utf-8").read()
 
 
+def rest_verdict(base_by_frame, layer_by_frame, reader=None):
+    """OUR LAYER AT REST AGAINST THE BARE SOURCE. PURE (reader injectable).
+
+    ZAC'S RULING, 2026-09-19: a zoom component at rest that is not equivalent to
+    the source changes every frame outside its move, which is tampering by another
+    name. So the bar is EXACTLY ZERO — not a threshold, not a tolerance. This repo's
+    determinism law is byte-identity on a fixed plan, and "our layer at scale 1.0"
+    IS a fixed plan against the same decoded source in the same project.
+
+    -> {state, n, differing, max_abs, profile, why}
+       IDENTICAL   every compared frame is pixel-identical — the layer is a no-op
+                   at rest, and a zoom may sit on the timeline without touching
+                   anything outside its own move
+       DIFFERS     a FAULT, with the per-frame profile and the worst pixel
+       ABSENT      one side produced no frames; NOTHING is claimed
+       FAILED      a frame could not be read, with what it said
+    """
+    a, b, only_a, only_b = frames_by_number(base_by_frame, layer_by_frame)
+    if not a or not b:
+        return {"state": "ABSENT", "n": 0, "differing": None, "max_abs": None, "profile": [],
+                "why": "no frames common to both reads (base %d, layer %d)"
+                       % (len(base_by_frame or {}), len(layer_by_frame or {}))}
+    prof = frame_diff_profile(a, b, reader=reader)
+    if prof["state"] != "MEASURED":
+        return dict(prof, state=prof["state"],
+                    why="the comparison could not be made: %s" % prof["why"])
+    dropped = ("" if not (only_a or only_b)
+               else "; frames on one side only: base %s, layer %s" % (only_a[:6], only_b[:6]))
+    if prof["differing"]:
+        return {"state": "DIFFERS", "n": prof["n"], "differing": prof["differing"],
+                "max_abs": prof["max_abs"], "profile": prof["profile"],
+                "why": ("%d of %d frame(s) differ with the component at scale 1.0, worst pixel %d — "
+                        "the layer is NOT a no-op at rest%s"
+                        % (prof["differing"], prof["n"], int(prof["max_abs"]), dropped))}
+    return {"state": "IDENTICAL", "n": prof["n"], "differing": 0, "max_abs": 0.0,
+            "profile": prof["profile"],
+            "why": "all %d frame(s) pixel-identical at scale 1.0 — the layer is a no-op at rest%s"
+                   % (prof["n"], dropped)}
+
+
+@app.function(image=IMG, timeout=1800, cpu=4, memory=8192,
+              secrets=[modal.Secret.from_name("chatcut-oauth")])
+def zoom_rest(clip_url: str = "", at_s: float = 12.0, span_s: float = 2.0,
+              component: str = "SmoothPush"):
+    """OUR LAYER AT SCALE 1.0 AGAINST THE BARE SOURCE. No model calls.
+
+    THE ARM THE PAIR COULD NOT SUPPLY (Zac, 2026-09-19). The pair's control proved
+    the INSTRUMENT was stable — nine frames before the zoom, identical — but no
+    frame in it had our component placed at rest, so "our layer is equivalent to
+    the source when it is not moving" was UNPROVEN. A zoom that is not a no-op at
+    rest changes every frame outside its own move, which is tampering by another
+    name, and it would do so on every job that places one.
+
+    ONE PROJECT, SAME FRAMES, TWO READS: the bare timeline, then the component at
+    scale 1.0 over the span. The bar is EXACTLY ZERO.
+    """
+    _t0 = time.time()
+    os.makedirs("/work", exist_ok=True)
+    subprocess.run(["curl", "-fsSL", "-o", "/work/source.mp4", clip_url], check=True, timeout=300)
+    tok = _access_token()
+    fps = 30.0
+    from_frame = max(0, int(round(at_s * fps)))
+    dur_frames = max(2, int(round(span_s * fps)))
+    # THE FRAMES ARE INSIDE THE SPAN, which is the whole point: outside it the
+    # component is not placed and any two reads would agree trivially.
+    probe_frames = [from_frame + int(round(dur_frames * i / 8.0)) for i in range(9)]
+    out = {"state": "RUNNING", "component": component, "at_s": at_s, "span_s": span_s,
+           "frames_asked": probe_frames, "steps": []}
+
+    stage = prestage(tok, "", controls={}, source_path="/work/source.mp4",
+                     want_components=set(), titles=[])
+    pid, src_asset = stage["projectId"], stage.get("sourceAssetId")
+    out["project"] = pid
+    print("  PROJECT         %s source=%s  (one upload, two reads)"
+          % (str(pid)[:8], str(src_asset)[:12]), flush=True)
+
+    base_f, base_miss = frames_at(tok, pid, probe_frames, "/work/rest_base")
+    print("  BARE SOURCE     %d of %d frame(s)%s"
+          % (len(base_f), len(probe_frames), "" if not base_miss else "  MISSING %s" % base_miss), flush=True)
+
+    code = ported_code(component)
+    v = component_contract(code, PORTED_PROPS[component])
+    if v:
+        out["state"] = "FAILED"; out["why"] = "contract: %s" % "; ".join(v)
+        RESULTS["zoom-rest"] = out
+        return out
+    asset = _mcp_call(tok, "create_motion_graphic_from_code", {
+        "projectId": pid, "name": component, "code": code, "width": 1080, "height": 1920,
+        "durationInFrames": dur_frames,
+        "properties": normalise_properties(PORTED_PROPS[component])}, expect=None)
+    mg = asset_id_from(asset or {})
+    if not mg:
+        out["state"] = "FAILED"; out["why"] = registration_refusal(asset or {})
+        print("  REGISTER        REFUSED %s" % str(out["why"])[:200], flush=True)
+        RESULTS["zoom-rest"] = out
+        return out
+    # SCALE 1.0 AND THE CAP LEFT ON. At rest the cap has nothing to solve
+    # (fromScale == toScale, zero displacement), so leaving it on is the honest
+    # configuration: it is what a real placement carries.
+    r = edit_item_checked(tok, {"projectId": pid, "adds": [
+        {"type": "motion-graphic", "assetId": mg, "fromFrame": from_frame,
+         "durationInFrames": dur_frames,
+         "propertyOverrides": {"clip": src_asset, "srcFrom": from_frame, "scale": 1.0,
+                               "originX": 0.5, "originY": 0.5, "punch": False, "capped": True}}]},
+        "placing %s at rest" % component)
+    item_id = ((r.get("adds") or [{}])[0] or {}).get("id")
+    out["item"] = item_id
+    print("  PLACED AT REST  %s at frame %d for %d frame(s), scale 1.0"
+          % (str(item_id)[:10], from_frame, dur_frames), flush=True)
+
+    layer_f, layer_miss = frames_at(tok, pid, probe_frames, "/work/rest_layer")
+    print("  WITH THE LAYER  %d of %d frame(s)%s"
+          % (len(layer_f), len(probe_frames), "" if not layer_miss else "  MISSING %s" % layer_miss), flush=True)
+
+    out["verdict"] = rest_verdict(base_f, layer_f)
+    print("  REST            %s — %s" % (out["verdict"]["state"], out["verdict"]["why"]), flush=True)
+    print("  PROFILE         %s" % (out["verdict"].get("profile") or []), flush=True)
+
+    if item_id:
+        edit_item_checked(tok, {"projectId": pid, "deletes": [{"id": item_id}]},
+                          "clearing the rest arm")
+    # THE FRAMES, KEPT. A DIFFERS verdict is only actionable if the pictures survive.
+    import base64 as _b64
+    _common = sorted(set(base_f) & set(layer_f))
+    out["frames"] = {"base": [_b64.b64encode(open(base_f[f], "rb").read()).decode() for f in _common[:3]],
+                     "layer": [_b64.b64encode(open(layer_f[f], "rb").read()).decode() for f in _common[:3]],
+                     "of": _common[:3]}
+    out["state"] = "MEASURED"
+    out["wall_s"] = round(time.time() - _t0, 1)
+    RESULTS["zoom-rest"] = out
+    return {k: v for k, v in out.items() if k != "frames"}
+
+
 @app.function(image=IMG, timeout=2400, cpu=4, memory=8192,
               secrets=[modal.Secret.from_name("chatcut-oauth")])
 def zoom_pair(clip_url: str = "", at_s: float = 12.0, span_s: float = 2.0,
