@@ -20,6 +20,7 @@ import subprocess as _sub
 import os.path as _os_p
 import tempfile
 import time
+import time as _time
 import json
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -33,10 +34,57 @@ import chatcut_gate as G                                         # noqa: E402
 FAILS = []
 
 
+RESULTS_LOG = []
+
+
 def check(name, ok, why=""):
     print("  %-56s %s" % (name, "ok" if ok else "FAIL"))
+    RESULTS_LOG.append((name, bool(ok)))
     if not ok:
         FAILS.append("%s :: %s" % (name, why))
+
+
+HISTORY_PATH = "check_history.json"
+
+
+def merge_history(results, path=HISTORY_PATH, now=None, write=False):
+    """Per-check green history. -> {state, never_green, history, why}
+
+    ZAC'S STANDING-RED RULE (2026-09-20): a check red on every run for a day is
+    FIXED OR DELETED, and the census reports checks that have NEVER been green.
+
+    Why it needs a ledger and not a glance: a permanent red becomes furniture.
+    This lane printed "TOOL BLOCK: DIFFERS across calls (0 shas)" on every run
+    it has ever done -- the reader read a dict populated 160 lines below its own
+    print -- and the line was read past for weeks and then quoted upward as a
+    finding. Nothing in any single run said "this has never once been green".
+
+    WRITE IS OPT-IN. The red proof runs this smoke ~198 times with the tree
+    deliberately mutated; letting that write history would fill the ledger with
+    induced failures and bury the real ones. A mutating harness and a durable
+    record cannot share a run.
+    """
+    import json as _j
+    import os as _o
+    import time as _t
+    now = _t.time() if now is None else now
+    try:
+        hist = _j.load(open(path, encoding="utf-8")) if _o.path.exists(path) else {}
+    except (OSError, ValueError) as e:
+        return {"state": "FAILED", "never_green": [], "history": {},
+                "why": "%s: %s" % (type(e).__name__, str(e)[:120])}
+    for name, ok in results:
+        row = hist.setdefault(name, {"runs": 0, "greens": 0,
+                                     "first_seen": now, "last_green": None})
+        row["runs"] += 1
+        if ok:
+            row["greens"] += 1
+            row["last_green"] = now
+    never = sorted(n for n, r in hist.items() if r.get("greens", 0) == 0)
+    if write:
+        _j.dump(hist, open(path, "w", encoding="utf-8"), indent=1, sort_keys=True)
+    return {"state": "MEASURED", "never_green": never, "history": hist,
+            "why": "%d check(s) tracked, %d never green" % (len(hist), len(never))}
 
 
 PROBE_ITEMS = [
@@ -2851,6 +2899,419 @@ def main():
           "MEASURED" in _ptxt and "FAILED" in _ptxt and "ABSENT" in _ptxt
           and _pok == 1 and _ptot == 6 and "primary anchor" in _ptxt,
           "%d/%d measured, %d line(s)" % (_pok, _ptot, len(_ptxt.splitlines())))
+
+    # ---- FIXTURES BY NAME ----
+    import fixtures as FX
+    _fman = FX.load()
+    check("every fixture in the manifest carries an s3 key and measured geometry",
+          _fman["state"] == "MEASURED" and len(_fman["fixtures"]) >= 11
+          and all(f.get("s3_key") for f in _fman["fixtures"].values())
+          and all(f.get("width") and f.get("height") and f.get("duration")
+                  for f in _fman["fixtures"].values()),
+          "%d fixture(s); missing key=%s missing geometry=%s" % (
+              len(_fman["fixtures"]),
+              [n for n, f in _fman["fixtures"].items() if not f.get("s3_key")],
+              [n for n, f in _fman["fixtures"].items()
+               if not (f.get("width") and f.get("height") and f.get("duration"))]))
+    # AN UNKNOWN NAME IS REFUSED WITH THE KNOWN ONES NAMED. A typo returning
+    # None reaches curl as an empty URL and fails as a download error — the
+    # same symptom as an expired grant and as a deleted object, three causes
+    # behind one message, and the run becomes the debugger.
+    check("an unknown fixture is REFUSED and the refusal lists what exists",
+          FX.sign("nope")["state"] == "REFUSED"
+          and "talking_head" in FX.sign("nope")["why"]
+          and FX.resolve()["state"] == "REFUSED"
+          and FX.resolve(fixture="a", clip_url="b")["state"] == "REFUSED"
+          and FX.load("/nonexistent.json")["state"] == "ABSENT",
+          FX.sign("nope")["why"][:70])
+    # A RAW URL STILL WORKS AND IS LABELLED. Refusing it outright would break
+    # every probe entrypoint the day this landed, and a correct rule arriving
+    # as a wave of red gets reverted rather than investigated. The label is the
+    # number that goes to zero.
+    check("a raw URL is accepted and ledgered as raw_url, not silently equated with a fixture",
+          FX.resolve(clip_url="https://x/y.mp4")["source"] == "raw_url"
+          and "not reproducible" in FX.resolve(clip_url="https://x/y.mp4")["why"],
+          FX.resolve(clip_url="https://x/y.mp4")["why"][:70])
+    # THE TWO FIXTURES THE MORNING RUN NEEDS, ASSERTED BY NAME.
+    check("the talking-head fixture and Zac's clip are both in the manifest",
+          {"talking_head", "zac_blueshirt"} <= set(_fman["fixtures"])
+          and _fman["fixtures"]["talking_head"]["duration"] > 20
+          and _fman["fixtures"]["zac_blueshirt"]["width"] == 1080,
+          "talking_head %ss, zac_blueshirt %sx%s" % (
+              _fman["fixtures"]["talking_head"]["duration"],
+              _fman["fixtures"]["zac_blueshirt"]["width"],
+              _fman["fixtures"]["zac_blueshirt"]["height"]))
+
+    # ---- THE PRESIGN CLOCK ----
+    # A guard that refuses a VALID source is the false-red half of this file's
+    # family: it does not fail open, it fails the run, and the message blames
+    # the source rather than the clock that mis-read it. This one cost a launch.
+    import calendar as _calm
+    _now = _calm.timegm(_time.strptime("20260920T204000Z", "%Y%m%dT%H%M%SZ"))
+    _u4 = ("https://b.s3.amazonaws.com/k.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256"
+           "&X-Amz-Date=20260920T203932Z&X-Amz-Expires=3600&X-Amz-Signature=d")
+    _got = J.presign_left(_u4, now_s=_now)
+    check("a SigV4 expiry is read as UTC, not as local time minus the non-DST offset",
+          _got["state"] == "MEASURED" and _got["scheme"] == "sigv4"
+          and 3500 < _got["left_s"] <= 3600,
+          "left=%ss (the mktime-minus-timezone form read +0s on this exact URL "
+          "and refused the launch)" % _got["left_s"])
+    # THE PROPERTY THAT MAKES IT A CLOCK AND NOT A CONSTANT: it must not move
+    # with the machine's own timezone. The old form did, by exactly the DST
+    # hour, which is why it was right in winter and wrong in summer.
+    import os as _osm
+    _spans = []
+    for _tz in ("UTC", "America/Los_Angeles", "Asia/Kolkata", "Pacific/Auckland"):
+        _prev = _osm.environ.get("TZ")
+        _osm.environ["TZ"] = _tz
+        _time.tzset()
+        _spans.append(J.presign_left(_u4, now_s=_now)["left_s"])
+        if _prev is None:
+            _osm.environ.pop("TZ", None)
+        else:
+            _osm.environ["TZ"] = _prev
+        _time.tzset()
+    check("the presign clock reads the same in every timezone, including one at +05:30",
+          len(set(_spans)) == 1,
+          "readings %s across UTC/LA/Kolkata/Auckland" % _spans)
+    # AN UNSIGNED CDN URL HAS NO EXPIRY TO READ, which is an answer about the
+    # URL and not a fault in the reader — the caller HEADs it instead.
+    check("an unsigned URL is ABSENT and an unreadable date is FAILED, and neither is a number",
+          J.presign_left("https://d1iax8jos987n3.cloudfront.net/x.mp4")["state"] == "ABSENT"
+          and J.presign_left("https://b/k?X-Amz-Date=NOTADATE0T000000Z&X-Amz-Expires=60")["state"]
+              in ("ABSENT", "FAILED")
+          and J.presign_left("")["state"] == "ABSENT"
+          and J.presign_left("https://b/k?Expires=%d" % (_now + 120), now_s=_now)["left_s"] == 120,
+          "cdn=%s empty=%s sigv2=%ss" % (
+              J.presign_left("https://d1iax8jos987n3.cloudfront.net/x.mp4")["state"],
+              J.presign_left("")["state"],
+              J.presign_left("https://b/k?Expires=%d" % (_now + 120), now_s=_now)["left_s"]))
+
+    # ---- THE INVENTORY (item 5) ----
+    import inventory as INV
+    _inv = INV.build()
+    check("the inventory covers every library entry and every line cites a table",
+          _inv["state"] == "MEASURED" and len(_inv["entries"]) == 79
+          and _inv["families"] == 7
+          and all(e.get("source") for e in _inv["entries"] if e["state"] == "MEASURED")
+          and all(e.get("line") is None for e in _inv["entries"] if e["state"] != "MEASURED"),
+          "%d entr(ies), %d measured, %d atlas pending" % (
+              len(_inv["entries"]), _inv["measured"], _inv["pending"]))
+    # THE COUNT IS GUARDED AGAINST THE LIBRARY, not asserted as a literal. A
+    # library that grows silently and an inventory that silently covers less of
+    # it are the same defect seen from two ends.
+    _libn = sum(len(v) for k, v in _json.load(open("library_73.json")).items() if k != "_why")
+    check("the inventory's entry count is the library's, not a number in this file",
+          len(_inv["entries"]) == _libn,
+          "inventory %d vs library %d" % (len(_inv["entries"]), _libn))
+    # NO COMPARATIVE LANGUAGE IN WHAT IT EMITS. Zac: "keep the check that proves
+    # it stays clean." It scans the EMITTED lines, which is the surface the rule
+    # is about -- the catalogue being clean is necessary and is a different
+    # claim, and scanning only the catalogue is how I reported 0 hits earlier
+    # today off the wrong four fields.
+    check("no emitted inventory line ranks one component against another",
+          INV.comparative_hits(_inv) == [],
+          str(INV.comparative_hits(_inv)[:2]) if INV.comparative_hits(_inv)
+          else "%d line(s) scanned for 18 ranking phrases" % _inv["measured"])
+    # AND THE CHECK MUST BE ABLE TO FIRE. A scanner that matches nothing is not
+    # a scanner; this drives it against each phrase it claims to catch.
+    check("the comparative scanner actually catches the phrases it names",
+          all(INV.COMPARATIVE.search(_p) for _p in
+              ("the workhorse of the set", "the most common choice", "better than a card",
+               "reach for it instead of a title", "prefer this one", "FITS: talking head"))
+          and not INV.COMPARATIVE.search("when a number lands"),
+          "6 ranking phrases matched, 1 occasion phrase correctly ignored")
+    # AN UNMEASURED ENTRY SAYS SO IN THE SAME WORDS EVERYWHERE. A library where
+    # some entries are rich and some are bare teaches the reader that the rich
+    # ones are the real ones -- a ranking assembled by accident out of uneven
+    # effort.
+    _pend = [e for e in _inv["entries"] if e["state"] != "MEASURED"]
+    check("every unmeasured entry is ATLAS PENDING with a reason and no invented line",
+          all(e["state"] == "ATLAS PENDING" and e["why"] and not e["line"]
+              for e in _pend),
+          "%d pending: %s" % (len(_pend), ", ".join(sorted({e["family"] for e in _pend}))))
+
+    # ---- THE WITHIN-RUN CACHE GATE TERMINATES ----
+    # Zac: "the run must stop at call 2, not bill to the end." A gate that
+    # REPORTS a cache miss and lets the run continue is the expensive half of
+    # this family -- it looks like an instrument and costs like an outage.
+    check("the cache gate fails a call that did not read the prefix, and passes one that did",
+          J.cache_gate({"read": 14414, "write": 201698}, {"read": 216112})[0] is True
+          and J.cache_gate({"read": 14414, "write": 201698}, {"read": 4264})[0] is False
+          # a prefix that was never measured cannot convict anyone
+          and J.cache_gate({"read": 0, "write": 0}, {"read": 0})[0] is True,
+          "hit=%s miss=%s" % (J.cache_gate({"read": 14414, "write": 201698}, {"read": 216112})[1],
+                              J.cache_gate({"read": 14414, "write": 201698}, {"read": 4264})[1]))
+    # AND IT STOPS THE RUN. Driven through the REAL run_two_calls rather than a
+    # restatement of its loop: a rule that lives inside a dispatch and is tested
+    # by a local copy is tested nowhere.
+    _calls = []
+
+    def _inv(_n, _message):
+        _calls.append(_n)
+        # Call 1 places something, so the run has a reason to reach call 2 --
+        # a stub that places nothing terminates at NO PLACEMENT and never
+        # exercises the gate. Call 2 then WRITES the prefix again instead of
+        # reading it, which is exactly what a changed tool list looks like on
+        # the wire.
+        _u = ({"read": 14414, "write": 201698} if _n == 1
+              else {"read": 4264, "write": 201698})
+        return {"usage": _u, "stop_reason": "end_turn", "text": "", "api_status": 200,
+                "tool_calls": [{"name": "mcp__chatcut__edit_item",
+                                "input": {"adds": [{"type": "text"}]}}]}
+    try:
+        _tm = J.run_two_calls(_inv, lambda *a, **k: {"message": "rw", "sheets": []},
+                              "first", verify=lambda *a, **k: {},
+                              readback=lambda *a, **k: {})
+    except TypeError:
+        _tm = None
+    check("a call-2 prefix write TERMINATES the run at call 2 rather than billing on",
+          _tm is not None
+          and (_tm.get("terminal") or {}).get("kind") == "CACHE MISS"
+          and (_tm.get("terminal") or {}).get("at") == 2
+          and len(_calls) == 2,
+          "terminal=%s at=%s calls=%d" % (
+              (_tm or {}).get("terminal", {}).get("kind") if _tm else "run_two_calls not drivable",
+              (_tm or {}).get("terminal", {}).get("at") if _tm else "-", len(_calls)))
+    # THE TOOL-BLOCK READER READS ITS FILE, NOT A DICT FILLED 160 LINES LATER.
+    # It printed "DIFFERS across calls (0 shas)" on every run this lane has
+    # ever done, because out["prefix_calls"] is populated below the print. A
+    # permanent red becomes furniture; this one was quoted as a finding.
+    _appsrc = open("chatcut_job_app.py", encoding="utf-8").read()
+    _tb = _appsrc.index("TOOL BLOCK      : %s")
+    _region = _appsrc[max(0, _tb - 2000):_tb]
+    check("the tool-block reader reads the fingerprint file and not a dict filled later",
+          "_read_prefix_rows()" in _region
+          and 'out.get("prefix_calls")' not in _region,
+          "reads _read_prefix_rows=%s, still reads out[]=%s" % (
+              "_read_prefix_rows()" in _region, 'out.get("prefix_calls")' in _region))
+    # ZERO SHAS IS ABSENT, NOT DRIFT. "we could not read it" and "they
+    # disagree" are different facts and only one is about the tool block.
+    check("no tool sha at all reports ABSENT rather than DIFFERS",
+          "this is \n                                           \"unread, not drifted\"" in _appsrc
+          or "unread, not drifted" in _appsrc,
+          "the absent branch names itself")
+
+    # THE CENSUS MUST BE ABLE TO SEE A STANDING RED. A tracker that reports
+    # "0 never green" because it cannot detect one is the furniture it exists
+    # to remove -- so it is driven against a check that is red twice running.
+    _tmpd = tempfile.mkdtemp(prefix="hist-")
+    _hp = os.path.join(_tmpd, "h.json")
+    merge_history([("always red", False), ("sometimes", False)], path=_hp, write=True)
+    _h2 = merge_history([("always red", False), ("sometimes", True)], path=_hp, write=True)
+    check("the standing-red census names a check that has never once been green",
+          _h2["never_green"] == ["always red"]
+          and _h2["history"]["always red"]["runs"] == 2
+          and _h2["history"]["always red"]["greens"] == 0
+          and _h2["history"]["sometimes"]["greens"] == 1
+          and _h2["history"]["sometimes"]["last_green"] is not None,
+          "never_green=%s" % _h2["never_green"])
+    # AND IT DOES NOT WRITE UNLESS ASKED. The red proof runs this smoke ~198
+    # times with the tree deliberately mutated; a ledger that recorded those
+    # would bury every real standing red under induced ones.
+    _hp2 = os.path.join(_tmpd, "h2.json")
+    merge_history([("x", False)], path=_hp2, write=False)
+    check("the history ledger is read-only unless writing is asked for",
+          not os.path.exists(_hp2)
+          and merge_history([("x", False)], path="/nonexistent/dir/h.json")["state"]
+              in ("MEASURED", "FAILED"),
+          "no file written at %s" % os.path.basename(_hp2))
+    # TEMPERATURE: PINNED FOR A PAIR, FREE FOR PRODUCTION (Zac).
+    import api_proxy as AP
+    _b_free, _app_free = AP.pin_temperature({"model": "m"}, pin="")
+    _b_pin, _app_pin = AP.pin_temperature({"model": "m", "top_p": 0.9,
+                                           "temperature": 1.0}, pin="0")
+    check("temperature is pinned only when armed, and a pinned arm sets one sampler",
+          _app_free is False and "temperature" not in _b_free
+          and _app_pin is True and _b_pin["temperature"] == 0.0
+          and "top_p" not in _b_pin
+          and AP.pin_temperature({}, pin="notanumber")[1] is False,
+          "free=%s pinned=%s top_p_dropped=%s"
+          % (_app_free, _b_pin.get("temperature"), "top_p" not in _b_pin))
+
+    # ---- THE FACE DETECTOR'S NEGATIVE CONTROL (Zac, 2026-09-20) ----
+    # "The check doesn't count as existing until both hold": a clip with no
+    # face returns zero, a clip with one returns at least one on every frame.
+    # Without the negative half, a detector that boxes EVERYTHING passes every
+    # positive test ever written -- and this lane withholds an export on what
+    # that detector says, so it could terminate every run on a phantom.
+    #
+    # TESTED IN TWO PLACES ON PURPOSE. cv2 and the model live in the CONTAINER,
+    # not on this machine, so the laptop can only test the LOGIC -- driven here
+    # with an injected tracker, through the shipped function. The DETECTOR is
+    # proven in the container, where face_control() runs on every job and the
+    # run REFUSES if it fails. A leg that quietly passed here because cv2 was
+    # missing would be the absence-as-success shape guarding the detector that
+    # decides whether anyone sees their video.
+    import perception as _PCF
+    _cdir = "fixtures_control"
+    _clips = sorted(f for f in os.listdir(_cdir)) if os.path.isdir(_cdir) else []
+    check("the control clips are staged in the tree, both kinds",
+          sum(1 for c in _clips if c.startswith("noface")) >= 2
+          and any(c.startswith("oneface") for c in _clips),
+          "clips: %s" % ", ".join(_clips))
+
+    def _fake(kind):
+        def _t(path, model=None, every_n_frames=6, **kw):
+            _n = os.path.basename(path)
+            if kind == "honest":
+                _has = not _n.startswith("noface")
+            elif kind == "boxes_everything":
+                _has = True
+            else:                                   # blind
+                _has = False
+            return {"state": "MEASURED", "samples": 4, "hits": 4 if _has else 0,
+                    "boxes": [{"t": 0.0, "score": 0.9}] * (4 if _has else 0)}
+        return _t
+    _ok = _PCF.face_control(_cdir, model="m", tracker=_fake("honest"))
+    _all = _PCF.face_control(_cdir, model="m", tracker=_fake("boxes_everything"))
+    _none = _PCF.face_control(_cdir, model="m", tracker=_fake("blind"))
+    check("the control passes an honest detector and FAILS one that boxes everything",
+          _ok["state"] == "MEASURED" and _all["state"] == "FAILED"
+          and "no face and returned" in _all["why"],
+          "honest=%s boxes-everything=%s" % (_ok["state"], _all["why"][:60]))
+    check("the control FAILS a detector that finds nothing, so a blind one cannot judge placements",
+          _none["state"] == "FAILED" and "found none" in _none["why"],
+          _none["why"][:80])
+    check("a control that could not run is ABSENT, never a pass",
+          _PCF.face_control("/nonexistent/dir")["state"] == "ABSENT"
+          and _PCF.face_control(_cdir, tracker=lambda *a, **k: {"state": "FAILED"})["state"] == "FAILED",
+          _PCF.face_control("/nonexistent/dir")["why"][:70])
+    # AND THE CONTAINER ACTUALLY RUNS IT, AND REFUSES ON FAILURE.
+    _appsrc = open("chatcut_job_app.py", encoding="utf-8").read()
+    check("the run calls the face control and refuses when it fails",
+          "_pcc.face_control()" in _appsrc
+          and "failed its negative control" in _appsrc
+          and "fixtures_control" in _appsrc,
+          "wired=%s refuses=%s mounted=%s" % (
+              "_pcc.face_control()" in _appsrc,
+              "failed its negative control" in _appsrc,
+              '"/craft/fixtures_control"' in _appsrc))
+
+    # ---- TWO READERS THAT CAME BACK BLIND ON THEIR FIRST RUN ----
+    # Both reported ABSENT rather than a number, which is the only reason they
+    # were visible at all -- and one of them was a reader placed ahead of its
+    # producer ONE COMMIT after fixing exactly that in the tool-block line.
+    #
+    # The parts reader looked for a top-level "content"; _message() wraps blocks
+    # as {"type":"user","message":{"role":..,"content":[...]}}. So the leg
+    # drives it through the REAL builder's shape rather than a hand-made list.
+    _real = J._message([{"type": "text", "text": "PERCEPTION — x" * 50},
+                        {"type": "text", "text": "PROPERTY KEYS, PER COMPONENT" * 20}])
+    _unwrapped = ((_real or {}).get("message") or {}).get("content") or []
+    _mp2 = J.message_parts(_unwrapped)
+    check("the parts reader reads the shape _message() actually builds",
+          isinstance(_real, dict) and "message" in _real
+          and _mp2["state"] == "MEASURED" and len(_mp2["rows"]) == 2
+          and "platter" in _mp2["by_part"] and "signals" in _mp2["by_part"],
+          "%s — parts %s" % (_mp2["why"][:60], sorted(_mp2.get("by_part") or {})))
+    # AND THE DIVERGENCE READER RUNS AFTER THE CALL THAT PRODUCES ITS INPUT.
+    # The proxy writes prefix_calls.jsonl when a call goes out, so a reader
+    # above turn 1 can only ever see an empty file.
+    _src2 = open("chatcut_job_app.py", encoding="utf-8").read()
+    _i_div = _src2.index("_divg = _report_divergence()")
+    _i_turn = _src2.index("_first_message = pass1_message(")
+    check("the prefix-divergence reader sits AFTER the call whose fingerprint it reads",
+          _i_div > _i_turn,
+          "divergence at %d, first call built at %d" % (_i_div, _i_turn))
+
+    # ---- WHERE THE PING'S PREFIX STOPS MATCHING THE JOB'S ----
+    # The ping writes 200,142 tokens at 1h; the job's call 1 read 14,414, which
+    # is system+tools and nothing else. So they agree on the system block and
+    # diverge in the messages before the breakpoint -- and nothing could say
+    # WHERE, because neither side kept its message shas where the other could
+    # see them. Two wrong diagnoses today came out of that gap.
+    def _fp(sysh, toolh, msgs):
+        return [{"n": 1, "fp": {"system": {"sha": sysh}, "tools": {"sha": toolh},
+                                "messages": [{"role": r, "sha": h, "bytes": b}
+                                             for r, h, b in msgs]}}]
+    _pshape = J.prefix_shape(_fp("S1", "T1", [("user", "a", 10), ("assistant", "b", 20),
+                                              ("user", "c", 30)]))
+    check("a prefix shape carries the system, the tools and every message sha",
+          _pshape["state"] == "MEASURED" and _pshape["system"] == "S1"
+          and _pshape["tools"] == "T1" and len(_pshape["messages"]) == 3
+          and J.prefix_shape([])["state"] == "ABSENT",
+          _pshape["why"])
+    _same = J.prefix_shape(_fp("S1", "T1", [("user", "a", 10), ("assistant", "b", 20),
+                                            ("user", "c", 30)]))
+    _difm = J.prefix_shape(_fp("S1", "T1", [("user", "a", 10), ("assistant", "X", 21),
+                                            ("user", "c", 30)]))
+    _difs = J.prefix_shape(_fp("S2", "T1", [("user", "a", 10)]))
+    check("the divergence names the FIRST differing message and which side of the breakpoint it is on",
+          J.prefix_divergence(_pshape, _same)["at"] is None
+          and J.prefix_divergence(_pshape, _difm)["at"] == 1
+          and "BEFORE the breakpoint" in J.prefix_divergence(_pshape, _difm, breakpoint_at=2)["why"]
+          and "after the breakpoint" in J.prefix_divergence(_pshape, _difm, breakpoint_at=0)["why"],
+          J.prefix_divergence(_pshape, _difm, breakpoint_at=2)["why"][:90])
+    check("a differing system block is named as such, and nothing after it can hit",
+          J.prefix_divergence(_pshape, _difs)["at"] == "system"
+          and "nothing" in J.prefix_divergence(_pshape, _difs)["why"]
+          and J.prefix_divergence(None, _pshape)["state"] == "ABSENT"
+          and "did not store one" in J.prefix_divergence(None, _pshape)["why"],
+          J.prefix_divergence(_pshape, _difs)["why"][:80])
+    # A SHORTER PING PREFIX IS NOT A MISMATCH, it is a smaller cache key.
+    _short = J.prefix_shape(_fp("S1", "T1", [("user", "a", 10)]))
+    check("a ping whose prefix is a strict prefix of the job's is reported as shorter, not as differing",
+          J.prefix_divergence(_short, _pshape)["at"] == 1
+          and "shorter prefix" in J.prefix_divergence(_short, _pshape)["why"],
+          J.prefix_divergence(_short, _pshape)["why"][:80])
+    # AND BOTH SIDES ACTUALLY RECORD IT.
+    _psrc = open("chatcut_job_app.py", encoding="utf-8").read()
+    check("the ping stores its prefix shape and the job reads it back to compare",
+          'rec["prefix_shape"] = prefix_shape(' in _psrc
+          and "_report_divergence()" in _psrc
+          and '"prefix_divergence"' in _psrc,
+          "ping stores=%s job compares=%s" % (
+              'rec["prefix_shape"]' in _psrc, "_report_divergence()" in _psrc))
+
+    # ---- THE RUN RECORD IS ARCHIVED, IN THE RUN (Zac, 2026-09-20) ----
+    # The only SCORED record this lane ever produced is gone from every disk.
+    # A record that lives in a container filesystem, a Dict and a /tmp log is
+    # one wipe from never having existed -- and it is the one artifact that
+    # cannot be regenerated, because regenerating means paying for the run.
+    _put = {}
+    _ar = J.archive_record({"a": 1, "wall_s": 12.5}, "run-x",
+                           bucket="b", putter=lambda bk, k, body: _put.update(
+                               {"bucket": bk, "key": k, "body": body}))
+    import hashlib as _hl
+    check("the record is archived with a sha OF THE BYTES THAT WERE SENT, keyed by run id",
+          _ar["state"] == "MEASURED"
+          and _ar["sha"] == _hl.sha256(_put["body"]).hexdigest()
+          and "run-x" in _ar["key"] and _ar["key"].endswith(".json")
+          and _ar["sha"][:12] in _ar["key"]
+          and _ar["bytes"] == len(_put["body"]),
+          "%s (%d bytes)" % (_ar["key"], _ar["bytes"]))
+    # A FAILED ARCHIVE IS LOUD AND NOT FATAL. Losing the archive must not also
+    # lose the edit; a silent failure is how the record goes missing again.
+    def _boom(*a, **k):
+        raise RuntimeError("no credentials")
+    _bad = J.archive_record({"a": 1}, "run-y", bucket="b", putter=_boom)
+    check("an archive that fails is FAILED with its reason, and still names the key it tried",
+          _bad["state"] == "FAILED" and "no credentials" in _bad["why"]
+          and _bad["key"] and _bad["sha"]
+          and J.archive_record({"a": 1}, "", bucket="b", putter=lambda *a: None)["state"] == "FAILED",
+          _bad["why"][:70])
+    # AND THE RUN ACTUALLY CALLS IT, BEFORE THE DICT WRITE.
+    _asrc = open("chatcut_job_app.py", encoding="utf-8").read()
+    check("the run archives the record before it stores it, and puts the path on the record",
+          _asrc.index("archive_record(out, run_id)") < _asrc.index("RESULTS[run_id] = out")
+          and '"record_archive"' in _asrc
+          and "RECORD ARCHIVE" in _asrc,
+          "archive before Dict write = %s" % (
+              _asrc.index("archive_record(out, run_id)") < _asrc.index("RESULTS[run_id] = out")))
+
+    # ---- THE STANDING-RED CENSUS (Zac, 2026-09-20) ----
+    _hist = merge_history(RESULTS_LOG, write=(os.environ.get("SMOKE_HISTORY") == "1"))
+    print("\n  CHECK HISTORY   : %s — %s%s"
+          % (_hist["state"], _hist["why"],
+             "" if os.environ.get("SMOKE_HISTORY") == "1"
+             else "  (read-only; set SMOKE_HISTORY=1 to record)"))
+    if _hist["never_green"]:
+        print("  NEVER GREEN     : %s" % ", ".join(_hist["never_green"][:8]))
+    check("no check has been red on every run it has ever had",
+          _hist["state"] == "MEASURED" and not _hist["never_green"],
+          "never green: %s" % ", ".join(_hist["never_green"][:5])
+          if _hist["never_green"] else "%d tracked" % len(_hist["history"]))
 
     if FAILS:
         print("\n%d FAILURE(S)" % len(FAILS))

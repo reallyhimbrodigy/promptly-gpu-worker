@@ -77,7 +77,9 @@ IMG = (
     # that Google serves to an ancient User-Agent returns an unrecognised container
     # (magic 0x18fc0400, not 0x00010000), so the woff route with a real conversion is
     # the honest one — and it is verified by the FILE'S MAGIC BYTES, not by its URL.
-    .pip_install("pillow", "numpy", "opencv-python-headless<5", "fonttools>=4.50")
+    .pip_install("pillow", "numpy", "opencv-python-headless<5", "fonttools>=4.50",
+                 # THE RECORD MUST OUTLIVE THE DISK IT WAS WRITTEN ON.
+                 "boto3")
     # THE REAL DETECTORS, NOT INVENTED ZONES. The sweep's face and burned-text
     # legs were judging against constants I made up — a face zone of 0.04-0.34
     # that reported "30% overlap" for every title, and an edge-density scan
@@ -308,6 +310,11 @@ JSON""",
     # module no check covers.
     .add_local_file(os.path.join(_HERE, "perception.py"),
                     "/root/perception.py", copy=True)
+    # THE CONTROL CLIPS. A FIXTURE BELONGS IN THE TREE so it drifts with the
+    # tree or fails loudly at merge; these are two seconds each and are what
+    # stands between a mis-scored detector and an export withheld on a phantom.
+    .add_local_dir(os.path.join(_HERE, "fixtures_control"),
+                   "/craft/fixtures_control", copy=True)
     # THE MEASURED BANDS THEMSELVES. verify_chain reads sheet/rows.json
     # relative to its own directory, and that file was never mounted — so in
     # the container `measured_bands()` returned {} and EVERY band fell through
@@ -1519,6 +1526,52 @@ def registry_fingerprint(path="/craft/chatcut_registry_baked.json"):
                 "components": len(reg),
                 "why": "%d component(s) from %s" % (len(reg), path)})
     return out
+
+
+def presign_left(url, now_s=None):
+    """Seconds of life left in a presigned URL. -> {state, left_s, scheme, why}
+
+    HOISTED OUT OF main() SO A CHECK CAN DRIVE IT. It was inline in the launch
+    guard, which meant the only way to test it was to restate it -- and then
+    the test proves the restatement while the shipped path goes untested. This
+    repo has that lesson twice already.
+
+    THE BUG IT WAS HOISTED TO FIX, kept as the correction. The SigV4 branch read
+
+        time.mktime(strptime(X-Amz-Date)) - time.timezone + X-Amz-Expires
+
+    and X-Amz-Date is UTC by definition. mktime interprets a naive struct as
+    LOCAL, so the subtraction was a second correction in the same direction;
+    time.timezone is also the NON-DST offset, so the residual was exactly the
+    DST hour. Measured 2026-09-20 on a real URL: timezone 28800, altzone 25200,
+    and a URL signed for 3600s read as +0s -- the error and the expiry cancelled
+    to zero, and the guard refused a VALID source. Correct every winter, wrong
+    every summer, and only wrong by a whole hour so nothing looked approximate.
+    """
+    import calendar as _cal
+    out = {"state": "ABSENT", "left_s": None, "scheme": None,
+           "why": "not attempted"}
+    if not url:
+        return dict(out, why="no url")
+    now_s = time.time() if now_s is None else now_s
+    m = re.search(r"[?&]Expires=(\d+)", url)
+    if m:
+        return {"state": "MEASURED", "left_s": int(m.group(1)) - int(now_s),
+                "scheme": "sigv2", "why": "Expires= epoch"}
+    m = re.search(r"X-Amz-Date=(\d{8}T\d{6}Z).*?X-Amz-Expires=(\d+)", url)
+    if m:
+        try:
+            t = _cal.timegm(time.strptime(m.group(1), "%Y%m%dT%H%M%SZ"))
+        except ValueError as e:
+            return dict(out, state="FAILED", scheme="sigv4",
+                        why="unreadable X-Amz-Date %r: %s" % (m.group(1), e))
+        return {"state": "MEASURED", "left_s": int(t + int(m.group(2)) - now_s),
+                "scheme": "sigv4", "why": "X-Amz-Date %s + %ss, read as UTC"
+                                          % (m.group(1), m.group(2))}
+    # NOT A FAILURE. An unsigned CDN URL has no expiry to read, which is an
+    # answer about the URL rather than a fault in the reader -- and the caller
+    # HEADs it instead.
+    return dict(out, state="ABSENT", why="no expiry parameter — an unsigned URL")
 
 
 def prestage_key(source_sha=None, registry_digest=None, account=None,
@@ -3112,7 +3165,7 @@ def face_collision(placement_box_, face_box_, tol=FACE_OVERLAP_TOLERANCE):
 
 
 def verify_hop6_clear(plan, source="/work/source.mp4", items=None,
-                      caption_band=None):
+                      caption_band=None, frame_h=1920):
     """HOP 6 — nothing sits on the speaker's face or on the source's own text.
 
     REAL DETECTORS, NOT INVENTED ZONES. The sweep's first attempt at these two
@@ -3244,6 +3297,36 @@ def verify_hop6_clear(plan, source="/work/source.mp4", items=None,
                         "face" if name in occ else
                         ("source text" if name in bbands else "the captions"),
                         1.0))
+        # WHERE IT COULD GO, IN COORDINATES THE AGENT WRITES (Zac, 2026-09-20).
+        #
+        # Turn 2 of the morning run did the RIGHT THING with this fault -- it
+        # moved the card rather than deleting or ignoring it -- and still
+        # failed, because the message named a BAND and not a NUMBER. With
+        # nothing to aim at it invented `anchor: "upper_third_safe"` and
+        # `offsetY: -260`, two plausible keys and a guessed distance.
+        #
+        # A fault that says what is wrong and not where to put it makes the
+        # repair a guess, and a guessed repair fails the same check twice while
+        # looking like the agent ignored us. So every occupied band now ships
+        # the clear span beside it, as a fraction AND in pixels, because the
+        # agent writes pixels.
+        if mine & (occ | bbands | _capnames):
+            _occupied = sorted(occ | bbands | _capnames)
+            _spans = [fb.band_to_fraction(n) for n in _occupied
+                      if fb.band_to_fraction(n)]
+            _lo = min((sp[0] for sp in _spans), default=None)
+            _hi = max((sp[1] for sp in _spans), default=None)
+            if _lo is not None:
+                _h = float(frame_h or 1920)
+                _above = (0.0, round(_lo, 3))
+                _below = (round(_hi, 3), 1.0)
+                _pick = _above if (_above[1] - _above[0]) >= (_below[1] - _below[0]) else _below
+                out.setdefault("clear", {})[r["slot"]] = {
+                    "occupied_bands": _occupied,
+                    "occupied_y": [round(_lo, 3), round(_hi, 3)],
+                    "clear_y": [_pick[0], _pick[1]],
+                    "clear_px": [int(_pick[0] * _h), int(_pick[1] * _h)],
+                    "slot_y": [round(b[0], 3), round(b[1], 3)]}
         out["detail"].append(
             "slot%-3s band %.3f-%.3f occupies %s | face %s | source text %s"
             % (r["slot"], b[0], b[1],
@@ -3252,8 +3335,18 @@ def verify_hop6_clear(plan, source="/work/source.mp4", items=None,
     out["state"] = "FAILED" if bad else "MEASURED"
     out["why"] = (
         "%d placement(s) sit on something: %s"
-        % (len(bad), "; ".join("slot%s in the %s band, which the %s occupies"
-                               % (s, n, k) for s, n, k, _o in bad))
+        % (len(bad), "; ".join(
+            "slot%s in the %s band, which the %s occupies%s"
+            % (s, n, k,
+               (" — it spans y %.3f-%.3f, the occupied region is y %.3f-%.3f, "
+                "and the clear span is y %.3f-%.3f (%d-%dpx of %d): move it there"
+                % (tuple((out.get("clear") or {}).get(s, {}).get("slot_y", (0, 0)))
+                   + tuple((out.get("clear") or {}).get(s, {}).get("occupied_y", (0, 0)))
+                   + tuple((out.get("clear") or {}).get(s, {}).get("clear_y", (0, 0)))
+                   + tuple((out.get("clear") or {}).get(s, {}).get("clear_px", (0, 0)))
+                   + (int(frame_h or 1920),)))
+               if (out.get("clear") or {}).get(s) else "")
+            for s, n, k, _o in bad))
         if bad else
         "faces found in %d of %d sampled frames; source text in %s; no "
         "placement overlaps either"
@@ -3692,6 +3785,216 @@ def _transcript_rows(r, dur_s=None):
             b = int(m.group(4)) * 60 + int(m.group(5)) + int(m.group(6)) / 1000.0
             out.append({"t_start": a, "t_end": b, "text": m.group(7).strip()})
     return sorted(out, key=lambda b: b["t_start"])
+
+RECORD_BUCKET_ENV = ("S3_BUCKET_NAME", "SUPABASE_S3_BUCKET")
+RECORD_PREFIX = "agentic-editor/run-records"
+
+
+def prefix_shape(fp_rows):
+    """The cacheable prefix of one call, as shas. -> {state, system, tools, messages, why}
+
+    WHAT A CACHE KEY ACTUALLY IS, recorded so two calls can be COMPARED rather
+    than argued about. The ping writes 200,142 tokens at 1h and the job's call 1
+    reads 14,414 -- which is system+tools and nothing else -- so the two
+    prefixes agree on the system block and diverge somewhere in the messages
+    before the breakpoint. Nothing anywhere said WHERE, because neither side
+    kept its message shas where the other could see them.
+    """
+    out = {"state": "ABSENT", "system": None, "tools": None, "messages": [],
+           "why": "not attempted"}
+    rows = fp_rows or []
+    first = next((r for r in rows if (r.get("n") in (1, "1")) or r is rows[0]), None)
+    if not first:
+        return dict(out, why="no fingerprinted call")
+    fp = first.get("fp") or {}
+    msgs = fp.get("messages") or []
+    return {"state": "MEASURED",
+            "system": (fp.get("system") or {}).get("sha"),
+            "tools": (fp.get("tools") or {}).get("sha"),
+            "messages": [{"i": i, "role": m.get("role"), "sha": m.get("sha"),
+                          "bytes": m.get("bytes")}
+                         for i, m in enumerate(msgs)],
+            "why": "system %s, tools %s, %d message(s)"
+                   % (str((fp.get("system") or {}).get("sha"))[:12],
+                      str((fp.get("tools") or {}).get("sha"))[:12], len(msgs))}
+
+
+def prefix_divergence(ping, job, breakpoint_at=None):
+    """Where the ping's prefix stops matching the job's. -> {state, at, why}
+
+    NAMES THE FIRST DIVERGENT MESSAGE, because "the prefixes differ" is not
+    actionable and "message 7 of 25 differs, 2.2 MB on one side and 1.1 MB on
+    the other" is. A divergence AFTER the breakpoint is harmless and is reported
+    as such rather than as a fault -- only the bytes before the breakpoint are
+    the cache key.
+    """
+    out = {"state": "ABSENT", "at": None, "why": "not attempted"}
+    if not ping or ping.get("state") != "MEASURED":
+        return dict(out, why="no ping prefix recorded — the ping did not store one")
+    if not job or job.get("state") != "MEASURED":
+        return dict(out, why="no job prefix to compare")
+    if ping.get("system") != job.get("system"):
+        return {"state": "MEASURED", "at": "system",
+                "why": "the SYSTEM block differs (ping %s vs job %s) — nothing "
+                       "after it can hit"
+                       % (str(ping["system"])[:12], str(job["system"])[:12])}
+    if ping.get("tools") != job.get("tools"):
+        return {"state": "MEASURED", "at": "tools",
+                "why": "the TOOL block differs (ping %s vs job %s)"
+                       % (str(ping["tools"])[:12], str(job["tools"])[:12])}
+    pm, jm = ping["messages"], job["messages"]
+    for i in range(min(len(pm), len(jm))):
+        if pm[i]["sha"] != jm[i]["sha"]:
+            where = ("BEFORE the breakpoint at %s — this is why the job could "
+                     "not read the ping's entry" % breakpoint_at) \
+                if (breakpoint_at is None or i <= breakpoint_at) else \
+                ("after the breakpoint at %s — harmless, the cache key ends "
+                 "earlier" % breakpoint_at)
+            return {"state": "MEASURED", "at": i,
+                    "why": "message %d of %d first differs (%s %s/%sB vs %s %s/%sB), %s"
+                           % (i, min(len(pm), len(jm)), pm[i]["role"],
+                              str(pm[i]["sha"])[:10], pm[i]["bytes"],
+                              jm[i]["role"], str(jm[i]["sha"])[:10], jm[i]["bytes"],
+                              where)}
+    if len(pm) != len(jm):
+        return {"state": "MEASURED", "at": min(len(pm), len(jm)),
+                "why": "every shared message matches; the ping has %d and the "
+                       "job has %d — the shorter prefix is what can be cached"
+                       % (len(pm), len(jm))}
+    return {"state": "MEASURED", "at": None,
+            "why": "the ping and the job carry an identical prefix (%d message(s))"
+                   % len(pm)}
+
+
+def archive_record(record, run_id, bucket=None, putter=None, env=None):
+    """The run record to S3, IN THE RUN. -> {state, key, sha, bytes, why}
+
+    ZAC'S RULE (2026-09-20), and it is the August rule again: the only SCORED
+    record this lane ever produced is gone from every disk. A record that lives
+    only in a container's filesystem, a Modal Dict, or a /tmp log is one wipe,
+    one preemption or one cleared temp directory from never having existed --
+    and a run's own numbers are the one artifact that cannot be regenerated,
+    because regenerating means paying for the run again.
+
+    IN THE SAME RUN, NOT AFTERWARDS BY THE LAUNCHER. The launcher is the part
+    that reliably dies: two runs were already lost to a client-side
+    cancellation, which is why RESULTS is durable at all. An archive step that
+    depends on the local process surviving protects the record from everything
+    except the thing that actually happens.
+
+    SHA'D, AND THE SHA IS OF WHAT WAS SENT. Computed on the exact bytes that go
+    to S3 so the path and the digest describe one object -- a hash taken before
+    a re-serialisation describes something nobody stored.
+    """
+    out = {"state": "ABSENT", "key": None, "sha": None, "bytes": None,
+           "why": "not attempted"}
+    env = os.environ if env is None else env
+    bucket = bucket or next((env.get(k) for k in RECORD_BUCKET_ENV if env.get(k)), None) \
+        or "promptly-video-storage"
+    if not run_id:
+        return dict(out, state="FAILED", why="no run id — a record with no name is not findable")
+    try:
+        body = json.dumps(record, default=str, sort_keys=True).encode("utf-8")
+    except (TypeError, ValueError) as e:
+        return dict(out, state="FAILED", why="record will not serialise: %s" % str(e)[:140])
+    sha = hashlib.sha256(body).hexdigest()
+    key = "%s/%s-%s.json" % (RECORD_PREFIX, run_id, sha[:12])
+    try:
+        if putter is None:
+            import boto3
+            boto3.client("s3").put_object(Bucket=bucket, Key=key, Body=body,
+                                          ContentType="application/json")
+        else:
+            putter(bucket, key, body)
+    except Exception as e:                                        # noqa: BLE001
+        # LOUD, AND NOT FATAL TO THE RUN. Losing the archive must not also lose
+        # the edit; but a silent failure here is how the record goes missing
+        # again, so it is a named FAILED on the run line.
+        return {"state": "FAILED", "key": key, "sha": sha, "bytes": len(body),
+                "why": "%s: %s" % (type(e).__name__, str(e)[:160])}
+    return {"state": "MEASURED", "key": key, "sha": sha, "bytes": len(body),
+            "why": "s3://%s/%s (%d bytes, sha256 %s)" % (bucket, key, len(body), sha[:16])}
+
+
+def message_parts(blocks, label_of=None):
+    """Every block of the turn-1 message, sized. -> {state, rows, total, why}
+
+    ZAC, 2026-09-20: decompose the 22.45 MB / 201,698-token turn-1 message by
+    part, in tokens, and print it.
+
+    WHY IT COULD NOT BE ANSWERED BEFORE. The message is a list of blocks and the
+    only number anyone had was the total on the wire, so every conversation
+    about what to cut was a guess about which part was big. "The density is the
+    cost driver" was my inference from one total; this makes it a measurement or
+    refutes it.
+
+    TOKENS, NOT BYTES, AND THE RULE FOR IMAGES IS NOT THE RULE FOR TEXT. Text is
+    estimated at ~4 chars/token; an image block is (w*h)/750 by Anthropic's own
+    documented formula, and a base64 payload's BYTE size is ~4/3 of the pixels
+    it encodes -- so sizing an image by its base64 length overstates it by
+    orders of magnitude and would send someone to delete the wrong thing.
+    Estimates are LABELLED as estimates; the wire total is the only exact number
+    and it is printed beside them.
+    """
+    import base64 as _b64
+    out = {"state": "ABSENT", "rows": [], "total": 0, "why": "not attempted"}
+    if not blocks:
+        return dict(out, why="no blocks")
+    rows = []
+    for i, b in enumerate(blocks):
+        kind = b.get("type")
+        if kind == "text":
+            t = b.get("text") or ""
+            label = (label_of or {}).get(i) or _part_label(t)
+            rows.append({"part": label, "kind": "text", "chars": len(t),
+                         "tokens": int(len(t) / 4.0)})
+        elif kind == "image":
+            src = (b.get("source") or {})
+            data = src.get("data") or ""
+            px_tokens, wh = None, None
+            try:
+                import struct as _st
+                raw = _b64.b64decode(data[:64] + "=" * (-len(data[:64]) % 4))
+                if raw[:8] == b"\x89PNG\r\n\x1a\n":
+                    w, h = _st.unpack(">II", raw[16:24])
+                    wh, px_tokens = (w, h), int((w * h) / 750.0)
+            except Exception:                                     # noqa: BLE001
+                pass
+            rows.append({"part": (label_of or {}).get(i) or "image",
+                         "kind": "image", "chars": len(data),
+                         "wh": wh, "tokens": px_tokens})
+        else:
+            rows.append({"part": (label_of or {}).get(i) or str(kind),
+                         "kind": str(kind), "chars": 0, "tokens": None})
+    known = [r["tokens"] for r in rows if r["tokens"] is not None]
+    agg = {}
+    for r in rows:
+        a = agg.setdefault(r["part"], {"n": 0, "tokens": 0, "unknown": 0})
+        a["n"] += 1
+        if r["tokens"] is None:
+            a["unknown"] += 1
+        else:
+            a["tokens"] += r["tokens"]
+    return {"state": "MEASURED", "rows": rows, "by_part": agg,
+            "total": sum(known),
+            "unsized": sum(1 for r in rows if r["tokens"] is None),
+            "why": "%d block(s), %d sized, ~%d token(s) ESTIMATED (text at 4 "
+                   "chars/token, images at w*h/750)"
+                   % (len(rows), len(known), sum(known))}
+
+
+def _part_label(text):
+    """Which part of the turn-1 message a text block is, from its own opening."""
+    t = (text or "").strip()
+    for needle, label in (("PERCEPTION", "signals"), ("THE SOURCE —", "watch readings"),
+                          ("THE SOURCE FRAMES", "watch readings"),
+                          ("FACE —", "face region"), ("FACE:", "face region"),
+                          ("PROPERTY KEYS", "platter"), ("THE LIBRARY", "inventory text"),
+                          ("THE WORDS", "transcript"), ("BRIEF", "brief")):
+        if t.startswith(needle):
+            return label
+    return "paragraph"
+
 
 def pass1_message(plan, beats, inventory_png, source_watch=None,
                   deciding=False, face=None, platter=None, constraints=None,
@@ -5511,7 +5814,80 @@ def component_faults(items, props_by_id=None):
             "why": "%d component(s) judged, %d unreadable entr(ies)" % (checked, len(faults))}
 
 
-def check_constraints(constraints, items, base_item_id, captions, end_s, props_by_id=None, text_carriers=None):
+SFX_ASSET_IDS_PATH = "/craft/sfx_chatcut_assets.json"
+
+
+def sfx_asset_ids(path=SFX_ASSET_IDS_PATH):
+    """The fifteen sfx asset ids. -> {state, ids, why}
+
+    BUILDER-2'S FILE, READ RATHER THAN RESTATED. A second list here would drift
+    from the one the placer uses, and the drift would be silent: a `no_sfx`
+    constraint would start passing on a placed sfx whose id this copy had never
+    heard of.
+
+    WHY IT EXISTS AT ALL. `_fam_of` calls EVERY audio item "sound", so music and
+    sfx are one family on the timeline -- the collapse my own brief_constraints
+    comment warns about. A no_sfx constraint without this would fail on a placed
+    MUSIC item and pass on nothing, which is worse than not existing, because it
+    fails a CORRECT timeline.
+    """
+    out = {"state": "ABSENT", "ids": frozenset(), "why": "not attempted"}
+    if not os.path.exists(path):
+        return dict(out, why="no sfx asset map at %s" % path)
+    try:
+        raw = json.load(open(path, encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        return dict(out, state="FAILED", why="%s: %s" % (type(e).__name__, str(e)[:140]))
+    rows = raw if isinstance(raw, list) else (raw.get("sfx") or raw.get("assets") or [])
+    if isinstance(rows, dict):
+        rows = list(rows.values())
+    ids = frozenset(str(r.get("asset_id")) for r in rows
+                    if isinstance(r, dict) and r.get("asset_id"))
+    if not ids:
+        return dict(out, state="FAILED",
+                    why="the sfx map carries no asset_id — an empty set would "
+                        "make every placed sound read as music")
+    return {"state": "MEASURED", "ids": ids,
+            "why": "%d sfx asset id(s) from %s" % (len(ids), os.path.basename(path))}
+
+
+def audio_kind(item, ids):
+    """sfx | music | UNKNOWN for one placed audio item. PURE.
+
+    UNKNOWN IS A REAL ANSWER and is not folded into either. With no id set
+    loaded, every sound would read as music and a no_music constraint would
+    fail on a placed sfx -- a correct timeline marked wrong, which is the one
+    outcome worse than an unchecked constraint.
+    """
+    if not ids:
+        return "UNKNOWN"
+    aid = str((item.get("asset") or {}).get("id") or item.get("assetId") or "")
+    if not aid:
+        return "UNKNOWN"
+    short = aid.replace("-", "")[:10]
+    return "sfx" if (aid in ids or short in {str(i).replace("-", "")[:10] for i in ids}) else "music"
+
+
+def video_kind(item, source_asset_id):
+    """source | broll for one placed video item. PURE.
+
+    EVERY CLIP IN THIS PIPELINE IS A SEEK INTO ONE ASSET (Builder-2), so any
+    video item whose assetId differs from the source's IS b-roll. That is what
+    makes the test mechanical rather than a guess -- and it is why it cannot be
+    answered without the source id, so a missing one returns UNKNOWN rather
+    than calling everything b-roll.
+    """
+    if not source_asset_id:
+        return "UNKNOWN"
+    aid = str((item.get("asset") or {}).get("id") or item.get("assetId") or "")
+    if not aid:
+        return "UNKNOWN"
+    a, b = aid.replace("-", "")[:10], str(source_asset_id).replace("-", "")[:10]
+    return "source" if a == b else "broll"
+
+
+def check_constraints(constraints, items, base_item_id, captions, end_s, props_by_id=None, text_carriers=None,
+                      source_asset_id=None, sfx_ids=None):
     """The timeline against the brief's checkable constraints. PURE.
 
     `captions` is the native caption read: {state: MEASURED|ABSENT|FAILED, cards: n, why}.
@@ -6263,7 +6639,11 @@ def attach(clip_url: str, source_sha: str = "", density_fps: float = 2.0):
               # rather than the literal twice.
               volumes={ATTACH_ROOT: ATTACH_VOL},
               secrets=[modal.Secret.from_name("chatcut-oauth"),
-                       modal.Secret.from_name("anthropic-api-key")])
+                       modal.Secret.from_name("anthropic-api-key"),
+                       # S3 FOR THE RUN RECORD. Read-nothing, write-one-object:
+                       # the record is archived in the run because the launcher
+                       # is the part that reliably dies.
+                       modal.Secret.from_name("promptly-secrets")])
 def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
          run_id: str = "latest", use_hands: bool = False, plan: str = "",
          think_tokens: int = CANONICAL_THINK_TOKENS, effort: str = CANONICAL_EFFORT, prefix_ttl: str = "1h", no_watch: bool = False, density_fps: float = 2.0,
@@ -6665,16 +7045,59 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
 
     def _perceive():
         import perception as _pc
-        _perc["shot_changes"] = _pc.shot_changes("/work/source.mp4")
-        _perc["motion_curve"] = _pc.motion_curve("/work/source.mp4")
-        _perc["audio_energy"] = _pc.audio_energy("/work/source.mp4")
-        _perc["silence_spans"] = _pc.silence_spans("/work/source.mp4")
-        _perc["face_track"] = _pc.face_track("/work/source.mp4", fps_hint=_src_fps)
-        _perc["frame_density"] = _pc.frame_density(
+        # ONE SIGNAL'S FAILURE LOSES ONE SIGNAL. Measured 2026-09-20 on Zac's
+        # clip: a TypeError in the filler step killed the whole thread, so the
+        # five signals already computed were never stored and the frame density
+        # -- which runs last -- came back ABSENT. Six detectors behind one
+        # unguarded try is a single point of failure wearing a list's clothes.
+        def _one(key, fn):
+            try:
+                _perc[key] = fn()
+            except Exception as _e:                               # noqa: BLE001
+                _perc[key] = {"state": "FAILED", "why": "%s: %s"
+                              % (type(_e).__name__, str(_e)[:160])}
+
+        _one("shot_changes", lambda: _pc.shot_changes("/work/source.mp4"))
+        _one("motion_curve", lambda: _pc.motion_curve("/work/source.mp4"))
+        _one("audio_energy", lambda: _pc.audio_energy("/work/source.mp4"))
+        _one("silence_spans", lambda: _pc.silence_spans("/work/source.mp4"))
+        _one("face_track", lambda: _pc.face_track(
+            "/work/source.mp4", fps_hint=_src_fps,
+            frame_w=_geo["w"], frame_h=_geo["h"]))
+
+        # FILLERS NEED THE WORD ROWS, AND A BEAT DOES NOT CARRY THEM.
+        # `beat["words"]` is a COUNT (an int, set by a sum()), not a list --
+        # I inferred a shape from its name and the thread died on it. The
+        # reader now takes whichever shape is actually there and says which,
+        # rather than assuming either.
+        def _fillers():
+            _beats_th.join(timeout=120)
+            _rows = []
+            for _b in (_beats_box.get("beats") or []):
+                _w = _b.get("words")
+                if isinstance(_w, list):
+                    _rows.extend(_w)
+            if _rows:
+                return _pc.filler_words(_rows)
+            if _beats_box.get("state") != "MEASURED":
+                return _pc.filler_words(None)
+            return {"state": "ABSENT", "fillers": [],
+                    "why": "the transcript read %d beat(s) and none carries word "
+                           "rows (beat['words'] is a count, not a list) — the "
+                           "filler pass needs per-word timings it cannot reach "
+                           "from here"
+                           % len(_beats_box.get("beats") or [])}
+        _one("filler_words", _fillers)
+
+        # DENSITY LAST, AND IT READS WHAT LANDED. A signal that FAILED
+        # contributes no anchors rather than an exception: shot changes are the
+        # primary anchor, and losing the motion peaks should cost the peaks,
+        # not the density.
+        _one("frame_density", lambda: _pc.frame_density(
             _dur_for_detect,
-            changes=(_perc["shot_changes"].get("changes") or []),
-            peaks=(_perc["motion_curve"].get("peaks") or []),
-            base_fps=density_fps, src_fps=_src_fps)
+            changes=((_perc.get("shot_changes") or {}).get("changes") or []),
+            peaks=((_perc.get("motion_curve") or {}).get("peaks") or []),
+            base_fps=density_fps, src_fps=_src_fps))
 
     _perc_th = threading.Thread(target=_perceive, daemon=True)
     _perc_th.start()
@@ -6902,7 +7325,54 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         _platter, _n_platter = component_platter()
     except Exception as _pe:                                      # noqa: BLE001
         _platter, _n_platter = "PROPERTY KEYS: ABSENT (%s) — every key you send is a guess" % str(_pe)[:80], 0
-    _face_lines = face_lines((_regions.get("face_traj") if isinstance(_regions, dict) else None), _dur_for_detect or 0)
+    # ── SAME EYES: ONE TRAJECTORY, TWO CONSUMERS (Zac, 2026-09-20) ────────
+    # The morning run terminated on a face/text collision and the terminal was
+    # OURS: turn 1 showed the agent a region from res10 (region_states ->
+    # face_bands, 82/82 at 0.25s steps) while the read-back judged against
+    # YuNet (103/103 every 6 frames). Two detectors, two grids, two boxes —
+    # the agent was told one thing and marked against another.
+    #
+    # THE FIX IS ONE PRODUCER, NOT TWO CALLERS THAT AGREE. Two detectors that
+    # happen to agree today is not the property. perception.face_track is the
+    # single producer and both the turn-1 region and the collision check read
+    # its trajectory.
+    #
+    # res10's trajectory is still READ, and only to report disagreement: a
+    # silent swap would leave nobody able to say whether the new detector is
+    # better on THIS clip, and the whole argument for YuNet is a measurement.
+    _ft = (_perc.get("face_track") or {})
+    _face_traj = _ft.get("traj")
+    _face_src = "yunet"
+    if not _face_traj:
+        _face_traj = (_regions.get("face_traj") if isinstance(_regions, dict) else None)
+        _face_src = "res10 (FALLBACK — yunet %s: %s)" % (
+            _ft.get("state"), str(_ft.get("why"))[:80])
+    _r10 = (_regions.get("face_traj") if isinstance(_regions, dict) else None) or []
+    _y_found = sum(1 for r in (_ft.get("traj") or []) if r.get("found"))
+    _r_found = sum(1 for r in _r10 if r.get("found"))
+    print("  FACE REGION     : %s  yunet %d/%d found, res10 %d/%d found — the "
+          "turn-1 region and the read-back check read the SAME trajectory"
+          % (_face_src, _y_found, len(_ft.get("traj") or []), _r_found, len(_r10)),
+          flush=True)
+    _face_lines = face_lines(_face_traj, _dur_for_detect or 0)
+    # THE SFX ID SET, READ ONCE. Without it a placed sound cannot be told from
+    # a placed piece of music, and no_sfx / no_music both become guesses.
+    # THE FACE DETECTOR'S NEGATIVE CONTROL, BEFORE IT IS TRUSTED TO WITHHOLD
+    # AN EXPORT. A detector that boxes everything passes every positive test
+    # ever written, and this lane terminates runs on what it says -- so it is
+    # proven in both directions on staged clips, in the container where it
+    # actually lives, on every job.
+    import perception as _pcc
+    _fctl = _pcc.face_control()
+    print("  FACE CONTROL    : %s — %s" % (_fctl["state"], _fctl["why"]), flush=True)
+    if _fctl["state"] == "FAILED":
+        raise RuntimeError(
+            "the face detector failed its negative control (%s). It is what "
+            "withholds an export on a face collision, so a detector that boxes "
+            "nothing or boxes everything must not be allowed to judge "
+            "placements." % _fctl["why"])
+    _sfx_ids = sfx_asset_ids()
+    print("  SFX ASSET IDS   : %s — %s" % (_sfx_ids["state"], _sfx_ids["why"]), flush=True)
     print("  PLATTER         : %d component(s), %d chars; FACE lines: %d" % (_n_platter, len(_platter), len(_face_lines)), flush=True)
     # THE THINKING CAP. 267 of 608 seconds — 44% of the wall — was `thinking`
     # blocks on an agent handed a COMPLETE plan. It is executing, not deciding,
@@ -7034,7 +7504,9 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
             return [], [{"kind": c["kind"], "state": "UNCHECKED", "read": c.get("why")} for c in _constraints]
         _cc = (caption_cards(tok, _stage) if any(c["kind"] in ("no_captions", "no_text") for c in _constraints)
                else {"state": "MEASURED", "cards": 0, "why": "no caption constraint"})
-        return check_constraints(_constraints, items, base, _cc, end_s, props, TEXT_CARRIERS)
+        return check_constraints(_constraints, items, base, _cc, end_s, props, TEXT_CARRIERS,
+                                 source_asset_id=(_stage or {}).get("sourceAssetId"),
+                                 sfx_ids=_sfx_ids["ids"])
 
     def _props_for_items(items, cap=12):
         """Properties for the placed components, from inspect_item. -> {id: props}
@@ -7127,10 +7599,59 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     else:
         print("  DENSITY         : %s — %s"
               % (_dm.get("state", "ABSENT"), str(_dm.get("why"))[:140]), flush=True)
+    # ── WHERE THE PING'S PREFIX STOPS MATCHING THIS JOB'S ─────────────────
+    # Reported from the JOB's side, against the ping's stored shape, because a
+    # cache miss with no cause named is the thing that produced two wrong
+    # diagnoses today already.
+    def _report_divergence():
+        try:
+            _ping = (WARM.get("last") or {}).get("prefix_shape")
+        except Exception as _we:                                  # noqa: BLE001
+            print("  PING PREFIX     : ABSENT — could not read the warm record (%s)"
+                  % str(_we)[:80], flush=True)
+            return None
+        _job = prefix_shape(_read_prefix_rows())
+        _bp = None
+        for _r in (_read_prefix_rows() or []):
+            _b = (_r.get("fp") or {}).get("breakpoint") or _r.get("breakpoint") or {}
+            if _b.get("watch_end_message") is not None:
+                _bp = _b["watch_end_message"]
+                break
+        _dv = prefix_divergence(_ping, _job, breakpoint_at=_bp)
+        print("  PREFIX DIVERGE  : %s — %s" % (_dv["state"], _dv["why"]), flush=True)
+        return {"ping": _ping, "job": _job, "divergence": _dv, "breakpoint": _bp}
+
+    # ── THE TURN-1 MESSAGE, DECOMPOSED BEFORE IT IS SENT (Zac) ────────────
+    # Printed here rather than derived later, because the only number anyone
+    # had was the total on the wire, and every argument about what to cut was
+    # therefore a guess about which part was big -- including my own "the
+    # density is the cost driver", which this measures or refutes.
+    def _report_parts(_blocks):
+        _mp = message_parts(_blocks)
+        if _mp["state"] != "MEASURED":
+            print("  TURN-1 PARTS    : %s — %s" % (_mp["state"], _mp["why"]), flush=True)
+            return _mp
+        print("  TURN-1 PARTS    : %s" % _mp["why"], flush=True)
+        for _part, _a in sorted(_mp["by_part"].items(),
+                                key=lambda kv: -kv[1]["tokens"]):
+            print("      %-16s %6d tok  %3d block(s)%s"
+                  % (_part, _a["tokens"], _a["n"],
+                     "  (%d unsized)" % _a["unknown"] if _a["unknown"] else ""),
+                  flush=True)
+        return _mp
+
     _first_message = pass1_message(prompt, _beats, "/craft/component_sheet.png",
                                    _watch_box, deciding=not bool(plan),
                                    perception=_perc,
                                    face=_face_lines, platter=_platter, constraints=_constraints)
+    # THE SHAPE IS {"type":"user","message":{"role":..,"content":[blocks]}} --
+    # _message() wraps it, and my first reader looked for a top-level
+    # "content", found nothing, and reported ABSENT. It said ABSENT rather
+    # than 0 blocks, which is the only reason it was visible at all.
+    _parts = _report_parts(
+        _first_message if isinstance(_first_message, list)
+        else ((_first_message or {}).get("message") or {}).get("content")
+        or (_first_message or {}).get("content") or [])
     out_first = _first_message          # into the record below, in full (section C)
     _turn_recs = []
 
@@ -7264,7 +7785,8 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         print("  CAPTION BAND    : %s" % (("MEASURED %s" % (list(_cb),)) if _cb else ("ABSENT — %s" % _cbw)), flush=True)
         _h6 = {"state": "ABSENT", "why": "not run"}
         try:
-            _h6 = verify_hop6_clear(None, "/work/source.mp4", items=_items, caption_band=_cb)
+            _h6 = verify_hop6_clear(None, "/work/source.mp4", items=_items, caption_band=_cb,
+                                    frame_h=_geo["h"])
         except Exception as _h6e:                                 # noqa: BLE001
             _h6 = {"state": "ABSENT", "why": "hop6 %s" % str(_h6e)[:80]}
         _faults = fault_lines(_g, _h6, None, _items, _base)
@@ -7360,7 +7882,8 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                 _cb2, _ = caption_band(tok, _stage)
             except Exception:                                     # noqa: BLE001
                 _cb2 = None
-            _h62 = verify_hop6_clear(None, "/work/source.mp4", items=_it2, caption_band=_cb2)
+            _h62 = verify_hop6_clear(None, "/work/source.mp4", items=_it2, caption_band=_cb2,
+                                     frame_h=_geo["h"])
             if (_h62 or {}).get("state") == "FAILED":
                 _out2.append("face/text collision: %s" % str(_h62.get("why"))[:220])
             _rec2 = derive_record(_it2, _beats, _stage.get("baseItemId"), "")
@@ -7501,6 +8024,15 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
            "perception": {_k: {"state": _v.get("state"), "why": _v.get("why")}
                           for _k, _v in _perc.items() if isinstance(_v, dict)},
            "perception_measured": _pok,
+           "turn1_parts": {"by_part": _parts.get("by_part"),
+                           "estimated_total": _parts.get("total"),
+                           "state": _parts.get("state"), "why": _parts.get("why")},
+           # WHICH EYES THE AGENT WAS GIVEN. A run whose terminal is a face
+           # collision is unreadable without it — the morning run's terminal
+           # was ours and nothing in its record said so.
+           "face_region_detector": _face_src,
+           "face_found_yunet": _y_found,
+           "face_found_res10": _r_found,
            "frame_density": {_k: (_perc.get("frame_density") or {}).get(_k)
                              for _k in ("state", "n_base", "n_dense", "why")},
            "prestage_source": (_stage or {}).get("prestage_source", "reused"),
@@ -7986,16 +8518,55 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                                                         "redacted": _rs.get("redacted"), "chars": _rs.get("chars")}
     except Exception:                                             # noqa: BLE001
         _think_by_call = {"state": "ABSENT"}
+    # ── THE TOOL BLOCK, READ FROM ITS FILE AND NOT FROM `out` ─────────────
+    # THIS READER HAS NEVER ONCE MEASURED ANYTHING. It read out["prefix_calls"],
+    # which is populated ~160 lines BELOW this print, so it always saw an empty
+    # list -- and an empty list makes `len(_shas) == 1` false, so it printed
+    # "DIFFERS across calls (0 shas) -- every later call is a cold write" on
+    # EVERY RUN THIS LANE HAS EVER DONE. A permanent red becomes furniture, and
+    # this one was quoted to Zac on 2026-09-20 as a real finding about caching.
+    #
+    # The truth, read from the same run's record afterwards: call 1 and call 2
+    # carried the IDENTICAL tool sha 430a28ae6aa0e36a (2 tools, 1121 bytes) and
+    # the identical system sha e4bffdeb6d3bb1e7. Nothing drifted.
+    #
+    # TWO FIXES, BECAUSE THERE ARE TWO BUGS. It now reads the JSONL directly so
+    # it cannot depend on assignment order again; and ZERO SHAS IS ABSENT, NOT
+    # "DIFFERS" -- "we could not read it" and "they disagree" are different
+    # facts and only one of them is about the tool block.
     _tools_by_call, _tools_same = [], None
     try:
-        for _c in (out.get("prefix_calls") or []):
+        for _c in (_read_prefix_rows() or []):
             _t = ((_c.get("fp") or {}).get("tools") or {})
             _tools_by_call.append({"n": _c.get("n"), "count": _t.get("n"), "sha": _t.get("sha"), "bytes": _t.get("bytes")})
         _shas = {x["sha"] for x in _tools_by_call if x.get("sha")}
-        _tools_same = (len(_shas) == 1) if _tools_by_call else None
-        print("  TOOL BLOCK      : %s — %s" % (
-            ("IDENTICAL on all %d call(s)" % len(_tools_by_call)) if _tools_same else ("DIFFERS across calls (%d shas) — every later call is a cold write" % len(_shas)),
-            ", ".join("call %s: %s tools %s" % (x["n"], x["count"], str(x["sha"])[:12]) for x in _tools_by_call)), flush=True)
+        if not _tools_by_call:
+            _tools_same, _verdict = None, "ABSENT — no fingerprinted call to read"
+        elif not _shas:
+            _tools_same, _verdict = None, ("ABSENT — %d call(s) fingerprinted and "
+                                           "not one carried a tool sha; this is "
+                                           "unread, not drifted" % len(_tools_by_call))
+        elif len(_shas) == 1:
+            _tools_same, _verdict = True, "IDENTICAL on all %d call(s)" % len(_tools_by_call)
+        else:
+            _tools_same, _verdict = False, ("DIFFERS across calls (%d distinct sha) "
+                                            "— every later call is a cold write" % len(_shas))
+        print("  TOOL BLOCK      : %s — %s" % (_verdict,
+            ", ".join("call %s: %s tools %s" % (x["n"], x["count"], str(x["sha"])[:12])
+                      for x in _tools_by_call)), flush=True)
+        # WHAT DIFFERED, NOT JUST THAT IT DID (Zac). A drift verdict nobody can
+        # act on sends the next person to diff two 22 MB requests by hand.
+        if _tools_same is False:
+            _byname = {}
+            for _c in (_read_prefix_rows() or []):
+                _t = ((_c.get("fp") or {}).get("tools") or {})
+                _byname[_c.get("n")] = set(_t.get("names") or [])
+            _ns = sorted(_byname)
+            if len(_ns) >= 2:
+                _a, _b = _byname[_ns[0]], _byname[_ns[-1]]
+                print("      DRIFT         : call %s -> %s  added=%s removed=%s"
+                      % (_ns[0], _ns[-1], sorted(_b - _a) or "none",
+                         sorted(_a - _b) or "none"), flush=True)
     except Exception as _te:                                      # noqa: BLE001
         _tools_same = None
         print("  TOOL BLOCK      : ABSENT (%s)" % str(_te)[:80], flush=True)
@@ -8197,6 +8768,22 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                                      "note": "images replaced by their sha; message shas here differ from the live fingerprint"}
         except Exception as _pe2:                                 # noqa: BLE001
             out["prefix_vs_previous_run"] = {"state": "FAILED", "why": "%s: %s" % (type(_pe2).__name__, str(_pe2)[:160])}
+    # ── THE RECORD OUTLIVES THE DISK IT WAS WRITTEN ON (Zac, 2026-09-20) ──
+    # Archived BEFORE the Dict write, so a record that reaches S3 is the same
+    # one the Dict holds; and the path and sha go on the run line so the next
+    # reader can fetch it without asking anyone where it went.
+    # AFTER THE AGENT HAS RUN, BECAUSE THE PROXY WRITES prefix_calls.jsonl
+    # WHEN A CALL GOES OUT. I placed this before turn 1 and it reported
+    # "no job prefix to compare" -- a reader ahead of its producer, ONE COMMIT
+    # after fixing exactly that in the tool-block line. The tool-block one
+    # printed a VERDICT from an empty read; this one printed ABSENT, which is
+    # the difference between a wrong answer and a visible gap, and is why the
+    # three-state rule is worth its cost.
+    _divg = _report_divergence()
+    out["prefix_divergence"] = _divg
+    _arch = archive_record(out, run_id)
+    out["record_archive"] = _arch
+    print("  RECORD ARCHIVE  : %s — %s" % (_arch["state"], _arch["why"]), flush=True)
     RESULTS[run_id] = out
     print(f"  RESULT PERSISTED: chatcut-results[{run_id}]", flush=True)
     return out
@@ -8319,6 +8906,15 @@ def keep_warm(model: str = "claude-sonnet-5", proxy: bool = True, base_url: str 
         except Exception as _ce:                                  # noqa: BLE001
             rec["cli_timeline"] = "ABSENT %s" % str(_ce)[:80]
         print("  CLI EVENTS      : n=%s %s | timeline %s" % (rec.get("cli_event_count"), json.dumps(rec["cli_events"])[:700], json.dumps(rec["cli_timeline"])[:400]), flush=True)
+    # THE PING'S OWN PREFIX SHAPE, STORED WHERE THE JOB CAN READ IT.
+    # The ping writes 200,142 tokens at 1h and the job's call 1 read 14,414 --
+    # system+tools and nothing else -- so the two prefixes agree on the system
+    # block and diverge in the messages before the breakpoint. Neither side
+    # kept its message shas where the other could see them, so nothing could
+    # say WHERE. This is that record.
+    rec["prefix_shape"] = prefix_shape(_read_prefix_rows("/work/warm_fp.jsonl"))
+    print("  PING PREFIX     : %s — %s"
+          % (rec["prefix_shape"]["state"], rec["prefix_shape"]["why"]), flush=True)
     WARM["last"] = rec
     print("  WARM            : read=%s write=%s (1h %s / 5m %s) out=%s thinking=%s wall=%.1fs rc=%s cli=%s reply=%r"
           % (rec["read"], rec["write"], rec["write_1h"], rec["write_5m"], rec["out"], rec["thinking"], wall, rc, rec["cli_version"], rec["reply_head"][:120]), flush=True)
@@ -12086,9 +12682,18 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
          model: str = "claude-sonnet-5", use_hands: bool = False,
          think_tokens: int = CANONICAL_THINK_TOKENS, effort: str = CANONICAL_EFFORT, prefix_ttl: str = "1h", no_watch: bool = False, density_fps: float = 2.0,
          run_bound: int = 0, light_prefix: bool = False, prestage_title: str = "", prestage_controls: str = "",
-         prestage_titles: str = "", transcript_file: str = "", brief_file: str = ""):
-    if not clip_url:
-        raise SystemExit("pass --clip-url")
+         prestage_titles: str = "", transcript_file: str = "", brief_file: str = "",
+         fixture: str = ""):
+    # THE SOURCE IS NAMED, NOT PASTED (Zac, 2026-09-20). A presigned URL on a
+    # command line expires, is not in the tree, and is unrecoverable the next
+    # morning — which is how this lane blocked a run asking for one. A NAME is
+    # durable and reviewable; the URL is derived here and never written down.
+    import fixtures as _fx
+    _src = _fx.resolve(fixture=fixture, clip_url=clip_url)
+    if _src["state"] != "MEASURED":
+        raise SystemExit("SOURCE %s: %s" % (_src["state"], _src["why"]))
+    clip_url = _src["url"]
+    print("  SOURCE          : %s  %s" % (_src["source"], _src["why"]), flush=True)
     if brief_file:
         # A PRODUCTION BRIEF FROM A FILE (Builder-2's fixture rows): quotes and newlines survive the
         # batch's `sh -c` launch this way; a brief on the command line would not.
@@ -12108,15 +12713,12 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
     # reads the container log.
     #
     # The expiry is knowable BEFORE spending anything, so it is checked here.
-    _exp = re.search(r"[?&]Expires=(\d+)", clip_url)
-    _x_amz = re.search(r"X-Amz-Date=(\d{8}T\d{6}Z).*?X-Amz-Expires=(\d+)",
-                       clip_url)
-    _left = None
-    if _exp:
-        _left = int(_exp.group(1)) - int(time.time())
-    elif _x_amz:
-        _t = time.mktime(time.strptime(_x_amz.group(1), "%Y%m%dT%H%M%SZ"))
-        _left = int(_t - time.timezone + int(_x_amz.group(2)) - time.time())
+    _pl = presign_left(clip_url)
+    _left = _pl["left_s"]
+    if _pl["state"] == "FAILED":
+        raise SystemExit("REFUSING TO LAUNCH: the clip URL's expiry could not "
+                         "be read (%s). An unreadable clock is not a valid one."
+                         % _pl["why"])
     if _left is None:
         # A URL WITH NO EXPIRY IS THE ANSWER, NOT A GAP. This bucket's policy
         # allows ONLY the CloudFront service principal, so a presigned S3 URL

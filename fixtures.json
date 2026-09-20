@@ -1,0 +1,127 @@
+{
+ "_why": "Fixture manifest, keyed by NAME -> S3 key (Zac, 2026-09-20). A clip URL on a command line is a presigned string that expires, is not in the tree, and is unrecoverable the next morning -- which is exactly how a run got blocked asking for a paste. A NAME is durable, reviewable and diffable; the URL is derived at use time and never written down.",
+ "_bucket": "promptly-video-storage",
+ "fixtures": {
+  "talking_head": {
+   "s3_key": "ab-sources/reliability-fixtures-v3/talking_head-f4195ca9.mp4",
+   "sha256_16": "f4195ca98da575a5",
+   "provenance": "Zac reference footage, ~/Desktop/Promptly Reports/references/",
+   "duration": 20.36,
+   "width": 1080,
+   "height": 1920,
+   "vcodec": "h264",
+   "acodec": "aac",
+   "covers": "talking_head"
+  },
+  "motion": {
+   "s3_key": "ab-sources/reliability-fixtures-v3/motion-31fa2646.mp4",
+   "sha256_16": "31fa264681eca4fd",
+   "provenance": "Zac reference footage, ~/Desktop/Promptly Reports/references/",
+   "duration": 27.93,
+   "width": 540,
+   "height": 960,
+   "vcodec": "h264",
+   "acodec": "aac",
+   "covers": "no_speech_visual_beats"
+  },
+  "car_short": {
+   "s3_key": "ab-sources/reliability-fixtures-v3/car_short-fb4aa93b.mp4",
+   "sha256_16": "fb4aa93b82da428f",
+   "provenance": "Zac reference footage, ~/Desktop/Promptly Reports/references/",
+   "duration": 10.0,
+   "width": 720,
+   "height": 1272,
+   "vcodec": "h264",
+   "acodec": "aac",
+   "covers": "incidental_speech_2_words_10s"
+  },
+  "screen_recording": {
+   "s3_key": "ab-sources/reliability-fixtures-v3/screen_recording-12c3bb18.mp4",
+   "sha256_16": "12c3bb188450aaf1",
+   "provenance": "Zac reference footage, ~/Desktop/Promptly Reports/references/",
+   "duration": 90.46,
+   "width": 3826,
+   "height": 2160,
+   "vcodec": "h264",
+   "acodec": "aac",
+   "covers": "landscape_screen_recording_90s"
+  },
+  "car_mid": {
+   "s3_key": "ab-sources/reliability-fixtures-v3/car_mid-0643be1c.mp4",
+   "sha256_16": "0643be1c193ffda2",
+   "provenance": "Zac reference footage, ~/Desktop/Promptly Reports/references/",
+   "duration": 13.8,
+   "width": 2160,
+   "height": 3840,
+   "vcodec": "h264",
+   "acodec": "aac",
+   "covers": "sfx_below_D_zero_13.8s"
+  },
+  "zac_blueshirt": {
+   "s3_key": "agentic-editor/1789432453-blueshirt.mp4",
+   "sha256_16": null,
+   "provenance": "Zac's own clip, staged 2026-09-14. The run record `blueshirt-fixed-3` is this source. 1789432682-blueshirt2.mp4 is a byte-identical re-upload (same 26410088 bytes, same 20.30s) and is NOT a second fixture.",
+   "duration": 20.3,
+   "width": 1080,
+   "height": 1920,
+   "vcodec": "h264",
+   "acodec": null,
+   "covers": "zac_reference"
+  },
+  "zac_blueshirt_v4": {
+   "s3_key": "agentic-editor/1789437291-blueshirt4.mp4",
+   "sha256_16": null,
+   "provenance": "A LATER AND GENUINELY DIFFERENT edit of the same session (21.10s, not 20.30s). Named separately rather than replacing the above, because which one 'Zac's clip' means is a choice and a filename suffix is not evidence of it.",
+   "duration": 21.1,
+   "width": 1080,
+   "height": 1920,
+   "vcodec": "h264",
+   "acodec": null,
+   "covers": "zac_reference"
+  },
+  "talking_head_hi": {
+   "s3_key": "ab-sources/reliability-fixtures-v3/talking_head_hi-7282e45a.mp4",
+   "sha256_16": "7282e45a",
+   "provenance": "Builder-2's Hindi fixture, staged 2026-09-18 23:31 -- AFTER the v3 manifest was written (2026-09-08), so the manifest could not see it. That gap is what this file exists to close.",
+   "duration": 20.362,
+   "width": 1080,
+   "height": 1920,
+   "vcodec": "h264",
+   "acodec": null,
+   "covers": "hindi_speech"
+  },
+  "multiclip_a": {
+   "s3_key": "ab-sources/reliability-fixtures-v3/multiclip_a-acece224.mp4",
+   "sha256_16": "acece224",
+   "provenance": "Builder-2's three-clip fixture, clip A. Staged 2026-09-18.",
+   "duration": 6.033,
+   "width": 1080,
+   "height": 1920,
+   "vcodec": "h264",
+   "acodec": null,
+   "covers": "multiclip"
+  },
+  "multiclip_b": {
+   "s3_key": "ab-sources/reliability-fixtures-v3/multiclip_b-79a536dd.mp4",
+   "sha256_16": "79a536dd",
+   "provenance": "Builder-2's three-clip fixture, clip B. Staged 2026-09-18.",
+   "duration": 6.0,
+   "width": 1080,
+   "height": 1920,
+   "vcodec": "h264",
+   "acodec": null,
+   "covers": "multiclip"
+  },
+  "multiclip_c": {
+   "s3_key": "ab-sources/reliability-fixtures-v3/multiclip_c-f89c7a74.mp4",
+   "sha256_16": "f89c7a74",
+   "provenance": "Builder-2's three-clip fixture, clip C. Staged 2026-09-18.",
+   "duration": 6.0,
+   "width": 1080,
+   "height": 1920,
+   "vcodec": "h264",
+   "acodec": null,
+   "covers": "multiclip"
+  }
+ }
+}
