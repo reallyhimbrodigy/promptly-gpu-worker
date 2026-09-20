@@ -166,8 +166,16 @@ def motion_curve(path, window_s=1.0, sample_fps=6.0, scale_w=160, runner=None):
            "window_s": window_s, "why": "not attempted"}
     if not path or not os.path.exists(path):
         return dict(out, why="no file at %r" % (path,))
+    # file=- AND NOT A BARE metadata=print. THE VOLUMEDETECT LESSON, COMMITTED
+    # AGAIN BY THE PERSON WHO HAD JUST READ IT (measured on the morning run,
+    # 2026-09-20): `metadata=print` writes at INFO level, this call runs at
+    # `-v error`, and the print is therefore suppressed -- so the filter ran,
+    # ffmpeg exited 0, and the parse found no scores. The detector reported
+    # FAILED rather than a still clip, which is the one thing that went right;
+    # the detector still did not work. `file=-` writes to stdout regardless of
+    # log level, which is what shot_changes already did and why it worked.
     vf = ("scale=%d:-2:flags=bilinear,fps=%g,select='gte(scene,0)',"
-          "metadata=print" % (int(scale_w), sample_fps))
+          "metadata=print:file=-" % (int(scale_w), sample_fps))
     try:
         r = (runner or subprocess.run)(
             ["ffmpeg", "-v", "error", "-i", path, "-vf", vf, "-an", "-f", "null", "-"],

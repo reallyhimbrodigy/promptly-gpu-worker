@@ -6716,6 +6716,18 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         _perc["audio_energy"] = _pc.audio_energy("/work/source.mp4")
         _perc["silence_spans"] = _pc.silence_spans("/work/source.mp4")
         _perc["face_track"] = _pc.face_track("/work/source.mp4", fps_hint=_src_fps)
+        # FILLERS NEED THE WORDS, which arrive on the beats thread. Joined
+        # here rather than left out: the morning run reported fillers ABSENT
+        # and that was honest and useless -- a signal censused, printed, and
+        # never actually run reads to the agent exactly like a clip with no
+        # fillers in it.
+        _beats_th.join(timeout=120)
+        _pc_words = []
+        for _b in (_beats_box.get("beats") or []):
+            _pc_words.extend(_b.get("words") or [])
+        _perc["filler_words"] = _pc.filler_words(
+            _pc_words if _pc_words else
+            (None if _beats_box.get("state") != "MEASURED" else []))
         _perc["frame_density"] = _pc.frame_density(
             _dur_for_detect,
             changes=(_perc["shot_changes"].get("changes") or []),

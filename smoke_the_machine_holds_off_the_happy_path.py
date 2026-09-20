@@ -2940,6 +2940,50 @@ def main():
               J.presign_left("")["state"],
               J.presign_left("https://b/k?Expires=%d" % (_now + 120), now_s=_now)["left_s"]))
 
+    # ---- THE INVENTORY (item 5) ----
+    import inventory as INV
+    _inv = INV.build()
+    check("the inventory covers every library entry and every line cites a table",
+          _inv["state"] == "MEASURED" and len(_inv["entries"]) == 79
+          and _inv["families"] == 7
+          and all(e.get("source") for e in _inv["entries"] if e["state"] == "MEASURED")
+          and all(e.get("line") is None for e in _inv["entries"] if e["state"] != "MEASURED"),
+          "%d entr(ies), %d measured, %d atlas pending" % (
+              len(_inv["entries"]), _inv["measured"], _inv["pending"]))
+    # THE COUNT IS GUARDED AGAINST THE LIBRARY, not asserted as a literal. A
+    # library that grows silently and an inventory that silently covers less of
+    # it are the same defect seen from two ends.
+    _libn = sum(len(v) for k, v in _json.load(open("library_73.json")).items() if k != "_why")
+    check("the inventory's entry count is the library's, not a number in this file",
+          len(_inv["entries"]) == _libn,
+          "inventory %d vs library %d" % (len(_inv["entries"]), _libn))
+    # NO COMPARATIVE LANGUAGE IN WHAT IT EMITS. Zac: "keep the check that proves
+    # it stays clean." It scans the EMITTED lines, which is the surface the rule
+    # is about -- the catalogue being clean is necessary and is a different
+    # claim, and scanning only the catalogue is how I reported 0 hits earlier
+    # today off the wrong four fields.
+    check("no emitted inventory line ranks one component against another",
+          INV.comparative_hits(_inv) == [],
+          str(INV.comparative_hits(_inv)[:2]) if INV.comparative_hits(_inv)
+          else "%d line(s) scanned for 18 ranking phrases" % _inv["measured"])
+    # AND THE CHECK MUST BE ABLE TO FIRE. A scanner that matches nothing is not
+    # a scanner; this drives it against each phrase it claims to catch.
+    check("the comparative scanner actually catches the phrases it names",
+          all(INV.COMPARATIVE.search(_p) for _p in
+              ("the workhorse of the set", "the most common choice", "better than a card",
+               "reach for it instead of a title", "prefer this one", "FITS: talking head"))
+          and not INV.COMPARATIVE.search("when a number lands"),
+          "6 ranking phrases matched, 1 occasion phrase correctly ignored")
+    # AN UNMEASURED ENTRY SAYS SO IN THE SAME WORDS EVERYWHERE. A library where
+    # some entries are rich and some are bare teaches the reader that the rich
+    # ones are the real ones -- a ranking assembled by accident out of uneven
+    # effort.
+    _pend = [e for e in _inv["entries"] if e["state"] != "MEASURED"]
+    check("every unmeasured entry is ATLAS PENDING with a reason and no invented line",
+          all(e["state"] == "ATLAS PENDING" and e["why"] and not e["line"]
+              for e in _pend),
+          "%d pending: %s" % (len(_pend), ", ".join(sorted({e["family"] for e in _pend}))))
+
     if FAILS:
         print("\n%d FAILURE(S)" % len(FAILS))
         for f in FAILS:
