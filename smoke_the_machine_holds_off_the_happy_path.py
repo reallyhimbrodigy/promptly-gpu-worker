@@ -14,6 +14,7 @@ import os
 import random
 import sys
 import re as _re
+import os.path as _os_p
 import tempfile
 import time
 import json
@@ -1769,6 +1770,56 @@ def main():
           and '"before_timeline": _before' in _src_e
           and 'out["before_timeline"] = _state.get("before_timeline")' in _src_e,
           "capture/record wiring")
+    # ---- RULE 3, AS A FUNCTION (the zoom pair for Zac's eye, 2026-09-19) ----
+    # Three rounds of his time were lost judging pairs that may have been identical, so a pair
+    # is deliverable only once PROVEN to differ — and an ABSENT or FAILED comparison is not a
+    # pass, because a comparison that could not be made has not shown anything.
+    import numpy as _np
+    _z = _np.zeros((4, 4, 3), dtype="int16")
+    _one = _z.copy(); _one[1, 1, 0] = 7
+    _mk = lambda sheets: {"frames": {"sheets": sheets}}
+    _rd = lambda d: (lambda p: d[p])
+    _same, _diff = {"a": _z, "b": _z.copy()}, {"a": _z, "b": _one}
+    check("a pixel-identical pair is IDENTICAL and is never delivered",
+          J.pair_differs(_mk(["a"]), _mk(["b"]), reader=_rd(_same))["state"] == "IDENTICAL",
+          str(J.pair_differs(_mk(["a"]), _mk(["b"]), reader=_rd(_same))["why"])[:110])
+    _d = J.pair_differs(_mk(["a"]), _mk(["b"]), reader=_rd(_diff))
+    check("ONE differing pixel is enough to make it a pair, with no threshold to calibrate",
+          _d["state"] == "DIFFER" and _d["profile"]["differing"] == 1 and _d["profile"]["max_abs"] == 7.0,
+          str(_d["why"])[:110])
+    def _boom(_p):
+        raise IOError("truncated sheet")
+    check("an unread or absent comparison is ABSENT or FAILED, never a proven pair",
+          J.pair_differs(_mk([]), _mk(["b"]), reader=_rd(_same))["state"] == "ABSENT"
+          and J.pair_differs(_mk(["a"]), _mk(["b"]), reader=_boom)["state"] == "FAILED"
+          and J.pair_differs(_mk(["a", "a"]), _mk(["b"]), reader=_rd(_same))["state"] == "FAILED",
+          "%s / %s" % (J.pair_differs(_mk([]), _mk(["b"]), reader=_rd(_same))["state"],
+                       J.pair_differs(_mk(["a"]), _mk(["b"]), reader=_boom)["state"]))
+    # THE PROFILE IS IN ORDER, so a pair differing only at the edges (a misalignment) is
+    # distinguishable from one differing through the middle (the curve, which is the point).
+    check("the per-frame profile is returned in order and as long as the comparison",
+          J.frame_diff_profile(["a", "a"], ["b", "b"], reader=_rd(_diff))["profile"] == [0.1458, 0.1458],
+          str(J.frame_diff_profile(["a", "a"], ["b", "b"], reader=_rd(_diff))["profile"]))
+    # THE BUILT BLOB IS WHAT SHIPS. The emitter and the bodies are deliberately NOT in the
+    # image: a container that could re-emit would render something the gate never compared.
+    _src_p = open("chatcut_job_app.py", encoding="utf-8").read()
+    check("only the BUILT blobs are mounted, and the component is read from them",
+          'os.path.join(_HERE, "port", "build"), "/craft/port"' in _src_p
+          and 'os.path.join("/craft/port", name + ".jsx")' in _src_p
+          and '"port", "bodies"' not in _src_p and '"emit_zoom_cap' not in _src_p,
+          "image mounts port/build only")
+    # THE LABELS ARE THE CLAIM. Zac asked for the sides labelled "our timing carried" or
+    # "their default" — and a preset taking only a start frame and a duration HAS no timing
+    # to carry, so a label that said otherwise would do the work the picture must do.
+    _lt, _lo = J.pair_labels("slow-push", "SmoothPush")
+    check("the pair is labelled honestly on both sides, naming each component",
+          _lt.startswith("THEIRS — slow-push") and "their default" in _lt and "constant speed" in _lt
+          and _lo.startswith("OURS — SmoothPush") and "our timing carried" in _lo,
+          "%s // %s" % (_lt[:60], _lo[:60]))
+    _sb = J.stack_pair(None, "x", (_lt, _lo), "/tmp/_never_written.jpg")
+    check("a one-sided pair is ABSENT and writes nothing",
+          _sb["state"] == "ABSENT" and _sb["path"] is None and not _os_p.exists("/tmp/_never_written.jpg"),
+          str(_sb["why"])[:100])
     check("a brief this extractor cannot read is UNCHECKED, never a clean read",
           [c["kind"] for c in J.brief_constraints("Сделай видео динамичным")] == ["language_unchecked"]
           and J.brief_constraints("Сделай видео динамичным")[0]["checkable"] is False

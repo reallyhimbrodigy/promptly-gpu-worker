@@ -175,6 +175,10 @@ JSON""",
                     "/craft/chatcut_registry_baked.json", copy=True)
     # THE 73, from their own sources (the inventory and the type registries) rather than a copy in code
     .add_local_file(os.path.join(_HERE, "library_73.json"), "/craft/library_73.json", copy=True)
+    # THE PORTED COMPONENTS, AS BUILT. Only port/build — the bodies and the
+    # emitter stay out of the image on purpose, so nothing in the container can
+    # re-emit and nothing can quietly differ from what the gate byte-compared.
+    .add_local_dir(os.path.join(_HERE, "port", "build"), "/craft/port", copy=True)
     # THE CATALOGUE — the library the agent SEES before it chooses. A bare enum
     # is a list of words: two rounds read 1-of-29 selected and StatCard x4
     # because the prefix named StatCard and nothing else. One sheet, 26
@@ -7114,6 +7118,291 @@ def source_layer_probe(clip_url: str = ""):
     out["wall_s"] = round(time.time() - _t0, 1); out["state"] = "MEASURED"
     RESULTS["source-layer-probe"] = out
     return {k: v for k, v in out.items() if k != "frames"} | {"frames_n": (out.get("frames") or {}).get("n")}
+
+
+def pair_labels(theirs_name, ours_name):
+    """The two captions, written HONESTLY (Zac, 2026-09-19). PURE.
+
+    He asked for the sides labelled "our timing carried" or "their default", and
+    those words are not decoration: a preset that takes only a start frame and a
+    duration HAS no timing to carry, so calling its side anything else would be
+    the claim doing the work the picture is supposed to do.
+    """
+    return ("THEIRS — %s: their default (start frame and duration only; constant speed, no curve)" % theirs_name,
+            "OURS — %s: our timing carried (ramp lands on the word, holds, releases; velocity-capped)" % ours_name)
+
+
+def stack_pair(top_path, bottom_path, labels, out_path, writer=None):
+    """Two sheets, stacked, each captioned. -> {state, path, why}. Reader/writer injectable.
+
+    The sheets are frame GRIDS in time order, so stacking them puts the two arms'
+    same moments directly above one another — which is the comparison, and is why
+    this is a stack and not two files in a folder.
+    """
+    if not top_path or not bottom_path:
+        return {"state": "ABSENT", "path": None,
+                "why": "one side has no sheet (%s / %s)" % (bool(top_path), bool(bottom_path))}
+    try:
+        from PIL import Image, ImageDraw
+        A, B = Image.open(top_path).convert("RGB"), Image.open(bottom_path).convert("RGB")
+        w = max(A.width, B.width)
+        bar = 34
+        out = Image.new("RGB", (w, A.height + B.height + bar * 2), (14, 14, 16))
+        d = ImageDraw.Draw(out)
+        d.text((10, 9), labels[0], fill=(235, 235, 235))
+        out.paste(A, (0, bar))
+        d.text((10, bar + A.height + 9), labels[1], fill=(235, 235, 235))
+        out.paste(B, (0, bar * 2 + A.height))
+        (writer or (lambda im, p: im.save(p, quality=92)))(out, out_path)
+        return {"state": "MEASURED", "path": out_path,
+                "why": "%dx%d, theirs above ours at matched times" % (out.width, out.height)}
+    except Exception as e:                                        # noqa: BLE001
+        return {"state": "FAILED", "path": None, "why": str(e)[:200]}
+
+
+def frame_diff_profile(a_paths, b_paths, reader=None):
+    """Per-frame difference between two arms' contact sheets. PURE (reader injectable).
+
+    NO THRESHOLD, BY DESIGN. This repo's determinism law is byte-identity, not a
+    PSNR bar, and a threshold here would be a number calibrated on one pair that
+    then decides every future pair. The question asked is the binary one: is any
+    pixel different? A pair that renders identically is the failure; how big the
+    difference is, is Zac's judgement and not a gate's.
+
+    -> {state, n, differing, max_abs, profile, why}
+       state MEASURED  both sides read and compared
+             ABSENT    one or both sides produced no frames — NOTHING is claimed
+             FAILED    a sheet could not be read, with what it said
+    `profile` is the per-frame mean absolute difference IN ORDER, so a pair that
+    differs only at the edges (a misalignment) is distinguishable from one that
+    differs through the middle (the curve), which is the thing being shown.
+    """
+    if not a_paths or not b_paths:
+        return {"state": "ABSENT", "n": 0, "differing": None, "max_abs": None, "profile": [],
+                "why": "no frames on %s side" % ("either" if not a_paths and not b_paths
+                                                 else "theirs" if not a_paths else "ours")}
+    if len(a_paths) != len(b_paths):
+        return {"state": "FAILED", "n": 0, "differing": None, "max_abs": None, "profile": [],
+                "why": "the arms produced different frame counts (%d vs %d) — not comparable"
+                       % (len(a_paths), len(b_paths))}
+
+    def _read(p):
+        from PIL import Image
+        import numpy as np
+        return np.asarray(Image.open(p).convert("RGB"), dtype="int16")
+
+    rd = reader or _read
+    profile, differing, max_abs = [], 0, 0
+    for pa, pb in zip(a_paths, b_paths):
+        try:
+            A, B = rd(pa), rd(pb)
+        except Exception as e:                                    # noqa: BLE001
+            return {"state": "FAILED", "n": len(profile), "differing": None, "max_abs": None,
+                    "profile": profile, "why": "could not read a sheet: %s" % str(e)[:200]}
+        if getattr(A, "shape", None) != getattr(B, "shape", None):
+            return {"state": "FAILED", "n": len(profile), "differing": None, "max_abs": None,
+                    "profile": profile, "why": "sheet shapes differ (%s vs %s) — not comparable"
+                                               % (getattr(A, "shape", "?"), getattr(B, "shape", "?"))}
+        d = abs(A - B)
+        mad = float(d.mean())
+        profile.append(round(mad, 4))
+        if float(d.max()) > 0:
+            differing += 1
+        max_abs = max(max_abs, float(d.max()))
+    return {"state": "MEASURED", "n": len(profile), "differing": differing,
+            "max_abs": max_abs, "profile": profile,
+            "why": "%d of %d sheet(s) carry at least one differing pixel" % (differing, len(profile))}
+
+
+def pair_differs(arm_a, arm_b, reader=None):
+    """RULE 3, as a function. Two arms are deliverable only once proven to differ.
+
+    Three rounds of Zac's time were lost judging pairs that may have been
+    identical, so this runs BEFORE delivery and an unproven pair withholds. An
+    ABSENT or FAILED read is NOT a pass: a comparison that could not be made has
+    not shown the arms differ, and saying so is the whole point.
+    """
+    fa = ((arm_a or {}).get("frames") or {}).get("sheets") or []
+    fb = ((arm_b or {}).get("frames") or {}).get("sheets") or []
+    prof = frame_diff_profile(fa, fb, reader=reader)
+    if prof["state"] != "MEASURED":
+        return {"state": prof["state"], "why": prof["why"], "profile": prof}
+    if not prof["differing"]:
+        return {"state": "IDENTICAL", "profile": prof,
+                "why": "every one of %d compared sheet(s) is pixel-identical — the two zooms "
+                       "rendered the same picture, so there is no pair to show" % prof["n"]}
+    return {"state": "DIFFER", "profile": prof,
+            "why": "%d of %d sheet(s) differ, peak per-pixel difference %d"
+                   % (prof["differing"], prof["n"], int(prof["max_abs"]))}
+
+
+PORTED_PROPS = {
+    "SmoothPush": [
+        {"key": "clip", "label": "Clip", "type": "video", "defaultValue": ""},
+        {"key": "srcFrom", "label": "Source start frame", "type": "number", "defaultValue": 0},
+        {"key": "scale", "label": "Peak magnification", "type": "number", "defaultValue": 1.2},
+        {"key": "originX", "label": "Origin X", "type": "number", "defaultValue": 0.5},
+        {"key": "originY", "label": "Origin Y", "type": "number", "defaultValue": 0.5},
+        {"key": "punch", "label": "Punch (accelerate into the word)", "type": "boolean", "defaultValue": False},
+        {"key": "capped", "label": "Velocity cap", "type": "boolean", "defaultValue": True},
+    ],
+    "StepZoom": [
+        {"key": "clip", "label": "Clip", "type": "video", "defaultValue": ""},
+        {"key": "srcFrom", "label": "Source start frame", "type": "number", "defaultValue": 0},
+        {"key": "scale", "label": "Step magnification", "type": "number", "defaultValue": 1.3},
+        {"key": "originX", "label": "Origin X", "type": "number", "defaultValue": 0.5},
+        {"key": "originY", "label": "Origin Y", "type": "number", "defaultValue": 0.5},
+        {"key": "stepAtFrame", "label": "Step at frame", "type": "number", "defaultValue": 0},
+    ],
+}
+
+
+def ported_code(name):
+    """The BUILT blob, read from the image. Never re-emitted in the container.
+
+    The emitter and the bodies are deliberately NOT in the image: if the
+    container could re-emit, the thing that renders would no longer be the thing
+    red_proof_the_cap_has_one_source byte-compared, and the gate would be
+    guarding a file nobody runs.
+    """
+    p = os.path.join("/craft/port", name + ".jsx")
+    if not os.path.exists(p):
+        raise RuntimeError("no built blob for %s at %s (built: %s)"
+                           % (name, p, sorted(os.listdir("/craft/port")) if os.path.isdir("/craft/port") else "NO /craft/port"))
+    return open(p, encoding="utf-8").read()
+
+
+@app.function(image=IMG, timeout=2400, cpu=4, memory=8192,
+              secrets=[modal.Secret.from_name("chatcut-oauth")])
+def zoom_pair(clip_url: str = "", at_s: float = 12.0, span_s: float = 2.0,
+              magnification: float = 1.2, punch: bool = False, theirs: str = "slow-push"):
+    """OUR SmoothPush BESIDE THEIR slow-push, ON THE SAME WORD. No model calls.
+
+    WHY A PAIR AND NOT A DEMO. ChatCut's zoom presets take a start frame and a
+    duration and move at CONSTANT SPEED — their own description, and there is no
+    timing or curve parameter to pass. Ours ramps in over the first 35% of the
+    span, holds to 60% and releases, with the ramp LANDING on the word because
+    peak-on-word is a product law. Whether that is visible is Zac's call, and he
+    cannot make it from a description.
+
+    RULE 3 IS ENFORCED HERE, NOT ASSUMED. Two arms that render identically are
+    three rounds of his time thrown away, so the frames are compared before
+    anything is delivered and an identical pair is a FAULT that withholds.
+
+    TWO PROJECTS, ONE VARIABLE. Same source, same span, same peak magnification,
+    same everything but the curve. Their zoom is an effect ON the base item;
+    ours is a layer OVER it that renders the source itself, which is the only
+    shape available — so `srcFrom` carries the span's own source offset or the
+    layer would play second zero under a zoom at twelve seconds.
+    """
+    _t0 = time.time()
+    os.makedirs("/work", exist_ok=True)
+    subprocess.run(["curl", "-fsSL", "-o", "/work/source.mp4", clip_url], check=True, timeout=300)
+    tok = _access_token()
+    fps = 30.0
+    from_frame = max(0, int(round(at_s * fps)))
+    dur_frames = max(2, int(round(span_s * fps)))
+    out = {"state": "RUNNING", "at_s": at_s, "span_s": span_s, "magnification": magnification,
+           "punch": punch, "theirs": theirs, "arms": {}, "steps": []}
+
+    def step(name, fn):
+        try:
+            v = fn()
+            out["steps"].append({"step": name, "state": "MEASURED"})
+            print("  %-26s MEASURED %s" % (name, json.dumps(v, default=str)[:120]), flush=True)
+            return v
+        except Exception as e:                                    # noqa: BLE001
+            out["steps"].append({"step": name, "state": "FAILED", "why": str(e)[:400]})
+            print("  %-26s FAILED   %s" % (name, str(e)[:160]), flush=True)
+            return None
+
+    def arm(label, place):
+        """One project, one zoom, the frames over the span. -> dict with state."""
+        stage = prestage(tok, "", controls={}, source_path="/work/source.mp4",
+                         want_components=set(), titles=[])
+        pid, base, src_asset = stage["projectId"], stage.get("baseItemId"), stage.get("sourceAssetId")
+        print("  %-8s project=%s base=%s" % (label.upper(), str(pid)[:8], str(base)[:10]), flush=True)
+        placed = step("%s: place" % label, lambda: place(pid, base, src_asset))
+        rb = read_back(tok, stage)
+        items = rb.get("items") or []
+        a = {"project": pid, "stage": stage, "placed": bool(placed),
+             "items": len(items), "types": [i.get("itemType") for i in items]}
+        if not placed:
+            a["state"] = "FAILED"; a["why"] = "nothing was placed for this arm"
+            return a
+        # DENSE OVER THE SPAN ONLY. The comparison is about the CURVE, so the
+        # frames that matter are the ones inside the move; sampling the whole
+        # timeline would spend the budget where both arms are identical by
+        # construction and dilute the very difference being proven.
+        try:
+            sheets, times = _preview_frames(tok, pid, from_frame + dur_frames, fps=fps,
+                                            density_fps=6.0, out_dir="/work/%s_frames" % label)
+            a["frames"] = {"n": len(times), "sheets": sheets, "times": times}
+            a["state"] = "MEASURED"
+        except Exception as e:                                    # noqa: BLE001
+            a["frames"] = {"state": "FAILED", "why": str(e)[:200]}
+            a["state"] = "FAILED"; a["why"] = "the frames could not be read: %s" % str(e)[:160]
+        return a
+
+    # ── THEIRS: their preset, on the base item ────────────────────────────
+    def place_theirs(pid, base, _src):
+        return _mcp_call(tok, "edit_item", {"projectId": pid, "adds": [
+            {"type": "effect", "assetId": "builtin:zoom", "targetItemId": base,
+             "fromFrame": from_frame, "durationInFrames": dur_frames,
+             "propertyOverrides": {"magnification": magnification, "shape": theirs}}]},
+            expect="adds")
+
+    # ── OURS: our component, as a layer over the base ─────────────────────
+    def place_ours(pid, base, src_asset):
+        code = ported_code("SmoothPush")
+        asset = _mcp_call(tok, "create_motion_graphic_from_code", {
+            "projectId": pid, "name": "SmoothPush",
+            "code": code, "width": 1080, "height": 1920,
+            "durationInFrames": dur_frames,
+            "properties": normalise_properties(PORTED_PROPS["SmoothPush"])}, expect=None)
+        mg = asset_id_from(asset or {})
+        if not mg:
+            raise RuntimeError("SmoothPush did not register: %s" % registration_refusal(asset or {}))
+        out["our_asset"] = mg
+        return _mcp_call(tok, "edit_item", {"projectId": pid, "adds": [
+            {"type": "motion-graphic", "assetId": mg,
+             "fromFrame": from_frame, "durationInFrames": dur_frames,
+             "propertyOverrides": {"clip": src_asset, "srcFrom": from_frame,
+                                   "scale": magnification, "punch": bool(punch),
+                                   "capped": True}}]}, expect="adds")
+
+    out["arms"]["theirs"] = arm("theirs", place_theirs)
+    out["arms"]["ours"] = arm("ours", place_ours)
+
+    # ── RULE 3: PROVE THEY DIFFER, BEFORE ANYTHING REACHES HIS EYE ────────
+    out["differ"] = pair_differs(out["arms"].get("theirs") or {}, out["arms"].get("ours") or {})
+    print("  DIFFER                     %s — %s" % (out["differ"]["state"], out["differ"]["why"]), flush=True)
+    if out["differ"]["state"] != "DIFFER":
+        out["state"] = "WITHHELD"
+        out["why"] = ("the pair was not proven to differ, so it is not delivered: %s"
+                      % out["differ"]["why"])
+        out["wall_s"] = round(time.time() - _t0, 1)
+        RESULTS["zoom-pair"] = out
+        return {k: v for k, v in out.items() if k != "arms"}
+
+    # ── THE SIDE-BY-SIDE, LABELLED HONESTLY ──────────────────────────────
+    _lab = pair_labels(theirs, "SmoothPush")
+    _ts = ((out["arms"]["theirs"].get("frames") or {}).get("sheets") or [None])[0]
+    _os = ((out["arms"]["ours"].get("frames") or {}).get("sheets") or [None])[0]
+    out["side_by_side"] = stack_pair(_ts, _os, _lab, "/work/zoom_pair.jpg")
+    print("  SIDE BY SIDE               %s — %s" % (out["side_by_side"]["state"], out["side_by_side"]["why"]), flush=True)
+    if out["side_by_side"]["state"] == "MEASURED":
+        import base64 as _b64
+        out["side_by_side"]["b64"] = _b64.b64encode(open(out["side_by_side"]["path"], "rb").read()).decode()
+    out["labels"] = list(_lab)
+    out["state"] = "MEASURED"
+    out["wall_s"] = round(time.time() - _t0, 1)
+    RESULTS["zoom-pair"] = out
+    return {"state": out["state"], "differ": {k: v for k, v in out["differ"].items() if k != "profile"},
+            "profile": (out["differ"].get("profile") or {}).get("profile"),
+            "side_by_side": {k: v for k, v in out["side_by_side"].items() if k != "b64"},
+            "labels": out["labels"], "wall_s": out["wall_s"],
+            "projects": {k: (v or {}).get("project") for k, v in out["arms"].items()}}
 
 
 @app.function(image=IMG, timeout=600, cpu=2, memory=4096,
