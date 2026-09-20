@@ -100,6 +100,20 @@ IMG = (
         "curl -fsSL -o /models/face_detector/res10_300x300_ssd_iter_140000.caffemodel "
         "https://raw.githubusercontent.com/opencv/opencv_3rdparty/"
         "dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel",
+        # YuNet — THE FACE DETECTOR THAT CAN SEE THE USERS. Same URL and same
+        # revision as modal_app.py:224, deliberately: a different revision would
+        # make this lane's face numbers incomparable with handler.py's own
+        # measurement (res10 face_ratio below 0.25 on 52% of clips vs YuNet's
+        # 22%, p50 0.2 vs 0.8, on IND-dominant traffic), and comparability is
+        # the reason for porting it rather than picking a detector.
+        #
+        # Both lanes pin by FILENAME (2023mar) against a `main` raw URL, so both
+        # carry the same exposure to the zoo moving. Mirrored rather than
+        # improved — a lane that quietly pinned harder would be a lane whose
+        # weights differ from production's with nothing saying so.
+        "curl -fsSL -o /models/face_detector/yunet.onnx "
+        "https://github.com/opencv/opencv_zoo/raw/main/models/"
+        "face_detection_yunet/face_detection_yunet_2023mar.onnx",
         "curl -fsSL -o /models/east/frozen_east_text_detection.pb "
         "https://d1iax8jos987n3.cloudfront.net/models/east/"
         "frozen_east_text_detection.pb",
@@ -109,6 +123,11 @@ IMG = (
         "test $(stat -c%s /models/east/frozen_east_text_detection.pb) -gt 90000000",
         "test $(stat -c%s /models/face_detector/"
         "res10_300x300_ssd_iter_140000.caffemodel) -gt 5000000",
+        # ~232KB real; an HTML error page is ~1-10KB and would otherwise land as
+        # a "model" that fails at runtime as an ABSENT face signal — which, per
+        # perception.face_track, is exactly the state that makes the face check
+        # vacuous rather than red.
+        "test $(stat -c%s /models/face_detector/yunet.onnx) -gt 100000",
     )
     .run_commands(
         "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -",
