@@ -7644,9 +7644,14 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                                    _watch_box, deciding=not bool(plan),
                                    perception=_perc,
                                    face=_face_lines, platter=_platter, constraints=_constraints)
-    _parts = _report_parts(_first_message if isinstance(_first_message, list)
-                           else (_first_message or {}).get("content") or [])
-    _divg = _report_divergence()
+    # THE SHAPE IS {"type":"user","message":{"role":..,"content":[blocks]}} --
+    # _message() wraps it, and my first reader looked for a top-level
+    # "content", found nothing, and reported ABSENT. It said ABSENT rather
+    # than 0 blocks, which is the only reason it was visible at all.
+    _parts = _report_parts(
+        _first_message if isinstance(_first_message, list)
+        else ((_first_message or {}).get("message") or {}).get("content")
+        or (_first_message or {}).get("content") or [])
     out_first = _first_message          # into the record below, in full (section C)
     _turn_recs = []
 
@@ -8019,7 +8024,6 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
            "perception": {_k: {"state": _v.get("state"), "why": _v.get("why")}
                           for _k, _v in _perc.items() if isinstance(_v, dict)},
            "perception_measured": _pok,
-           "prefix_divergence": _divg,
            "turn1_parts": {"by_part": _parts.get("by_part"),
                            "estimated_total": _parts.get("total"),
                            "state": _parts.get("state"), "why": _parts.get("why")},
@@ -8768,6 +8772,15 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     # Archived BEFORE the Dict write, so a record that reaches S3 is the same
     # one the Dict holds; and the path and sha go on the run line so the next
     # reader can fetch it without asking anyone where it went.
+    # AFTER THE AGENT HAS RUN, BECAUSE THE PROXY WRITES prefix_calls.jsonl
+    # WHEN A CALL GOES OUT. I placed this before turn 1 and it reported
+    # "no job prefix to compare" -- a reader ahead of its producer, ONE COMMIT
+    # after fixing exactly that in the tool-block line. The tool-block one
+    # printed a VERDICT from an empty read; this one printed ABSENT, which is
+    # the difference between a wrong answer and a visible gap, and is why the
+    # three-state rule is worth its cost.
+    _divg = _report_divergence()
+    out["prefix_divergence"] = _divg
     _arch = archive_record(out, run_id)
     out["record_archive"] = _arch
     print("  RECORD ARCHIVE  : %s — %s" % (_arch["state"], _arch["why"]), flush=True)

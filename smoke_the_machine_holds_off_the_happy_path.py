@@ -3188,6 +3188,33 @@ def main():
               "failed its negative control" in _appsrc,
               '"/craft/fixtures_control"' in _appsrc))
 
+    # ---- TWO READERS THAT CAME BACK BLIND ON THEIR FIRST RUN ----
+    # Both reported ABSENT rather than a number, which is the only reason they
+    # were visible at all -- and one of them was a reader placed ahead of its
+    # producer ONE COMMIT after fixing exactly that in the tool-block line.
+    #
+    # The parts reader looked for a top-level "content"; _message() wraps blocks
+    # as {"type":"user","message":{"role":..,"content":[...]}}. So the leg
+    # drives it through the REAL builder's shape rather than a hand-made list.
+    _real = J._message([{"type": "text", "text": "PERCEPTION — x" * 50},
+                        {"type": "text", "text": "PROPERTY KEYS, PER COMPONENT" * 20}])
+    _unwrapped = ((_real or {}).get("message") or {}).get("content") or []
+    _mp2 = J.message_parts(_unwrapped)
+    check("the parts reader reads the shape _message() actually builds",
+          isinstance(_real, dict) and "message" in _real
+          and _mp2["state"] == "MEASURED" and len(_mp2["rows"]) == 2
+          and "platter" in _mp2["by_part"] and "signals" in _mp2["by_part"],
+          "%s — parts %s" % (_mp2["why"][:60], sorted(_mp2.get("by_part") or {})))
+    # AND THE DIVERGENCE READER RUNS AFTER THE CALL THAT PRODUCES ITS INPUT.
+    # The proxy writes prefix_calls.jsonl when a call goes out, so a reader
+    # above turn 1 can only ever see an empty file.
+    _src2 = open("chatcut_job_app.py", encoding="utf-8").read()
+    _i_div = _src2.index("_divg = _report_divergence()")
+    _i_turn = _src2.index("_first_message = pass1_message(")
+    check("the prefix-divergence reader sits AFTER the call whose fingerprint it reads",
+          _i_div > _i_turn,
+          "divergence at %d, first call built at %d" % (_i_div, _i_turn))
+
     # ---- WHERE THE PING'S PREFIX STOPS MATCHING THE JOB'S ----
     # The ping writes 200,142 tokens at 1h; the job's call 1 read 14,414, which
     # is system+tools and nothing else. So they agree on the system block and
