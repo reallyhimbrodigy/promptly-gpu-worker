@@ -1789,6 +1789,29 @@ def main():
           str(_d["why"])[:110])
     def _boom(_p):
         raise IOError("truncated sheet")
+    # THE CONTROL, MEASURED INTO EXISTENCE 2026-09-19. The first pair ran as two ChatCut
+    # projects and the gate said DIFFER on all four sheets — including the two covering
+    # 0-7s where NEITHER arm has a zoom, because two projects are two uploads and two
+    # independent renders (mean 2.26, peak 253 on identical content). The gate was right
+    # that the pictures differed and wrong about WHY, which is the failure it exists to
+    # prevent, one level down. A pair whose control is dirty is CONFOUNDED, never shown.
+    _conf = {"c1": _z, "c2": _one, "a": _z, "b": _one}
+    _clean = {"c1": _z, "c2": _z.copy(), "a": _z, "b": _one}
+    check("a pair whose CONTROL differs is CONFOUNDED and is never delivered",
+          J.pair_differs(_mk(["a"]), _mk(["b"]), reader=_rd(_conf),
+                         control_a=["c1"], control_b=["c2"])["state"] == "CONFOUNDED"
+          and J.pair_differs(_mk(["a"]), _mk(["b"]), reader=_rd(_clean),
+                             control_a=["c1"], control_b=["c2"])["state"] == "DIFFER",
+          str(J.pair_differs(_mk(["a"]), _mk(["b"]), reader=_rd(_conf),
+                             control_a=["c1"], control_b=["c2"])["why"])[:120])
+    # AND THE ARMS SHARE ONE PROJECT, which is what makes a clean control reachable at all.
+    _zp = open("chatcut_job_app.py", encoding="utf-8").read()
+    _zp = _zp[_zp.index("def zoom_pair("):]
+    _zp = _zp[:_zp.index("@app.function")]
+    check("both arms share one project, one upload and one timeline, placed in sequence",
+          _zp.count("prestage(") == 1 and '"removes": [item_id]' in _zp
+          and "control_a=" in _zp and "def split_sheets" in _zp,
+          "prestage x%d, removes=%s" % (_zp.count("prestage("), '"removes": [item_id]' in _zp))
     check("an unread or absent comparison is ABSENT or FAILED, never a proven pair",
           J.pair_differs(_mk([]), _mk(["b"]), reader=_rd(_same))["state"] == "ABSENT"
           and J.pair_differs(_mk(["a"]), _mk(["b"]), reader=_boom)["state"] == "FAILED"
@@ -1820,6 +1843,26 @@ def main():
     check("a one-sided pair is ABSENT and writes nothing",
           _sb["state"] == "ABSENT" and _sb["path"] is None and not _os_p.exists("/tmp/_never_written.jpg"),
           str(_sb["why"])[:100])
+    # ---- ChatCut's THREE MEASURED CONTRACT RULES, CHECKED BEFORE THE SEND ----
+    # The ported Remotion components were frame-verified against Remotion and REFUSED by
+    # ChatCut on six counts; a later hand-written one was refused for AbsoluteFill when
+    # the repo's own measured contract says a plain div. A rule paid for twice is a check.
+    check("every component this harness can send satisfies the contract we measured",
+          all(not J.component_contract(open("port/build/%s.jsx" % _n, encoding="utf-8").read())
+              for _n in ("SmoothPush", "StepZoom", "StagedPush"))
+          and all(not J.component_contract(_c) for _c in J.MG_CAPABILITY_PROBES.values()),
+          str({_n: J.component_contract(open("port/build/%s.jsx" % _n, encoding="utf-8").read())
+               for _n in ("SmoothPush", "StepZoom", "StagedPush")}))
+    check("each of the four refusal classes is caught, and a COMMENT is not code",
+          J.component_contract("const Component = () => { return (<AbsoluteFill/>); };")
+          and J.component_contract("const FOO = 3;\nconst Component = () => { return (<div/>); };")
+          and J.component_contract("const Component = ({item}) => { const p = item.props; return (<div/>); };")
+          and J.component_contract("const Component = () => (<div/>);\nconst Component = () => (<div/>);")
+          # and the false positive that the first version of this check actually produced:
+          and not J.component_contract("/* never AbsoluteFill */\nconst Component = ({item}) => "
+                                       "{ const props = item.props; return (<div/>); };"),
+          "comment mention -> %s" % J.component_contract("/* never AbsoluteFill */\nconst Component = "
+                                                         "({item}) => { const props = item.props; return (<div/>); };"))
     check("a brief this extractor cannot read is UNCHECKED, never a clean read",
           [c["kind"] for c in J.brief_constraints("Сделай видео динамичным")] == ["language_unchecked"]
           and J.brief_constraints("Сделай видео динамичным")[0]["checkable"] is False

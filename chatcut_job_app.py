@@ -7120,6 +7120,211 @@ def source_layer_probe(clip_url: str = ""):
     return {k: v for k, v in out.items() if k != "frames"} | {"frames_n": (out.get("frames") or {}).get("n")}
 
 
+def component_contract(code):
+    """ChatCut's three validator rules, checked BEFORE the component is sent. PURE.
+
+    -> [violations] — empty means it satisfies the three rules we have MEASURED
+    from the validator's refusals (there may be more rules; this claims only these).
+
+    WHY IT EXISTS. The ported Remotion components were frame-verified against
+    Remotion and REFUSED by ChatCut on six counts, and a later hand-written one was
+    refused for using AbsoluteFill — the repo's own measured contract says a plain
+    div. Each refusal cost a round trip to learn something already written down.
+    A rule we have paid for twice is a check, not a comment.
+
+    THE THREE:
+      1. exactly one top-level component, and NO top-level constants;
+      2. the root is a plain div, never AbsoluteFill;
+      3. editable values are read through an identifier literally named `props` —
+         it is a STATIC NAME MATCH, so binding item.props to `p` makes the checker
+         report every property as declared-but-unused.
+    """
+    # COMMENTS ARE NOT CODE. The first version of this check flagged SmoothPush,
+    # because both its own header and the EMITTED cap's doc comment explain the
+    # rule in the words "never AbsoluteFill" — a substring match on prose, which
+    # is the same failure as grep proving a consumer exists. Every rule below is
+    # about what the component DOES, so the comments come out first.
+    stripped = re.sub(r"/\*.*?\*/", "", code, flags=re.S)
+    stripped = re.sub(r"^\s*//.*$", "", stripped, flags=re.M)
+    bad = []
+    lines = stripped.split("\n")
+    # Top-level = column zero, outside any block. Comments and blank lines aside,
+    # the only column-zero statement allowed is the single component.
+    tops = [l for l in lines
+            if l[:1] not in ("", " ", "\t", "*", "/", ")", "}", "]")
+            and not l.startswith("//")]
+    decls = [l for l in tops if re.match(r"^(const|let|var|function|class)\b", l)]
+    comps = [l for l in decls if re.match(r"^const\s+Component\s*=", l)]
+    if len(comps) != 1:
+        bad.append("expected exactly one top-level `const Component =`, found %d" % len(comps))
+    extra = [l.strip()[:60] for l in decls if l not in comps]
+    if extra:
+        bad.append("top-level constant(s) are refused: %s" % "; ".join(extra[:4]))
+    if re.search(r"\bAbsoluteFill\b", stripped):
+        bad.append("AbsoluteFill is refused as a root — the contract is a plain <div style={rootStyle}>")
+    if re.search(r"item\s*&&\s*item\.props|item\.props", stripped) and not re.search(r"\bconst\s+props\s*=", stripped):
+        bad.append("item.props must be bound to an identifier literally named `props` (static name match)")
+    m = re.search(r"return\s*\(\s*<(\w+)", stripped)
+    if m and m.group(1) != "div":
+        bad.append("the first returned root is <%s>, not <div>" % m.group(1))
+    return bad
+
+
+MG_CAPABILITY_PROBES = {
+    # TWO VIDEO LAYERS — THE GATE ON THE WHOLE TRANSITION HALF OF THE PORT.
+    # All nine of our transitions and both tight-cut overlays take clipA AND clipB
+    # and render both sides themselves; ChatCut's transition slot takes one of
+    # their thirteen presets and no custom code. So our transitions can only port
+    # as a motion graphic spanning the cut that draws both sides — which needs two
+    # <Video> layers from one asset at two offsets. One layer is PROVEN. Two is not,
+    # and nine components rest on it.
+    "two_video_layers": """
+const Component = ({ item }) => {
+  const frame = useCurrentFrame();
+  const props = (item && item.props) || {};
+  const src = props.clip;
+  const rootStyle = { position: "absolute", inset: 0, display: "flex",
+    alignItems: "center", justifyContent: "center", overflow: "hidden",
+    boxSizing: "border-box", backgroundColor: "#000000" };
+  if (!src) { return (<div style={rootStyle}><div style={{color:"#FFFFFF",fontSize:48}}>NO CLIP PROP</div></div>); }
+  const split = frame < 30 ? 0.5 : 0.5;
+  return (
+    <div style={rootStyle}>
+      <div style={{ position: "absolute", inset: 0, clipPath: `inset(0 ${(1 - split) * 100}% 0 0)` }}>
+        <Video src={src} startFrom={0} muted volume={0}
+               style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+      </div>
+      <div style={{ position: "absolute", inset: 0, clipPath: `inset(0 0 0 ${split * 100}%)` }}>
+        <Video src={src} startFrom={300} muted volume={0}
+               style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+      </div>
+    </div>
+  );
+};
+""",
+    # SPRING — THE GATE ON SnapReframe. Its curve is a critically-damped spring
+    # (damping 22, mass 0.6, stiffness 260). Reimplementing Remotion's solver here
+    # would be a SECOND implementation of one rule, which is the thing the cap's
+    # build step exists to prevent, so the question is whether the runtime has it.
+    "spring": """
+const Component = ({ item }) => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const props = (item && item.props) || {};
+  const rootStyle = { position: "absolute", inset: 0, display: "flex",
+    alignItems: "center", justifyContent: "center", overflow: "hidden",
+    boxSizing: "border-box", backgroundColor: "#101014" };
+  const s = spring({ frame, fps, config: { damping: 22, mass: 0.6, stiffness: 260 } });
+  return (
+    <div style={rootStyle}>
+      <div style={{ color: "#FFFFFF", fontSize: 140, fontFamily: "sans-serif",
+                    transform: `scale(${1 + 0.3 * s})` }}>
+        {(props.text || "SPRING")}
+      </div>
+    </div>
+  );
+};
+""",
+    # INTERPOLATE + EASING — used by every ported transition and by StagedPush's
+    # uncapped fallback. SmoothPush deliberately hand-rolls these so it does not
+    # depend on the answer; the transitions would rather not.
+    "interpolate_easing": """
+const Component = ({ item }) => {
+  const frame = useCurrentFrame();
+  const props = (item && item.props) || {};
+  const rootStyle = { position: "absolute", inset: 0, display: "flex",
+    alignItems: "center", justifyContent: "center", overflow: "hidden",
+    boxSizing: "border-box", backgroundColor: "#101014" };
+  const o = interpolate(frame, [0, 30], [0, 1],
+    { easing: Easing.out(Easing.cubic), extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  return (
+    <div style={rootStyle}>
+      <div style={{ color: "#FFFFFF", fontSize: 140, fontFamily: "sans-serif", opacity: o }}>
+        {(props.text || "EASING")}
+      </div>
+    </div>
+  );
+};
+""",
+}
+
+
+@app.function(image=IMG, timeout=1200, cpu=4, memory=8192,
+              secrets=[modal.Secret.from_name("chatcut-oauth")])
+def mg_runtime_probe(clip_url: str = ""):
+    """WHAT DOES ChatCut's MOTION-GRAPHIC RUNTIME ACTUALLY GIVE A COMPONENT? No model calls.
+
+    THREE QUESTIONS, EACH GATING REAL WORK, asked in one run because each costs a
+    registration and a frame:
+
+      two_video_layers   gates ALL NINE transitions and both tight-cut overlays.
+                         They take clipA and clipB and render both sides; ChatCut's
+                         transition slot accepts only its own thirteen presets, so
+                         ours can port only as a graphic spanning the cut.
+      spring             gates SnapReframe, whose curve IS a spring. Reimplementing
+                         Remotion's solver would be a second copy of one rule.
+      interpolate_easing what every ported transition would rather use than a
+                         hand-rolled clamp.
+
+    A REFUSAL IS A RESULT, and it is recorded with the validator's own words.
+    Guessing the answer is what produced 0/29 loadable ported blobs in September.
+    """
+    _t0 = time.time()
+    os.makedirs("/work", exist_ok=True)
+    subprocess.run(["curl", "-fsSL", "-o", "/work/source.mp4", clip_url], check=True, timeout=300)
+    tok = _access_token()
+    stage = prestage(tok, "", controls={}, source_path="/work/source.mp4",
+                     want_components=set(), titles=[])
+    pid, base, src_asset = stage["projectId"], stage.get("baseItemId"), stage.get("sourceAssetId")
+    out = {"state": "RUNNING", "project": pid, "capabilities": {}}
+    print("  PRESTAGE        project=%s source=%s" % (str(pid)[:8], str(src_asset)[:12]), flush=True)
+
+    for name, code in MG_CAPABILITY_PROBES.items():
+        row = {"registered": False, "placed": False, "frame": "ABSENT"}
+        _v = component_contract(code)
+        if _v:
+            row["state"] = "REFUSED"; row["refusal"] = "our own contract check: %s" % "; ".join(_v)
+            out["capabilities"][name] = row
+            print("  %-20s %-9s %s" % (name, row["state"], row["refusal"][:120]), flush=True)
+            continue
+        try:
+            a = _mcp_call(tok, "create_motion_graphic_from_code", {
+                "projectId": pid, "name": "cap_" + name, "code": code,
+                "width": 1080, "height": 1920, "durationInFrames": 60,
+                "properties": normalise_properties([
+                    {"key": "clip", "label": "Clip", "type": "video", "defaultValue": ""},
+                    {"key": "text", "label": "Text", "type": "text", "defaultValue": name}])}, expect=None)
+            mg = asset_id_from(a or {})
+            row["registered"] = bool(mg)
+            if not mg:
+                row["refusal"] = registration_refusal(a or {})
+                row["state"] = "REFUSED"
+            else:
+                r = _mcp_call(tok, "edit_item", {"projectId": pid, "adds": [
+                    {"type": "motion-graphic", "assetId": mg, "fromFrame": 0, "durationInFrames": 60,
+                     "propertyOverrides": {"clip": src_asset, "text": name}}]}, expect="adds")
+                row["placed"] = bool((r.get("adds") or [{}])[0].get("id"))
+                row["item"] = ((r.get("adds") or [{}])[0] or {}).get("id")
+                row["state"] = "MEASURED" if row["placed"] else "FAILED"
+        except Exception as e:                                    # noqa: BLE001
+            row["state"] = "REFUSED"; row["refusal"] = str(e)[:400]
+        out["capabilities"][name] = row
+        print("  %-20s %-9s %s" % (name, row["state"],
+                                   str(row.get("refusal") or row.get("item") or "")[:120]), flush=True)
+        # ONE COMPONENT ON THE TIMELINE AT A TIME: they all cover the frame, so a
+        # second placement would hide the first and the frame would answer for the
+        # wrong component. Removed before the next is placed.
+        if row.get("item"):
+            try:
+                _mcp_call(tok, "edit_item", {"projectId": pid, "removes": [row["item"]]}, expect=None)
+            except Exception:                                     # noqa: BLE001
+                pass
+    out["wall_s"] = round(time.time() - _t0, 1)
+    out["state"] = "MEASURED"
+    RESULTS["mg-runtime-probe"] = out
+    return out
+
+
 def pair_labels(theirs_name, ours_name):
     """The two captions, written HONESTLY (Zac, 2026-09-19). PURE.
 
@@ -7214,47 +7419,147 @@ def frame_diff_profile(a_paths, b_paths, reader=None):
             "why": "%d of %d sheet(s) carry at least one differing pixel" % (differing, len(profile))}
 
 
-def pair_differs(arm_a, arm_b, reader=None):
-    """RULE 3, as a function. Two arms are deliverable only once proven to differ.
+def pair_differs(arm_a, arm_b, reader=None, control_a=None, control_b=None):
+    """RULE 3, WITH A CONTROL. Two arms are deliverable only once proven to differ
+    BECAUSE OF THE THING UNDER TEST.
 
-    Three rounds of Zac's time were lost judging pairs that may have been
-    identical, so this runs BEFORE delivery and an unproven pair withholds. An
-    ABSENT or FAILED read is NOT a pass: a comparison that could not be made has
-    not shown the arms differ, and saying so is the whole point.
+    WHY THE CONTROL EXISTS, MEASURED 2026-09-19. The first build of this pair used
+    two ChatCut projects, and the gate said DIFFER on all four sheets — including
+    the two covering 0-7s, where NEITHER arm has a zoom. Two projects are two
+    uploads and two independent preview renders, so identical content came back
+    with a mean absolute difference of 2.26 and peaks to 253. The gate was right
+    that the pictures differed and wrong about why, which is the same failure it
+    was built to prevent, one level down: *a pair that differs for the wrong
+    reason*. My own note from this repo says it plainly — two arms that both
+    printed nothing are not a control.
+
+    So the arms now share one project, one upload and one timeline, placed and
+    removed in sequence, and the frames OUTSIDE the zoom span are compared too.
+    If the control differs at all, the instrument is not stable enough to attribute
+    anything and the pair is WITHHELD rather than explained.
+
+    -> {state: DIFFER | IDENTICAL | CONFOUNDED | ABSENT | FAILED, why, profile, control}
     """
     fa = ((arm_a or {}).get("frames") or {}).get("sheets") or []
     fb = ((arm_b or {}).get("frames") or {}).get("sheets") or []
+    ctrl = None
+    if control_a is not None or control_b is not None:
+        ctrl = frame_diff_profile(control_a or [], control_b or [], reader=reader)
+        if ctrl["state"] != "MEASURED":
+            return {"state": ctrl["state"], "why": "the control could not be read: %s" % ctrl["why"],
+                    "profile": None, "control": ctrl}
+        if ctrl["differing"]:
+            return {"state": "CONFOUNDED", "control": ctrl, "profile": None,
+                    "why": ("%d of %d CONTROL sheet(s) differ where neither arm has a zoom "
+                            "(mean up to %.2f, peak %d) — the two arms are not comparable, so a "
+                            "difference inside the span cannot be attributed to the curve"
+                            % (ctrl["differing"], ctrl["n"], max(ctrl["profile"] or [0]),
+                               int(ctrl["max_abs"])))}
     prof = frame_diff_profile(fa, fb, reader=reader)
     if prof["state"] != "MEASURED":
-        return {"state": prof["state"], "why": prof["why"], "profile": prof}
+        return {"state": prof["state"], "why": prof["why"], "profile": prof, "control": ctrl}
     if not prof["differing"]:
-        return {"state": "IDENTICAL", "profile": prof,
+        return {"state": "IDENTICAL", "profile": prof, "control": ctrl,
                 "why": "every one of %d compared sheet(s) is pixel-identical — the two zooms "
                        "rendered the same picture, so there is no pair to show" % prof["n"]}
-    return {"state": "DIFFER", "profile": prof,
-            "why": "%d of %d sheet(s) differ, peak per-pixel difference %d"
-                   % (prof["differing"], prof["n"], int(prof["max_abs"]))}
+    return {"state": "DIFFER", "profile": prof, "control": ctrl,
+            "why": "%d of %d sheet(s) in the span differ, peak per-pixel difference %d%s"
+                   % (prof["differing"], prof["n"], int(prof["max_abs"]),
+                      "" if ctrl is None else "; the control is pixel-identical across %d sheet(s)" % ctrl["n"])}
 
 
-PORTED_PROPS = {
-    "SmoothPush": [
-        {"key": "clip", "label": "Clip", "type": "video", "defaultValue": ""},
-        {"key": "srcFrom", "label": "Source start frame", "type": "number", "defaultValue": 0},
-        {"key": "scale", "label": "Peak magnification", "type": "number", "defaultValue": 1.2},
-        {"key": "originX", "label": "Origin X", "type": "number", "defaultValue": 0.5},
-        {"key": "originY", "label": "Origin Y", "type": "number", "defaultValue": 0.5},
-        {"key": "punch", "label": "Punch (accelerate into the word)", "type": "boolean", "defaultValue": False},
-        {"key": "capped", "label": "Velocity cap", "type": "boolean", "defaultValue": True},
-    ],
-    "StepZoom": [
-        {"key": "clip", "label": "Clip", "type": "video", "defaultValue": ""},
-        {"key": "srcFrom", "label": "Source start frame", "type": "number", "defaultValue": 0},
-        {"key": "scale", "label": "Step magnification", "type": "number", "defaultValue": 1.3},
-        {"key": "originX", "label": "Origin X", "type": "number", "defaultValue": 0.5},
-        {"key": "originY", "label": "Origin Y", "type": "number", "defaultValue": 0.5},
-        {"key": "stepAtFrame", "label": "Step at frame", "type": "number", "defaultValue": 0},
-    ],
-}
+def pair_labels(theirs_name, ours_name):
+    """The two captions, written HONESTLY (Zac, 2026-09-19). PURE.
+
+    He asked for the sides labelled "our timing carried" or "their default", and
+    those words are not decoration: a preset that takes only a start frame and a
+    duration HAS no timing to carry, so calling its side anything else would be
+    the claim doing the work the picture is supposed to do.
+    """
+    return ("THEIRS — %s: their default (start frame and duration only; constant speed, no curve)" % theirs_name,
+            "OURS — %s: our timing carried (ramp lands on the word, holds, releases; velocity-capped)" % ours_name)
+
+
+def stack_pair(top_path, bottom_path, labels, out_path, writer=None):
+    """Two sheets, stacked, each captioned. -> {state, path, why}. Reader/writer injectable.
+
+    The sheets are frame GRIDS in time order, so stacking them puts the two arms'
+    same moments directly above one another — which is the comparison, and is why
+    this is a stack and not two files in a folder.
+    """
+    if not top_path or not bottom_path:
+        return {"state": "ABSENT", "path": None,
+                "why": "one side has no sheet (%s / %s)" % (bool(top_path), bool(bottom_path))}
+    try:
+        from PIL import Image, ImageDraw
+        A, B = Image.open(top_path).convert("RGB"), Image.open(bottom_path).convert("RGB")
+        w = max(A.width, B.width)
+        bar = 34
+        out = Image.new("RGB", (w, A.height + B.height + bar * 2), (14, 14, 16))
+        d = ImageDraw.Draw(out)
+        d.text((10, 9), labels[0], fill=(235, 235, 235))
+        out.paste(A, (0, bar))
+        d.text((10, bar + A.height + 9), labels[1], fill=(235, 235, 235))
+        out.paste(B, (0, bar * 2 + A.height))
+        (writer or (lambda im, p: im.save(p, quality=92)))(out, out_path)
+        return {"state": "MEASURED", "path": out_path,
+                "why": "%dx%d, theirs above ours at matched times" % (out.width, out.height)}
+    except Exception as e:                                        # noqa: BLE001
+        return {"state": "FAILED", "path": None, "why": str(e)[:200]}
+
+
+def frame_diff_profile(a_paths, b_paths, reader=None):
+    """Per-frame difference between two arms' contact sheets. PURE (reader injectable).
+
+    NO THRESHOLD, BY DESIGN. This repo's determinism law is byte-identity, not a
+    PSNR bar, and a threshold here would be a number calibrated on one pair that
+    then decides every future pair. The question asked is the binary one: is any
+    pixel different? A pair that renders identically is the failure; how big the
+    difference is, is Zac's judgement and not a gate's.
+
+    -> {state, n, differing, max_abs, profile, why}
+       state MEASURED  both sides read and compared
+             ABSENT    one or both sides produced no frames — NOTHING is claimed
+             FAILED    a sheet could not be read, with what it said
+    `profile` is the per-frame mean absolute difference IN ORDER, so a pair that
+    differs only at the edges (a misalignment) is distinguishable from one that
+    differs through the middle (the curve), which is the thing being shown.
+    """
+    if not a_paths or not b_paths:
+        return {"state": "ABSENT", "n": 0, "differing": None, "max_abs": None, "profile": [],
+                "why": "no frames on %s side" % ("either" if not a_paths and not b_paths
+                                                 else "theirs" if not a_paths else "ours")}
+    if len(a_paths) != len(b_paths):
+        return {"state": "FAILED", "n": 0, "differing": None, "max_abs": None, "profile": [],
+                "why": "the arms produced different frame counts (%d vs %d) — not comparable"
+                       % (len(a_paths), len(b_paths))}
+
+    def _read(p):
+        from PIL import Image
+        import numpy as np
+        return np.asarray(Image.open(p).convert("RGB"), dtype="int16")
+
+    rd = reader or _read
+    profile, differing, max_abs = [], 0, 0
+    for pa, pb in zip(a_paths, b_paths):
+        try:
+            A, B = rd(pa), rd(pb)
+        except Exception as e:                                    # noqa: BLE001
+            return {"state": "FAILED", "n": len(profile), "differing": None, "max_abs": None,
+                    "profile": profile, "why": "could not read a sheet: %s" % str(e)[:200]}
+        if getattr(A, "shape", None) != getattr(B, "shape", None):
+            return {"state": "FAILED", "n": len(profile), "differing": None, "max_abs": None,
+                    "profile": profile, "why": "sheet shapes differ (%s vs %s) — not comparable"
+                                               % (getattr(A, "shape", "?"), getattr(B, "shape", "?"))}
+        d = abs(A - B)
+        mad = float(d.mean())
+        profile.append(round(mad, 4))
+        if float(d.max()) > 0:
+            differing += 1
+        max_abs = max(max_abs, float(d.max()))
+    return {"state": "MEASURED", "n": len(profile), "differing": differing,
+            "max_abs": max_abs, "profile": profile,
+            "why": "%d of %d sheet(s) carry at least one differing pixel" % (differing, len(profile))}
 
 
 def ported_code(name):
@@ -7316,67 +7621,81 @@ def zoom_pair(clip_url: str = "", at_s: float = 12.0, span_s: float = 2.0,
             print("  %-26s FAILED   %s" % (name, str(e)[:160]), flush=True)
             return None
 
+    def split_sheets(sheets, times, cut_frame):
+        """Sheets entirely BEFORE the zoom are the control; the rest are the test. PURE.
+
+        A sheet is a grid of consecutive frames, so a sheet whose LAST frame is
+        still before the zoom starts contains nothing under test and must come
+        back pixel-identical between the two passes.
+        """
+        if not sheets or not times:
+            return [], list(sheets or [])
+        per = max(1, (len(times) + len(sheets) - 1) // len(sheets))
+        ctrl, test = [], []
+        for i, sh in enumerate(sheets):
+            last = times[min(len(times) - 1, (i + 1) * per - 1)]
+            (ctrl if float(last) * fps < cut_frame else test).append(sh)
+        return ctrl, test
+
     def arm(label, place):
-        """One project, one zoom, the frames over the span. -> dict with state."""
-        stage = prestage(tok, "", controls={}, source_path="/work/source.mp4",
-                         want_components=set(), titles=[])
-        pid, base, src_asset = stage["projectId"], stage.get("baseItemId"), stage.get("sourceAssetId")
-        print("  %-8s project=%s base=%s" % (label.upper(), str(pid)[:8], str(base)[:10]), flush=True)
+        """ONE PASS on the SHARED project: place, read the frames, then REMOVE.
+
+        ONE PROJECT, NOT TWO. The first build gave each arm its own project, and
+        the control proved that wrong: frames covering 0-7s, where neither arm has
+        a zoom, came back with a mean absolute difference of 2.26 and peaks to 253,
+        because two projects are two uploads and two independent renders. Sharing
+        the project, the upload and the timeline leaves the curve as the only thing
+        that changed — and the control says so every run rather than being assumed.
+        """
         placed = step("%s: place" % label, lambda: place(pid, base, src_asset))
-        rb = read_back(tok, stage)
-        items = rb.get("items") or []
-        a = {"project": pid, "stage": stage, "placed": bool(placed),
-             "items": len(items), "types": [i.get("itemType") for i in items]}
+        a = {"placed": bool(placed)}
         if not placed:
             a["state"] = "FAILED"; a["why"] = "nothing was placed for this arm"
             return a
-        # DENSE OVER THE SPAN ONLY. The comparison is about the CURVE, so the
-        # frames that matter are the ones inside the move; sampling the whole
-        # timeline would spend the budget where both arms are identical by
-        # construction and dilute the very difference being proven.
+        item_id = ((placed.get("adds") or [{}])[0] or {}).get("id")
+        a["item"] = item_id
         try:
             sheets, times = _preview_frames(tok, pid, from_frame + dur_frames, fps=fps,
                                             density_fps=6.0, out_dir="/work/%s_frames" % label)
-            a["frames"] = {"n": len(times), "sheets": sheets, "times": times}
+            ctrl, test = split_sheets(sheets, times, from_frame)
+            a["frames"] = {"n": len(times), "sheets": test, "control": ctrl, "times": times}
             a["state"] = "MEASURED"
+            print("  %-8s %d frame(s) -> %d control sheet(s) + %d test sheet(s)"
+                  % (label.upper(), len(times), len(ctrl), len(test)), flush=True)
         except Exception as e:                                    # noqa: BLE001
             a["frames"] = {"state": "FAILED", "why": str(e)[:200]}
             a["state"] = "FAILED"; a["why"] = "the frames could not be read: %s" % str(e)[:160]
+        # REMOVED BEFORE THE NEXT ARM. Both arms cover the same span on the same
+        # timeline, so leaving one in place would put the second arm's zoom on top
+        # of the first and the frames would answer for neither.
+        if item_id:
+            r = step("%s: remove" % label,
+                     lambda: _mcp_call(tok, "edit_item", {"projectId": pid, "removes": [item_id]}, expect=None))
+            a["removed"] = bool(r)
+            if not r:
+                a["state"] = "FAILED"
+                a["why"] = "the arm could not be removed, so the next arm would be measured on top of it"
         return a
 
-    # ── THEIRS: their preset, on the base item ────────────────────────────
-    def place_theirs(pid, base, _src):
-        return _mcp_call(tok, "edit_item", {"projectId": pid, "adds": [
-            {"type": "effect", "assetId": "builtin:zoom", "targetItemId": base,
-             "fromFrame": from_frame, "durationInFrames": dur_frames,
-             "propertyOverrides": {"magnification": magnification, "shape": theirs}}]},
-            expect="adds")
-
-    # ── OURS: our component, as a layer over the base ─────────────────────
-    def place_ours(pid, base, src_asset):
-        code = ported_code("SmoothPush")
-        asset = _mcp_call(tok, "create_motion_graphic_from_code", {
-            "projectId": pid, "name": "SmoothPush",
-            "code": code, "width": 1080, "height": 1920,
-            "durationInFrames": dur_frames,
-            "properties": normalise_properties(PORTED_PROPS["SmoothPush"])}, expect=None)
-        mg = asset_id_from(asset or {})
-        if not mg:
-            raise RuntimeError("SmoothPush did not register: %s" % registration_refusal(asset or {}))
-        out["our_asset"] = mg
-        return _mcp_call(tok, "edit_item", {"projectId": pid, "adds": [
-            {"type": "motion-graphic", "assetId": mg,
-             "fromFrame": from_frame, "durationInFrames": dur_frames,
-             "propertyOverrides": {"clip": src_asset, "srcFrom": from_frame,
-                                   "scale": magnification, "punch": bool(punch),
-                                   "capped": True}}]}, expect="adds")
+    stage = prestage(tok, "", controls={}, source_path="/work/source.mp4",
+                     want_components=set(), titles=[])
+    pid, base, src_asset = stage["projectId"], stage.get("baseItemId"), stage.get("sourceAssetId")
+    out["project"] = pid
+    print("  SHARED PROJECT  %s base=%s source=%s  (both arms, one upload)"
+          % (str(pid)[:8], str(base)[:10], str(src_asset)[:12]), flush=True)
 
     out["arms"]["theirs"] = arm("theirs", place_theirs)
     out["arms"]["ours"] = arm("ours", place_ours)
 
-    # ── RULE 3: PROVE THEY DIFFER, BEFORE ANYTHING REACHES HIS EYE ────────
-    out["differ"] = pair_differs(out["arms"].get("theirs") or {}, out["arms"].get("ours") or {})
+    # ── RULE 3, WITH A CONTROL: the difference must BE the zoom ───────────
+    out["differ"] = pair_differs(
+        out["arms"].get("theirs") or {}, out["arms"].get("ours") or {},
+        control_a=((out["arms"].get("theirs") or {}).get("frames") or {}).get("control"),
+        control_b=((out["arms"].get("ours") or {}).get("frames") or {}).get("control"))
     print("  DIFFER                     %s — %s" % (out["differ"]["state"], out["differ"]["why"]), flush=True)
+    if (out["differ"].get("control") or {}).get("state") == "MEASURED":
+        print("  CONTROL                    %d sheet(s) outside the zoom, %d differing"
+              % (out["differ"]["control"]["n"], out["differ"]["control"]["differing"]), flush=True)
     if out["differ"]["state"] != "DIFFER":
         out["state"] = "WITHHELD"
         out["why"] = ("the pair was not proven to differ, so it is not delivered: %s"
