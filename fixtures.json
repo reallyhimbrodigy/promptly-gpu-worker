@@ -134,12 +134,17 @@
    "commons_page": "https://commons.wikimedia.org/wiki/File%3AA_participant_on_the_street_of_Lagos_talks_about_Wikipedia.webm",
    "source_url": "https://upload.wikimedia.org/wikipedia/commons/9/9d/A_participant_on_the_street_of_Lagos_talks_about_Wikipedia.webm",
    "original_title": "A participant on the street of Lagos talks about Wikipedia.webm",
-   "duration_s": 55.94,
-   "resolution": "1920x1080",
    "size_mb": 26.3,
    "subject": "Black woman, mid-shot to camera, handheld mic",
    "setting": "Lagos street, bright direct daylight, busy background",
-   "language": "English (Nigerian)"
+   "language": "English (Nigerian)",
+   "width": 1920,
+   "height": 1080,
+   "duration": 55.943,
+   "fps": 23.976,
+   "r_frame_rate": "24000/1001",
+   "vcodec": "h264",
+   "acodec": "aac"
   },
   "th_kolkata_en": {
    "s3_key": "ab-sources/fixture-corpus-v1/th_kolkata_en-a1ba6fd2.mp4",
@@ -152,12 +157,17 @@
    "commons_page": "https://commons.wikimedia.org/wiki/File%3AInterview_in_English_of_visually_challenged_individual_about_losing_job_due_to_COVID-19_pandemic-outstation_issue-Kolkata-West_Bengal-September_2021-VID_20210905_143847.webm",
    "source_url": "https://upload.wikimedia.org/wikipedia/commons/2/2d/Interview_in_English_of_visually_challenged_individual_about_losing_job_due_to_COVID-19_pandemic-outstation_issue-Kolkata-West_Bengal-September_2021-VID_20210905_143847.webm",
    "original_title": "Interview in English of visually challenged individual about losing job due to COVID-19 pandemic-outstation issue-Kolkata-West Bengal-September 2021-VID 20210905 143847.webm",
-   "duration_s": 72.57,
-   "resolution": "1280x720",
    "size_mb": 30.8,
    "subject": "South Asian man, sunglasses, mask pulled down, close mid-shot to camera",
    "setting": "Kolkata street, overcast, people moving behind",
-   "language": "English (Indian)"
+   "language": "English (Indian)",
+   "width": 1280,
+   "height": 720,
+   "duration": 72.571,
+   "fps": 28.0,
+   "r_frame_rate": "28/1",
+   "vcodec": "h264",
+   "acodec": "aac"
   },
   "th_baiga_hi": {
    "s3_key": "ab-sources/fixture-corpus-v1/th_baiga_hi-7b843eb6.mp4",
@@ -170,12 +180,17 @@
    "commons_page": "https://commons.wikimedia.org/wiki/File%3AInterview_of_a_Baiga_tribe_named_Lakhan_Lal_in_Hindi_Language_by_Suyash_Dwivedi.webm",
    "source_url": "https://upload.wikimedia.org/wikipedia/commons/8/89/Interview_of_a_Baiga_tribe_named_Lakhan_Lal_in_Hindi_Language_by_Suyash_Dwivedi.webm",
    "original_title": "Interview of a Baiga tribe named Lakhan Lal in Hindi Language by Suyash Dwivedi.webm",
-   "duration_s": 53.8,
-   "resolution": "1920x1080",
    "size_mb": 33.2,
    "subject": "Older Adivasi man in traditional headdress",
    "setting": "outdoor, shaded; PILLARBOXED — the subject occupies a narrow centre strip of a 1920x1080 frame",
-   "language": "Hindi"
+   "language": "Hindi",
+   "width": 1920,
+   "height": 1080,
+   "duration": 53.8,
+   "fps": 25.0,
+   "r_frame_rate": "25/1",
+   "vcodec": "h264",
+   "acodec": "aac"
   },
   "th_estudiante_es": {
    "s3_key": "ab-sources/fixture-corpus-v1/th_estudiante_es-927548a9.mp4",
@@ -188,12 +203,17 @@
    "commons_page": "https://commons.wikimedia.org/wiki/File%3AEntrevista_a_un_estudiante.webm",
    "source_url": "https://upload.wikimedia.org/wikipedia/commons/d/d7/Entrevista_a_un_estudiante.webm",
    "original_title": "Entrevista a un estudiante.webm",
-   "duration_s": 39,
-   "resolution": "1080x2400",
    "size_mb": 32.6,
    "subject": "young adult, full-body standing, wider than a typical talking head",
    "setting": "indoor/entrance, even light; NATIVELY VERTICAL 1080x2400",
-   "language": "Spanish"
+   "language": "Spanish",
+   "width": 1080,
+   "height": 2400,
+   "duration": 39.0,
+   "fps": 30.0,
+   "r_frame_rate": "30/1",
+   "vcodec": "h264",
+   "acodec": "aac"
   },
   "th_simurali_in": {
    "s3_key": "ab-sources/fixture-corpus-v1/th_simurali_in-24e82fc6.mp4",
@@ -206,13 +226,18 @@
    "commons_page": "https://commons.wikimedia.org/wiki/File%3AGirish_Karmakar_-_Interview_-_Simurali_2014-03-09_9643.ogv",
    "source_url": "https://upload.wikimedia.org/wikipedia/commons/5/51/Girish_Karmakar_-_Interview_-_Simurali_2014-03-09_9643.ogv",
    "original_title": "Girish Karmakar - Interview - Simurali 2014-03-09 9643.ogv",
-   "duration_s": 41.64,
-   "resolution": "1920x1080",
    "size_mb": 44,
    "subject": "elderly man, white hair, THREE-QUARTER PROFILE rather than to camera",
    "setting": "outdoor greenery, dappled light",
-   "language": "not stated by the source — UNVERIFIED; Simurali is West Bengal so probably Bengali"
+   "language": "not stated by the source — UNVERIFIED; Simurali is West Bengal so probably Bengali",
+   "width": 1920,
+   "height": 1080,
+   "duration": 41.64,
+   "fps": 25.0,
+   "r_frame_rate": "25/1",
+   "vcodec": "h264",
+   "acodec": "aac"
   }
  },
- "_fixture_corpus": "FIVE RIGHTS-CLEAR TALKING HEADS (Zac, 2026-09-20). Every talking-head fixture before these was Zac, one take of one person, so nothing measured on them generalised across people, rooms, lighting or skin tone. These are five different people in five different places: two of the five are English, one Hindi, one Spanish, one unverified; four of the five are darker-skinned subjects. ALL FIVE REQUIRE ATTRIBUTION (four CC BY-SA 4.0, one CC BY 3.0) — the author and the Commons page are recorded on every row and must travel with any published use. LIMITS, stated rather than discovered later: all five are OUTDOOR or entrance-lit, because a second search round for free-licensed INDOOR/studio talking heads of usable length returned ZERO; th_baiga_hi is pillarboxed; th_simurali_in is a three-quarter profile rather than to camera; th_estudiante_es is a wider full-body framing."
+ "_fixture_corpus": "FIVE RIGHTS-CLEAR TALKING HEADS (Zac, 2026-09-20). Every talking-head fixture before these was Zac, one take of one person, so nothing measured on them generalised across people, rooms, lighting or skin tone. These are five different people in five different places: two of the five are English, one Hindi, one Spanish, one unverified; four of the five are darker-skinned subjects. ALL FIVE REQUIRE ATTRIBUTION (four CC BY-SA 4.0, one CC BY 3.0) — the author and the Commons page are recorded on every row and must travel with any published use. LIMITS, stated rather than discovered later: all five are OUTDOOR or entrance-lit, because a second search round for free-licensed INDOOR/studio talking heads of usable length returned ZERO; th_baiga_hi is pillarboxed; th_simurali_in is a three-quarter profile rather than to camera; th_estudiante_es is a wider full-body framing.\n\nGEOMETRY KEY NAMES, CORRECTED 2026-09-20. The five corpus entries were written\nwith `duration_s` and `resolution: \"WxH\"` while the eleven before them use\n`duration`, `width`, `height`. The manifest reader tests the canonical three, so\nit reported all five as MISSING GEOMETRY while the geometry was sitting in the\nfile under other names -- the same shape as renaming `language` to `typed_in`\nunder a reader that still read `language`. Re-measured with ffprobe on the exact\nlocal artefacts that were uploaded and written under the canonical keys, with\n`fps` and `r_frame_rate` added because a rate is what the canvas has to follow:\n  th_lagos_en       1920x1080  23.976  55.943s\n  th_kolkata_en     1280x720   28.000  72.571s\n  th_baiga_hi       1920x1080  25.000  53.800s\n  th_estudiante_es  1080x2400  30.000  39.000s\n  th_simurali_in    1920x1080  25.000  41.640s\nFIVE SOURCES, FOUR FRAME RATES AND THREE ASPECTS, none of them 1080x1920@30 --\nwhich is the prestage default, and is what all five would have been rendered at.\nth_lagos_en's numbers agree with what ChatCut read back independently after\nimport (1920x1080, 23.976, 55.9s)."
 }

@@ -40,31 +40,90 @@ than inferred from the fact that they are built and gated.
 
 ## Transitions and overlays (11)
 
-| component | sent | answered | read-back | frame |
-|---|:--:|:--:|:--:|:--:|
-| DipToBlack | ❌ | ❌ | ❌ | ❌ |
-| SlideOver | ❌ | ❌ | ❌ | ❌ |
-| CardSwipe | ❌ | ❌ | ❌ | ❌ |
-| ZoomThrough | ❌ | ❌ | ❌ | ❌ |
-| StepPush | ❌ | ❌ | ❌ | ❌ |
-| CrossfadeZoom | ❌ | ❌ | ❌ | ❌ |
-| Stack | ❌ | ❌ | ❌ | ❌ |
-| ShutterFlash | ❌ | ❌ | ❌ | ❌ |
-| FilmStrip | ❌ | ❌ | ❌ | ❌ |
-| ShutterFlashOverlay | ❌ | ❌ | ❌ | ❌ |
-| LightLeakOverlay | ❌ | ❌ | ❌ | ❌ |
+| component | sent | answered | read-back | frame | asset · item | placed | seam frame · YAVG | what the frame shows |
+|---|:--:|:--:|:--:|:--:|---|---|---|---|
+| DipToBlack | ✅ | ✅ | ✅ | ✅ | `cb71cf0eb9` · `c9d25681f3` | 115–124 | f120 · 0.0 | full black at the seam — YMIN=YAVG=YMAX=0 |
+| SlideOver | ✅ | ✅ | ✅ | ✅ | `9edf3a9e47` · `85b1e6c1f2` | 232–247 | f240 · 107.9 | B's edge+shadow at x=22.7%, black left of it |
+| CardSwipe | ✅ | ✅ | ✅ | ✅ | `8335eb160c` · `4b5a751f14` | 352–367 | f360 · 143.0 | B nearly full (scale .992, +6px), A gone off-left |
+| ZoomThrough | ✅ | ✅ | ✅ | ✅ | `2ce63eec41` · `212376c501` | 473–486 | f480 · 63.2 | B 0.854/0.667 over black + A 2.9x/0.143 — YMAX 165 |
+| StepPush | ✅ | ✅ | ✅ | ✅ | `41c5787443` · `2185feb737` | 591–608 | f600 · 115.4 | A left half / B right half, both drawing |
+| CrossfadeZoom | ✅ | ✅ | ✅ | ✅ | `f8edf74374` · `c2ce577a20` | 710–729 | f720 · 139.4 | both plates superimposed mid-dissolve |
+| Stack | ✅ | ✅ | ✅ | ✅ | `02450e96cc` · `d2782baedc` | 828–851 | f840 · 170.1 | B stacked over A, A lifted and lightened |
+| ShutterFlash | ✅ | ✅ | ✅ | ✅ | `60d06591b4` · `e60567719f` | 951–968 | f960 · 1.31 | shutter closed to a centre dot — YMAX 255 on YAVG 1.3 |
+| FilmStrip | ✅ | ✅ | ✅ | ✅ | `5a429ed37a` · `f7c6fdd991` | 1065–1094 | f1080 · 94.8 | rounded tiles scrolling, two full + one entering |
+| ShutterFlashOverlay | ✅ | ✅ | ✅ | ✅ | `08ba2ab80d` · `b30c61e8e1` | 1194–1205 | f1200 · 216.7 | whole frame washed, speaker still legible; control f1160 = 46.0 |
+| LightLeakOverlay | ✅ | ✅ | ✅ | ✅ | `2fac567e49` · `d0be6950ea` | 1310–1329 | f1320 · 143.4 | warm gold leak drifting tl-br; control f1290 = 45.3 |
 
-> **ELEVEN OF THIRTY-THREE ARE AUTHORED, BUILT AND GATED — AND HAVE NEVER BEEN
-> SENT.** This is the honest headline of the table and it should not be softened.
-> Each one passes the component contract, carries its property table, emits
-> through the one-source build step and holds the no-fallback rule. None of that
-> is evidence it draws. `built` is not `committed` is not `deployed` is not
-> `working`, and every one of these sits at `built`.
+> **ALL ELEVEN ARE NOW SENT, ANSWERED, READ BACK AND FRAME-PROVEN.** Project
+> `3b9df622-769e-421a-afa4-e171ad68bbf6`, corpus fixture **th_lagos_en**
+> (`135a65c7`, 1920x1080 @ 23.976, 55.9s) on V1 `1e15c228` as twelve 120-frame
+> segments whose source seconds jump ~28s per cut, so each of the eleven seams
+> is a real cut between visibly different material; transitions on V2
+> `ee6a5ee0ab`. Every registration returned `isValid: true, errors: []`. Frames
+> were downloaded and looked at, not merely rendered — the YAVG column is
+> measured off the downloaded JPEG, and the three CONTROL frames (1160, 1290
+> both at V2-empty, plus f60) are what the overlay frames are read against, so
+> the difference is the component and not the footage.
 
-What they have instead, which is real but is not parity: contract 0 violations
-on all eleven, 24/24 emitted blobs in sync with one cap source, 24/24
-no-fallback clean, and a measured peak displacement for each of the eight that
-move pixels.
+They also carry, as before: contract 0 violations on all eleven, 24/24 emitted
+blobs in sync with one cap source, 24/24 no-fallback clean, and a measured peak
+displacement for each of the eight that move pixels.
+
+### Three things the run measured that no gate was asking
+
+**1. FilmStrip is the only DIVERGED registration, and it is a rewrite.**
+`inspect_asset(5a429ed37a, includeCode:true)` comes back byte-identical to what
+I sent except in two places, where the validator appended `item` to my nested
+sub-components' destructuring: `({ n })` became `({ n, item })` and
+`({ from, left, top, w, h, radius, transform, filter })` became the same plus
+`item`. Its registration was the one that warned
+`"Auto-fixed: Injected missing ({item}) prop to satisfy validator contract"`.
+Neither sub-component reads `item` and no call site passes one, so it arrives
+`undefined` and the injection is behaviourally a no-op — but it is a SECOND
+rewrite class beside the fallback strip, it applies to inner arrow components
+rather than the top-level one, and it is exactly what `registered_diff` exists
+to catch. The other ten read back byte-identical.
+
+**2. The no-fallback strip went quiet at the wire, and the reason is narrower
+than "no fallbacks".** Every registration before tonight returned
+`"Auto-fixed: Stripped hardcoded fallbacks from props"`. All eleven tonight
+returned `warnings: []` — except FilmStrip's injection above. LightLeakOverlay
+is the proof of what the stripper actually keys on: it ships THREE `||`
+expressions — `(item && item.props) || {}`, `palettes[palette] || palettes.warm`
+and `paths[direction] || paths["tl-br"]` — and all three survived verbatim. The
+stripper targets a fallback whose LEFT operand is a `props.x` read, not `||` in
+general. That is the same right-hand/left-hand distinction that made
+`readsPropWithFallback` wrong in both directions earlier, now confirmed from the
+service side rather than inferred from my own gate.
+
+**3. The transitions and the base track disagree about fit, and it is visible.**
+Every transition mounts its own `<Video style={{objectFit:"cover"}}>` on a
+`background:"#000"` root, so it CROPS the 1920x1080 source to fill the
+1080x1920 canvas. The base track letterboxes the same source into a band. Sheet
+A (seams) is therefore full-bleed close-up and sheet B (controls f60/f1160/f1290)
+is letterboxed with black bars — so at every seam the framing jumps to a crop
+and back. This is a PLACEMENT consequence, not a port defect: the components are
+faithful. But on a real edit a transition item must be given the same fit as the
+material under it, or the cut it exists to smooth introduces a reframe of its
+own. Nothing in the contract, the property tables or any gate currently asks
+this question.
+
+### Three seams that looked wrong at thumbnail size and are faithful
+
+Checked against `src/remotion/src/transitions/*` rather than judged from a
+300px tile, because "it looks wrong" is not a finding:
+
+* **SlideOver f240** — black across the left 22.7%. Original geometry is
+  identical (`translateA 0 -> sign*-25`, `scaleA 1 -> 0.92`,
+  `translateB -sign*100 -> 0`, `background:"#000"`). At e≈0.78 A's left edge is
+  at 22.6% and B's is at 22.0%, so B covers A completely and the black is the
+  space A vacated. The original does this too.
+* **ZoomThrough f480** — dim, YMAX 165 where every other frame reaches 233-255.
+  At the seam the original is B at scale 0.854 / opacity 0.667 over black plus A
+  at scale 2.9 / opacity 0.143: a cross-dissolve THROUGH black, so the midpoint
+  is supposed to be dark and low-contrast.
+* **ShutterFlash f960** — YAVG 1.31 with YMAX 255. The shutter is closed to a
+  centre dot. That is the mechanism, not a black frame.
 
 ## Sound effects (15)
 

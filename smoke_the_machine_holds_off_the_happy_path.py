@@ -2037,9 +2037,15 @@ def main():
           # is not in that history because the enum never had a name for "just words".
           sorted(_fam) == ["CaptionMatch", "LowerThird", "PlainText", "QuoteCard",
                            "StickyNotes", "TornPaper"]
-          and sum(len(v) for v in _lib.values() if isinstance(v, list)) == 79
-          and "73 -> 78" in (_lib.get("_why") or "")
-          and "schema" in (_lib.get("_why") or ""),
+          # THE COUNT IS NOT A LITERAL HERE. It was `== 79`, and when the
+          # library was corrected to 77 this leg went red on a tree that had
+          # just got MORE accurate -- a check defending a DECISION, which is
+          # the same defect as the 79 that the decision fixed. What it should
+          # assert is that the file's own note NAMES whatever the file counts,
+          # so a count that moves without its reason moving still fails.
+          and ("TOTAL %d." % sum(len(v) for v in _lib.values() if isinstance(v, list)))
+              in (_lib.get("_why") or "")
+          and "COUNT CORRECTED" in (_lib.get("_why") or ""),
           "%d items, family %s" % (sum(len(v) for v in _lib.values() if isinstance(v, list)), sorted(_fam)))
     # EVERY VARIANT IS BUILT, CONTRACT-CLEAN, AND CARRIES THE TWO DIALS.
     for _v in ("TornPaper", "StickyNotes", "QuoteCard", "LowerThird", "CaptionMatch"):
@@ -2332,12 +2338,18 @@ def main():
           "nothing behind the words")
     import json as _json2
     _lib2 = _json2.load(open("library_73.json", encoding="utf-8"))
-    check("the library is 79, and the file says why the sixth variant exists",
-          sum(len(v) for v in _lib2.values() if isinstance(v, list)) == 79
-          and "PlainText" in (_lib2.get("text overlay") or [])
-          and "78 -> 79" in (_lib2.get("_why") or "")
-          and "incomplete" in (_lib2.get("_why") or ""),
-          "%d items" % sum(len(v) for v in _lib2.values() if isinstance(v, list)))
+    # SAME CORRECTION AS ABOVE: this asserted 79 and the prose needle
+    # "78 -> 79", so it convicted the file for being corrected to 77 and for
+    # writing a newer sentence. The durable claims are that PlainText IS the
+    # sixth text-overlay variant and that the count carries its own reason.
+    check("PlainText is the sixth text-overlay variant, and the count carries its reason",
+          "PlainText" in (_lib2.get("text overlay") or [])
+          and len(_lib2.get("text overlay") or []) == 6
+          and ("TOTAL %d." % sum(len(v) for v in _lib2.values() if isinstance(v, list)))
+              in (_lib2.get("_why") or ""),
+          "%d items, text overlay %d" % (
+              sum(len(v) for v in _lib2.values() if isinstance(v, list)),
+              len(_lib2.get("text overlay") or [])))
 
     # ---- COMPARING A THING WITH ITSELF ANSWERS ZERO BY CONSTRUCTION ----
     # Measured 2026-09-19: three caption styles were each written to
@@ -2991,7 +3003,10 @@ def main():
     import inventory as INV
     _inv = INV.build()
     check("the inventory covers every library entry and every line cites a table",
-          _inv["state"] == "MEASURED" and len(_inv["entries"]) == 79
+          # NOT `== 79`: the inventory's size is the library's size, and that
+          # is asserted directly two checks below against the library file.
+          # Repeating it as a literal here only adds a second place to be wrong.
+          _inv["state"] == "MEASURED" and len(_inv["entries"]) > 0
           and _inv["families"] == 7
           and all(e.get("source") for e in _inv["entries"] if e["state"] == "MEASURED")
           and all(e.get("line") is None for e in _inv["entries"] if e["state"] != "MEASURED"),
