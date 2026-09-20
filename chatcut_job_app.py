@@ -77,7 +77,9 @@ IMG = (
     # that Google serves to an ancient User-Agent returns an unrecognised container
     # (magic 0x18fc0400, not 0x00010000), so the woff route with a real conversion is
     # the honest one — and it is verified by the FILE'S MAGIC BYTES, not by its URL.
-    .pip_install("pillow", "numpy", "opencv-python-headless<5", "fonttools>=4.50")
+    .pip_install("pillow", "numpy", "opencv-python-headless<5", "fonttools>=4.50",
+                 # THE RECORD MUST OUTLIVE THE DISK IT WAS WRITTEN ON.
+                 "boto3")
     # THE REAL DETECTORS, NOT INVENTED ZONES. The sweep's face and burned-text
     # legs were judging against constants I made up — a face zone of 0.04-0.34
     # that reported "30% overlap" for every title, and an edge-density scan
@@ -3163,7 +3165,7 @@ def face_collision(placement_box_, face_box_, tol=FACE_OVERLAP_TOLERANCE):
 
 
 def verify_hop6_clear(plan, source="/work/source.mp4", items=None,
-                      caption_band=None):
+                      caption_band=None, frame_h=1920):
     """HOP 6 — nothing sits on the speaker's face or on the source's own text.
 
     REAL DETECTORS, NOT INVENTED ZONES. The sweep's first attempt at these two
@@ -3295,6 +3297,36 @@ def verify_hop6_clear(plan, source="/work/source.mp4", items=None,
                         "face" if name in occ else
                         ("source text" if name in bbands else "the captions"),
                         1.0))
+        # WHERE IT COULD GO, IN COORDINATES THE AGENT WRITES (Zac, 2026-09-20).
+        #
+        # Turn 2 of the morning run did the RIGHT THING with this fault -- it
+        # moved the card rather than deleting or ignoring it -- and still
+        # failed, because the message named a BAND and not a NUMBER. With
+        # nothing to aim at it invented `anchor: "upper_third_safe"` and
+        # `offsetY: -260`, two plausible keys and a guessed distance.
+        #
+        # A fault that says what is wrong and not where to put it makes the
+        # repair a guess, and a guessed repair fails the same check twice while
+        # looking like the agent ignored us. So every occupied band now ships
+        # the clear span beside it, as a fraction AND in pixels, because the
+        # agent writes pixels.
+        if mine & (occ | bbands | _capnames):
+            _occupied = sorted(occ | bbands | _capnames)
+            _spans = [fb.band_to_fraction(n) for n in _occupied
+                      if fb.band_to_fraction(n)]
+            _lo = min((sp[0] for sp in _spans), default=None)
+            _hi = max((sp[1] for sp in _spans), default=None)
+            if _lo is not None:
+                _h = float(frame_h or 1920)
+                _above = (0.0, round(_lo, 3))
+                _below = (round(_hi, 3), 1.0)
+                _pick = _above if (_above[1] - _above[0]) >= (_below[1] - _below[0]) else _below
+                out.setdefault("clear", {})[r["slot"]] = {
+                    "occupied_bands": _occupied,
+                    "occupied_y": [round(_lo, 3), round(_hi, 3)],
+                    "clear_y": [_pick[0], _pick[1]],
+                    "clear_px": [int(_pick[0] * _h), int(_pick[1] * _h)],
+                    "slot_y": [round(b[0], 3), round(b[1], 3)]}
         out["detail"].append(
             "slot%-3s band %.3f-%.3f occupies %s | face %s | source text %s"
             % (r["slot"], b[0], b[1],
@@ -3303,8 +3335,18 @@ def verify_hop6_clear(plan, source="/work/source.mp4", items=None,
     out["state"] = "FAILED" if bad else "MEASURED"
     out["why"] = (
         "%d placement(s) sit on something: %s"
-        % (len(bad), "; ".join("slot%s in the %s band, which the %s occupies"
-                               % (s, n, k) for s, n, k, _o in bad))
+        % (len(bad), "; ".join(
+            "slot%s in the %s band, which the %s occupies%s"
+            % (s, n, k,
+               (" — it spans y %.3f-%.3f, the occupied region is y %.3f-%.3f, "
+                "and the clear span is y %.3f-%.3f (%d-%dpx of %d): move it there"
+                % (tuple((out.get("clear") or {}).get(s, {}).get("slot_y", (0, 0)))
+                   + tuple((out.get("clear") or {}).get(s, {}).get("occupied_y", (0, 0)))
+                   + tuple((out.get("clear") or {}).get(s, {}).get("clear_y", (0, 0)))
+                   + tuple((out.get("clear") or {}).get(s, {}).get("clear_px", (0, 0)))
+                   + (int(frame_h or 1920),)))
+               if (out.get("clear") or {}).get(s) else "")
+            for s, n, k, _o in bad))
         if bad else
         "faces found in %d of %d sampled frames; source text in %s; no "
         "placement overlaps either"
@@ -3743,6 +3785,60 @@ def _transcript_rows(r, dur_s=None):
             b = int(m.group(4)) * 60 + int(m.group(5)) + int(m.group(6)) / 1000.0
             out.append({"t_start": a, "t_end": b, "text": m.group(7).strip()})
     return sorted(out, key=lambda b: b["t_start"])
+
+RECORD_BUCKET_ENV = ("S3_BUCKET_NAME", "SUPABASE_S3_BUCKET")
+RECORD_PREFIX = "agentic-editor/run-records"
+
+
+def archive_record(record, run_id, bucket=None, putter=None, env=None):
+    """The run record to S3, IN THE RUN. -> {state, key, sha, bytes, why}
+
+    ZAC'S RULE (2026-09-20), and it is the August rule again: the only SCORED
+    record this lane ever produced is gone from every disk. A record that lives
+    only in a container's filesystem, a Modal Dict, or a /tmp log is one wipe,
+    one preemption or one cleared temp directory from never having existed --
+    and a run's own numbers are the one artifact that cannot be regenerated,
+    because regenerating means paying for the run again.
+
+    IN THE SAME RUN, NOT AFTERWARDS BY THE LAUNCHER. The launcher is the part
+    that reliably dies: two runs were already lost to a client-side
+    cancellation, which is why RESULTS is durable at all. An archive step that
+    depends on the local process surviving protects the record from everything
+    except the thing that actually happens.
+
+    SHA'D, AND THE SHA IS OF WHAT WAS SENT. Computed on the exact bytes that go
+    to S3 so the path and the digest describe one object -- a hash taken before
+    a re-serialisation describes something nobody stored.
+    """
+    out = {"state": "ABSENT", "key": None, "sha": None, "bytes": None,
+           "why": "not attempted"}
+    env = os.environ if env is None else env
+    bucket = bucket or next((env.get(k) for k in RECORD_BUCKET_ENV if env.get(k)), None) \
+        or "promptly-video-storage"
+    if not run_id:
+        return dict(out, state="FAILED", why="no run id — a record with no name is not findable")
+    try:
+        body = json.dumps(record, default=str, sort_keys=True).encode("utf-8")
+    except (TypeError, ValueError) as e:
+        return dict(out, state="FAILED", why="record will not serialise: %s" % str(e)[:140])
+    sha = hashlib.sha256(body).hexdigest()
+    key = "%s/%s-%s.json" % (RECORD_PREFIX, run_id, sha[:12])
+    try:
+        if putter is None:
+            import boto3
+            boto3.client("s3").put_object(Bucket=bucket, Key=key, Body=body,
+                                          ContentType="application/json")
+        else:
+            putter(bucket, key, body)
+    except Exception as e:                                        # noqa: BLE001
+        # LOUD, AND NOT FATAL TO THE RUN. Losing the archive must not also lose
+        # the edit; but a silent failure here is how the record goes missing
+        # again, so it is a named FAILED on the run line.
+        return {"state": "FAILED", "key": key, "sha": sha, "bytes": len(body),
+                "why": "%s: %s" % (type(e).__name__, str(e)[:160])}
+    return {"state": "MEASURED", "key": key, "sha": sha, "bytes": len(body),
+            "why": "s3://%s/%s (%d bytes, sha256 %s)" % (bucket, key, len(body), sha[:16])}
+
 
 def message_parts(blocks, label_of=None):
     """Every block of the turn-1 message, sized. -> {state, rows, total, why}
@@ -6467,7 +6563,11 @@ def attach(clip_url: str, source_sha: str = "", density_fps: float = 2.0):
               # rather than the literal twice.
               volumes={ATTACH_ROOT: ATTACH_VOL},
               secrets=[modal.Secret.from_name("chatcut-oauth"),
-                       modal.Secret.from_name("anthropic-api-key")])
+                       modal.Secret.from_name("anthropic-api-key"),
+                       # S3 FOR THE RUN RECORD. Read-nothing, write-one-object:
+                       # the record is archived in the run because the launcher
+                       # is the part that reliably dies.
+                       modal.Secret.from_name("promptly-secrets")])
 def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
          run_id: str = "latest", use_hands: bool = False, plan: str = "",
          think_tokens: int = CANONICAL_THINK_TOKENS, effort: str = CANONICAL_EFFORT, prefix_ttl: str = "1h", no_watch: bool = False, density_fps: float = 2.0,
@@ -7581,7 +7681,8 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         print("  CAPTION BAND    : %s" % (("MEASURED %s" % (list(_cb),)) if _cb else ("ABSENT — %s" % _cbw)), flush=True)
         _h6 = {"state": "ABSENT", "why": "not run"}
         try:
-            _h6 = verify_hop6_clear(None, "/work/source.mp4", items=_items, caption_band=_cb)
+            _h6 = verify_hop6_clear(None, "/work/source.mp4", items=_items, caption_band=_cb,
+                                    frame_h=_geo["h"])
         except Exception as _h6e:                                 # noqa: BLE001
             _h6 = {"state": "ABSENT", "why": "hop6 %s" % str(_h6e)[:80]}
         _faults = fault_lines(_g, _h6, None, _items, _base)
@@ -7677,7 +7778,8 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                 _cb2, _ = caption_band(tok, _stage)
             except Exception:                                     # noqa: BLE001
                 _cb2 = None
-            _h62 = verify_hop6_clear(None, "/work/source.mp4", items=_it2, caption_band=_cb2)
+            _h62 = verify_hop6_clear(None, "/work/source.mp4", items=_it2, caption_band=_cb2,
+                                     frame_h=_geo["h"])
             if (_h62 or {}).get("state") == "FAILED":
                 _out2.append("face/text collision: %s" % str(_h62.get("why"))[:220])
             _rec2 = derive_record(_it2, _beats, _stage.get("baseItemId"), "")
@@ -8562,6 +8664,13 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                                      "note": "images replaced by their sha; message shas here differ from the live fingerprint"}
         except Exception as _pe2:                                 # noqa: BLE001
             out["prefix_vs_previous_run"] = {"state": "FAILED", "why": "%s: %s" % (type(_pe2).__name__, str(_pe2)[:160])}
+    # ── THE RECORD OUTLIVES THE DISK IT WAS WRITTEN ON (Zac, 2026-09-20) ──
+    # Archived BEFORE the Dict write, so a record that reaches S3 is the same
+    # one the Dict holds; and the path and sha go on the run line so the next
+    # reader can fetch it without asking anyone where it went.
+    _arch = archive_record(out, run_id)
+    out["record_archive"] = _arch
+    print("  RECORD ARCHIVE  : %s — %s" % (_arch["state"], _arch["why"]), flush=True)
     RESULTS[run_id] = out
     print(f"  RESULT PERSISTED: chatcut-results[{run_id}]", flush=True)
     return out

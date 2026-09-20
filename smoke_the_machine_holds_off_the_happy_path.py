@@ -3188,6 +3188,42 @@ def main():
               "failed its negative control" in _appsrc,
               '"/craft/fixtures_control"' in _appsrc))
 
+    # ---- THE RUN RECORD IS ARCHIVED, IN THE RUN (Zac, 2026-09-20) ----
+    # The only SCORED record this lane ever produced is gone from every disk.
+    # A record that lives in a container filesystem, a Dict and a /tmp log is
+    # one wipe from never having existed -- and it is the one artifact that
+    # cannot be regenerated, because regenerating means paying for the run.
+    _put = {}
+    _ar = J.archive_record({"a": 1, "wall_s": 12.5}, "run-x",
+                           bucket="b", putter=lambda bk, k, body: _put.update(
+                               {"bucket": bk, "key": k, "body": body}))
+    import hashlib as _hl
+    check("the record is archived with a sha OF THE BYTES THAT WERE SENT, keyed by run id",
+          _ar["state"] == "MEASURED"
+          and _ar["sha"] == _hl.sha256(_put["body"]).hexdigest()
+          and "run-x" in _ar["key"] and _ar["key"].endswith(".json")
+          and _ar["sha"][:12] in _ar["key"]
+          and _ar["bytes"] == len(_put["body"]),
+          "%s (%d bytes)" % (_ar["key"], _ar["bytes"]))
+    # A FAILED ARCHIVE IS LOUD AND NOT FATAL. Losing the archive must not also
+    # lose the edit; a silent failure is how the record goes missing again.
+    def _boom(*a, **k):
+        raise RuntimeError("no credentials")
+    _bad = J.archive_record({"a": 1}, "run-y", bucket="b", putter=_boom)
+    check("an archive that fails is FAILED with its reason, and still names the key it tried",
+          _bad["state"] == "FAILED" and "no credentials" in _bad["why"]
+          and _bad["key"] and _bad["sha"]
+          and J.archive_record({"a": 1}, "", bucket="b", putter=lambda *a: None)["state"] == "FAILED",
+          _bad["why"][:70])
+    # AND THE RUN ACTUALLY CALLS IT, BEFORE THE DICT WRITE.
+    _asrc = open("chatcut_job_app.py", encoding="utf-8").read()
+    check("the run archives the record before it stores it, and puts the path on the record",
+          _asrc.index("archive_record(out, run_id)") < _asrc.index("RESULTS[run_id] = out")
+          and '"record_archive"' in _asrc
+          and "RECORD ARCHIVE" in _asrc,
+          "archive before Dict write = %s" % (
+              _asrc.index("archive_record(out, run_id)") < _asrc.index("RESULTS[run_id] = out")))
+
     # ---- THE STANDING-RED CENSUS (Zac, 2026-09-20) ----
     _hist = merge_history(RESULTS_LOG, write=(os.environ.get("SMOKE_HISTORY") == "1"))
     print("\n  CHECK HISTORY   : %s — %s%s"
