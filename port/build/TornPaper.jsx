@@ -34,6 +34,14 @@ const Component = ({ item }) => {
   const fontSize = size === "xlarge" ? 168 : size === "large" ? 128 : size === "small" ? 72 : 96;
   const justify = position === "top" ? "flex-start" : position === "bottom" ? "flex-end" : "center";
   const pad = Math.round(fontSize * 0.9);
+  // THE FACE IS A font-TYPED PROPERTY, NOT A CSS STRING. Measured 2026-09-19:
+  // two caption styles differing ONLY in family rendered PIXEL-IDENTICAL, because a
+  // bare fontFamily names a face the renderer was never told to fetch. Only a
+  // declared `font` property loads one. The default is a CANONICAL name confirmed
+  // present by search_fonts — "Georgia" is NOT in the catalogue (it answers with
+  // Noto Sans/Serif Georgian, which are Georgian-SCRIPT faces), so the serif here
+  // is Lora, which is.
+  const fontFamily = props.fontFamily || "Montserrat";
   const rootStyle = { position: "absolute", inset: 0, display: "flex",
     flexDirection: "column", alignItems: "center", justifyContent: justify,
     overflow: "hidden", boxSizing: "border-box", padding: pad,
@@ -46,7 +54,7 @@ const Component = ({ item }) => {
   const bottomText = String(props.bottomText || "");
   const slideTop = (1 - ease) * -120;
   const slideBottom = (1 - ease) * 120;
-  const strip = { backgroundColor: "#F7F3E8", color: "#141414", fontFamily: "sans-serif",
+  const strip = { backgroundColor: "#F7F3E8", color: "#141414", fontFamily: fontFamily,
     fontWeight: 800, fontSize: fontSize, letterSpacing: -1, lineHeight: 1.05,
     padding: Math.round(fontSize * 0.22) + "px " + Math.round(fontSize * 0.42) + "px",
     maxWidth: "94%", whiteSpace: "normal", overflowWrap: "break-word", textAlign: "center" };

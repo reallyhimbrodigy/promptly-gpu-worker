@@ -8001,6 +8001,8 @@ CAPTION_STYLE_FONT = {
 
 PORTED_PROPS = {
     "TornPaper": [
+        {"key": "fontFamily", "label": "Typeface", "type": "font",
+         "defaultValue": "Montserrat"},
         {"key": "topText", "label": "Top line", "type": "text", "defaultValue": ""},
         {"key": "bottomText", "label": "Bottom line", "type": "text", "defaultValue": ""},
         {"key": "size", "label": "Size", "type": "select", "defaultValue": "medium",
@@ -8011,6 +8013,8 @@ PORTED_PROPS = {
         {"key": "accentColor", "label": "Accent colour", "type": "color", "defaultValue": "#C8551F"},
     ],
     "QuoteCard": [
+        {"key": "fontFamily", "label": "Typeface", "type": "font",
+         "defaultValue": "Lora"},
         {"key": "quote", "label": "Quote", "type": "text", "defaultValue": ""},
         {"key": "attribution", "label": "Attribution (no em dash — the card adds it)", "type": "text", "defaultValue": ""},
         {"key": "size", "label": "Size", "type": "select", "defaultValue": "medium",
@@ -8021,6 +8025,8 @@ PORTED_PROPS = {
         {"key": "accentColor", "label": "Accent colour", "type": "color", "defaultValue": "#C8551F"},
     ],
     "LowerThird": [
+        {"key": "fontFamily", "label": "Typeface", "type": "font",
+         "defaultValue": "Montserrat"},
         {"key": "name", "label": "Name", "type": "text", "defaultValue": ""},
         {"key": "title", "label": "Role or location", "type": "text", "defaultValue": ""},
         {"key": "size", "label": "Size", "type": "select", "defaultValue": "medium",
@@ -8057,6 +8063,8 @@ PORTED_PROPS = {
     # It exists because CaptionMatch served that shape for one day only by NOT doing
     # its job, and the moment it learned the caption style the plain shape went with it.
     "PlainText": [
+        {"key": "fontFamily", "label": "Typeface", "type": "font",
+         "defaultValue": "Inter"},
         {"key": "text", "label": "Text", "type": "text", "defaultValue": ""},
         {"key": "size", "label": "Size", "type": "select", "defaultValue": "medium",
          "options": ["small", "medium", "large", "xlarge"]},
@@ -8065,6 +8073,8 @@ PORTED_PROPS = {
         {"key": "textColor", "label": "Text colour", "type": "color", "defaultValue": "#FFFFFF"},
     ],
     "StickyNotes": [
+        {"key": "fontFamily", "label": "Typeface", "type": "font",
+         "defaultValue": "Lora"},
         {"key": "notes", "label": "Notes — text|colour|rotation, separated by ;", "type": "text",
          "defaultValue": "Key takeaway|#FFE066|-3"},
         {"key": "size", "label": "Size", "type": "select", "defaultValue": "medium",

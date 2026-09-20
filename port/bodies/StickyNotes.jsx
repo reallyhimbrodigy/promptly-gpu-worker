@@ -39,6 +39,14 @@ const Component = ({ item }) => {
   const fontSize = size === "xlarge" ? 168 : size === "large" ? 128 : size === "small" ? 72 : 96;
   const justify = position === "top" ? "flex-start" : position === "bottom" ? "flex-end" : "center";
   const pad = Math.round(fontSize * 0.9);
+  // THE FACE IS A font-TYPED PROPERTY, NOT A CSS STRING. Measured 2026-09-19:
+  // two caption styles differing ONLY in family rendered PIXEL-IDENTICAL, because a
+  // bare fontFamily names a face the renderer was never told to fetch. Only a
+  // declared `font` property loads one. The default is a CANONICAL name confirmed
+  // present by search_fonts — "Georgia" is NOT in the catalogue (it answers with
+  // Noto Sans/Serif Georgian, which are Georgian-SCRIPT faces), so the serif here
+  // is Lora, which is.
+  const fontFamily = props.fontFamily || "Lora";
   const rootStyle = { position: "absolute", inset: 0, display: "flex",
     flexDirection: "column", alignItems: "center", justifyContent: justify,
     overflow: "hidden", boxSizing: "border-box", padding: pad,
@@ -70,7 +78,7 @@ const Component = ({ item }) => {
     <div style={rootStyle}>
       {notes.slice(0, 3).map((n, i) => (
         <div key={i} style={{
-          backgroundColor: n.color, color: "#141414", fontFamily: "Georgia, serif",
+          backgroundColor: n.color, color: "#141414", fontFamily: fontFamily,
           fontSize: Math.round(fontSize * 0.72), lineHeight: 1.16,
           padding: Math.round(fontSize * 0.36), maxWidth: "76%",
           whiteSpace: "normal", overflowWrap: "break-word",

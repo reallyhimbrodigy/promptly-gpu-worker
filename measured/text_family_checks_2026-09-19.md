@@ -52,3 +52,48 @@ menu with it.
 claims, and those two facts are in tension.** The resolution is Zac's — either
 CaptionMatch stays plain and is renamed for what it is, or it learns the caption
 style and a sixth component carries the workhorse plain/medium/middle.
+
+---
+
+## The style proof, settled — and the typeface audit
+
+**STYLE FOLLOWS: YES.** All three pairs differ, max 255:
+
+    CleanCut vs Gadzhi           differing=2  max=255
+    CleanCut vs Quintessence     differing=2  max=255
+    Gadzhi vs Quintessence       differing=2  max=255
+
+It took the whole sequence to get there, and each step was a different lie:
+
+| verdict | what it meant |
+|---|---|
+| NO (all pairs 0) | **my harness** — three placements wrote frames to one directory, so every pair compared a file with itself |
+| NO (one pair 0) | **real** — the two styles differing only in TYPEFACE rendered identically |
+| **YES** | the face became a `font`-TYPED property, which is what loads it |
+
+**A bare `fontFamily` string names a face the renderer was never told to fetch.**
+ChatCut's guidance says resolve through `search_fonts` and carry the canonical name
+in a `font` property; that is what makes it load.
+
+### The audit — every registered component
+
+    NAMED FACES ON REAL CONTENT   4   PlainText (Inter), QuoteCard x2 (Georgia), StickyNotes (Georgia)
+    generics on real content      4   LowerThird x2, TornPaper, StagedPush (diagnostic)
+    placeholders                  9   "NO TEXT" / "NO CLIP PROP" branches — generic is correct there
+
+All faces that carry user-visible text are now `font`-typed properties.
+
+**AND ONE OF THEM COULD NEVER HAVE WORKED.** `search_fonts` on "Georgia" returns
+**Noto Sans Georgian** and **Noto Serif Georgian** — Georgian-SCRIPT faces, not the
+serif. Georgia is **absent** from the catalogue, so QuoteCard and StickyNotes were
+naming a typeface that would silently fall back on every render. They use **Lora**,
+confirmed present.
+
+Confirmed present and now used: Inter, Montserrat, Lora, DM Sans, Space Mono,
+Playfair Display.
+
+### Still open
+
+One frame per caption style beside its Remotion reference render, to confirm the
+face ON THE FRAME is the face the style specifies. Nine styles rendering *differently*
+is not the same claim as nine styles rendering *correctly*.

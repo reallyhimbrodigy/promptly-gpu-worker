@@ -34,6 +34,14 @@ const Component = ({ item }) => {
   const fontSize = size === "xlarge" ? 168 : size === "large" ? 128 : size === "small" ? 72 : 96;
   const justify = position === "top" ? "flex-start" : position === "bottom" ? "flex-end" : "center";
   const pad = Math.round(fontSize * 0.9);
+  // THE FACE IS A font-TYPED PROPERTY, NOT A CSS STRING. Measured 2026-09-19:
+  // two caption styles differing ONLY in family rendered PIXEL-IDENTICAL, because a
+  // bare fontFamily names a face the renderer was never told to fetch. Only a
+  // declared `font` property loads one. The default is a CANONICAL name confirmed
+  // present by search_fonts — "Georgia" is NOT in the catalogue (it answers with
+  // Noto Sans/Serif Georgian, which are Georgian-SCRIPT faces), so the serif here
+  // is Lora, which is.
+  const fontFamily = props.fontFamily || "Montserrat";
   const rootStyle = { position: "absolute", inset: 0, display: "flex",
     flexDirection: "column", alignItems: "center", justifyContent: justify,
     overflow: "hidden", boxSizing: "border-box", padding: pad,
@@ -53,9 +61,9 @@ const Component = ({ item }) => {
       <div style={{ alignSelf: "flex-start", clipPath: "inset(0 " + (100 - wipe) + "% 0 0)" }}>
         <div style={{ backgroundColor: "rgba(12,12,14,0.9)", padding: Math.round(fontSize * 0.34),
                       borderBottom: Math.round(fontSize * 0.07) + "px solid " + accent }}>
-          <div style={{ color: textColor, fontFamily: "sans-serif", fontWeight: 800,
+          <div style={{ color: textColor, fontFamily: fontFamily, fontWeight: 800,
                         fontSize: fontSize, lineHeight: 1.05 }}>{name}</div>
-          {title ? (<div style={{ color: accent, fontFamily: "sans-serif", fontWeight: 600,
+          {title ? (<div style={{ color: accent, fontFamily: fontFamily, fontWeight: 600,
                                   fontSize: Math.round(fontSize * 0.42),
                                   marginTop: Math.round(fontSize * 0.12) }}>{title}</div>) : null}
         </div>

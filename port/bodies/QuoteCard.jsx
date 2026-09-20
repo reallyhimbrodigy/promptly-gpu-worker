@@ -34,6 +34,14 @@ const Component = ({ item }) => {
   const fontSize = size === "xlarge" ? 168 : size === "large" ? 128 : size === "small" ? 72 : 96;
   const justify = position === "top" ? "flex-start" : position === "bottom" ? "flex-end" : "center";
   const pad = Math.round(fontSize * 0.9);
+  // THE FACE IS A font-TYPED PROPERTY, NOT A CSS STRING. Measured 2026-09-19:
+  // two caption styles differing ONLY in family rendered PIXEL-IDENTICAL, because a
+  // bare fontFamily names a face the renderer was never told to fetch. Only a
+  // declared `font` property loads one. The default is a CANONICAL name confirmed
+  // present by search_fonts — "Georgia" is NOT in the catalogue (it answers with
+  // Noto Sans/Serif Georgian, which are Georgian-SCRIPT faces), so the serif here
+  // is Lora, which is.
+  const fontFamily = props.fontFamily || "Lora";
   const rootStyle = { position: "absolute", inset: 0, display: "flex",
     flexDirection: "column", alignItems: "center", justifyContent: justify,
     overflow: "hidden", boxSizing: "border-box", padding: pad,
@@ -53,12 +61,12 @@ const Component = ({ item }) => {
       <div style={{ transform: "translateY(" + rise + "px)", maxWidth: "92%",
                     backgroundColor: "rgba(12,12,14,0.86)", padding: Math.round(fontSize * 0.55),
                     borderLeft: Math.round(fontSize * 0.09) + "px solid " + accent }}>
-        <div style={{ color: textColor, fontFamily: "Georgia, serif", fontSize: fontSize,
+        <div style={{ color: textColor, fontFamily: fontFamily, fontSize: fontSize,
                       lineHeight: 1.22, whiteSpace: "normal", overflowWrap: "break-word" }}>
           {quote}
         </div>
         {attribution ? (
-          <div style={{ color: accent, fontFamily: "Georgia, serif",
+          <div style={{ color: accent, fontFamily: fontFamily,
                         fontSize: Math.round(fontSize * 0.46),
                         marginTop: Math.round(fontSize * 0.3) }}>
             {"\u2014 " + attribution}

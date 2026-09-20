@@ -2266,6 +2266,43 @@ def main():
           and _tf.index('out["state"] = "PARTIAL"') < _tf.index("1b. the workhorse"),
           "%d record writes" % _tf.count('RESULTS["text-family-check"] = out'))
 
+    # ---- NO COMPONENT NAMES A TYPEFACE AS A BARE CSS STRING (Zac, 2026-09-19) ----
+    # Proven by frame: two caption styles differing ONLY in family rendered
+    # pixel-identical, because a bare fontFamily names a face the renderer was never
+    # told to fetch. Only a declared `font`-typed property loads one. Every component
+    # that draws user-visible text now carries one; placeholder branches ("NO TEXT",
+    # "NO CLIP PROP") keep a generic, which always resolves and is meant to be plain.
+    _GENERIC = {"sans-serif", "serif", "monospace", "system-ui", "cursive"}
+    _bare, _nofont = [], []
+    for _f in sorted(_os_list("port/build")):
+        if not _f.endswith(".jsx"):
+            continue
+        _n = _f[:-4]
+        _src_c = open("port/build/" + _f, encoding="utf-8").read()
+        _c = _re.sub(r"^\s*//.*$", "", _re.sub(r"/\*.*?\*/", "", _src_c, flags=_re.S), flags=_re.M)
+        for _v in _re.findall(r'fontFamily:\s*"([^"]+)"', _c):
+            if _v.split(",")[0].strip() not in _GENERIC:
+                _bare.append("%s: %r" % (_n, _v))
+        # a component that reads props.fontFamily must DECLARE it as type font
+        if "props.fontFamily" in _c:
+            if not any(q.get("key") == "fontFamily" and q.get("type") == "font"
+                       for q in J.PORTED_PROPS.get(_n, [])):
+                _nofont.append(_n)
+    check("no component names a typeface as a bare CSS string",
+          not _bare, "; ".join(_bare[:4]) if _bare else "all faces are font-typed properties")
+    check("every component that reads a typeface declares it as a font-TYPED property",
+          not _nofont, "; ".join(_nofont) if _nofont else "declared everywhere it is read")
+    # AND THE DEFAULTS ARE FAMILIES ChatCut ACTUALLY HAS. Measured via search_fonts:
+    # Georgia is ABSENT from the catalogue — it answers with Noto Sans/Serif Georgian,
+    # which are Georgian-SCRIPT faces, not the serif. Lora is present and is the serif
+    # those components use instead.
+    _defaults = {q.get("defaultValue") for _n in J.PORTED_PROPS
+                 for q in J.PORTED_PROPS[_n] if q.get("type") == "font"}
+    _confirmed = {"Inter", "Montserrat", "Lora", "DM Sans", "Space Mono", "Playfair Display"}
+    check("every font default is a family search_fonts confirmed present, and Georgia is not used",
+          _defaults and _defaults <= _confirmed and "Georgia" not in _defaults,
+          "defaults %s" % sorted(_defaults))
+
     # THE WORKING TREE, NOT THE COMMIT. red_proof_no_undefined_names builds an ISOLATED
     # worktree from HEAD, so it judges what is COMMITTED — and a run is launched from what
     # is on disk. A slice-based edit removed `place_theirs`, `place_ours` and PORTED_PROPS
