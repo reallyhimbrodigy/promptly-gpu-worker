@@ -52,7 +52,7 @@ const Component = ({ item }) => {
   const rootStyle = { position: "absolute", inset: 0, display: "flex",
     alignItems: "center", justifyContent: "center", overflow: "hidden",
     boxSizing: "border-box", backgroundColor: "#000000" };
-  const plate = { width: "100%", height: "100%", objectFit: "cover", filter: correct };
+  const plate = { width: "100%", height: "100%", objectFit: "contain", filter: correct };
   const clamp01 = (t) => Math.min(Math.max(t, 0), 1);
   const start = Math.max(0, seamRoom - Math.round(duration / 2));
   const progress = clamp01((frame - start) / duration);

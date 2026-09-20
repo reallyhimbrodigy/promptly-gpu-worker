@@ -129,7 +129,7 @@ const Component = ({ item }) => {
         // 0.85 alpha and not 0.95 — higher read as a harsh outline on real footage.
         boxShadow: "inset 0 0 0 1.25px rgba(255,255,255,0.85), inset 0 0 16px rgba(255,255,255,0.14)" }}>
         <Video src={src} startFrom={from} muted volume={0}
-          style={{ width: "100%", height: "100%", objectFit: "cover", filter: correct }} />
+          style={{ width: "100%", height: "100%", objectFit: "contain", filter: correct }} />
       </div>
     </div>
   );

@@ -19,9 +19,15 @@
  *
  * VERDICTS, three states and not two:
  *   IDENTICAL    registered === source. The only passing state.
- *   STRIPPED     the differences are ALL removals of a props fallback and
- *                nothing else. Reported, and FAILS — it means a fallback
- *                survived into source, which is the rule this enforces.
+ *   STRIPPED     every difference is one of the TWO DOCUMENTED REWRITES, and
+ *                the report says which, because they mean opposite things:
+ *                  fallback   a props fallback survived into source. MINE,
+ *                             fixable, and the rule this file enforces. FAILS.
+ *                  injection  ChatCut appended `item` to a nested component's
+ *                             destructuring. NOT mine and not removable — it
+ *                             happens to correct source. Reported, PASSES.
+ *                A gate that stays red on code nobody can fix is a gate that
+ *                gets switched off, which is why those two exit differently.
  *   DIVERGED     anything else. The registered code differs in a way nobody
  *                documented, which is the case this file exists to surface.
  *
@@ -61,6 +67,44 @@ export function readsPropWithFallback(line) {
   if (/===\s*undefined\s*\?/.test(line)) return true;
   // || or ?? followed by a literal that CLOSES the expression.
   return /(\|\||\?\?)\s*(-?\d[\d._]*|"[^"]*"|'[^']*'|`[^`]*`|true|false|null|undefined|\{\s*\}|\[\s*\])\s*(;|,|\)|\]|\}|$)/.test(line);
+}
+
+/**
+ * THE SECOND KNOWN REWRITE, MEASURED 2026-09-20 ON FilmStrip.
+ *
+ * ChatCut's validator appends `item` to the destructuring parameter of NESTED
+ * arrow components — `({ n })` came back `({ n, item })`, and a tile container's
+ * nine-name pattern came back with a tenth. Its registration says so:
+ * "Auto-fixed: Injected missing ({item}) prop to satisfy validator contract".
+ * Ten of eleven components registered the same night came back byte-identical,
+ * so this is narrow, not ambient.
+ *
+ * IT IS AN INSERTION, so `deletionOnly` can never explain it — that function is
+ * correct and this needed its own rule rather than a loosening of that one.
+ *
+ * THE GUARD IS DELIBERATELY TIGHT, because a rule that forgives "a parameter was
+ * added" would forgive the thing this file exists to catch. Three conditions,
+ * all required: the added token is the identifier `item` and nothing else; the
+ * line is an arrow function whose parameter is a destructuring pattern; and
+ * deleting that one token from the registered line reproduces the source line
+ * EXACTLY. `classify` adds a fourth that no single line can see — the registered
+ * text must not READ `item` any more often than the source did, so an injection
+ * that came with a use of it is still DIVERGED.
+ */
+export function isItemInjection(src, reg) {
+  if (src === reg) return false;
+  if (!/\(\s*\{[^}]*\}\s*\)\s*=>/.test(reg)) return false;
+  for (const form of [", item", ",item", "item, ", "item,"]) {
+    for (let i = reg.indexOf(form); i >= 0; i = reg.indexOf(form, i + 1)) {
+      if (reg.slice(0, i) + reg.slice(i + form.length) === src) return true;
+    }
+  }
+  return false;
+}
+
+/** Occurrences of the bare identifier `item`, so a new READ of it is visible. */
+export function countItemReads(text) {
+  return (text.match(/\bitem\b/g) || []).length;
 }
 
 export function sha(s) { return createHash("sha256").update(s, "utf8").digest("hex"); }
@@ -128,10 +172,30 @@ export function classify(source, registered) {
       }
     }
   }
+  // SECOND PASS: the item injection. Runs after the fallback pass so a line
+  // that is both is counted as the fallback strip, which is the one I can fix.
+  let injections = 0;
+  for (let r = 0; r < removed.length; r++) {
+    if (explainedRemoved.has(r)) continue;
+    for (let a = 0; a < added.length; a++) {
+      if (takenAdded.has(a)) continue;
+      if (isItemInjection(removed[r].text, added[a].text)) {
+        takenAdded.add(a); explainedRemoved.add(r); injections++; break;
+      }
+    }
+  }
   const unexplained = removed.filter((_, r) => !explainedRemoved.has(r))
     .concat(added.filter((_, a) => !takenAdded.has(a)));
+  // THE INVARIANT ONE LINE CANNOT SEE. An injected parameter is harmless only
+  // because nothing reads it. If the registered text mentions `item` more times
+  // than the injections account for, something USES it, and that is a
+  // behavioural change wearing a documented rewrite's clothes.
+  const readDrift = countItemReads(registered) - countItemReads(source) - injections;
+  const fallbacks = explainedRemoved.size - injections;
   return {
-    verdict: unexplained.length === 0 ? "STRIPPED" : "DIVERGED",
+    verdict: (unexplained.length === 0 && readDrift === 0) ? "STRIPPED" : "DIVERGED",
+    explained: { fallback: fallbacks, injection: injections },
+    readDrift,
     differences: d.length,
     unexplained: unexplained.length,
     sha_source: sha(source),
@@ -150,7 +214,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const registered = readFileSync(regPath, "utf8");
   const r = classify(source, registered);
   console.log(JSON.stringify({ name, ...r }, null, 1));
-  // IDENTICAL is the only pass. STRIPPED means a fallback reached source, which
-  // is the defect; DIVERGED means something nobody documented.
-  process.exit(r.verdict === "IDENTICAL" ? 0 : 1);
+  // IDENTICAL passes. STRIPPED passes ONLY when every difference is the
+  // injection, which happens to correct source and cannot be removed from it;
+  // a single fallback strip is my defect and fails. DIVERGED always fails.
+  const injectionOnly = r.verdict === "STRIPPED" && r.explained.fallback === 0;
+  process.exit(r.verdict === "IDENTICAL" || injectionOnly ? 0 : 1);
 }

@@ -44,7 +44,7 @@ const Component = ({ item }) => {
   const rootStyle = { position: "absolute", inset: 0, display: "flex",
     alignItems: "center", justifyContent: "center", overflow: "hidden",
     boxSizing: "border-box", backgroundColor: "#000000" };
-  const plate = { width: "100%", height: "100%", objectFit: "cover", filter: correct };
+  const plate = { width: "100%", height: "100%", objectFit: "contain", filter: correct };
 
   /* ── PROMPTLY VELOCITY CAP — EMITTED, DO NOT EDIT ──
      source:  src/remotion/src/zoom/shared/velocity-cap.ts

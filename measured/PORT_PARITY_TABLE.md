@@ -96,7 +96,36 @@ general. That is the same right-hand/left-hand distinction that made
 `readsPropWithFallback` wrong in both directions earlier, now confirmed from the
 service side rather than inferred from my own gate.
 
-**3. The transitions and the base track disagree about fit, and it is visible.**
+**3. RULED AND FIXED — the transitions and the base track disagreed about fit.**
+Zac ruled `contain` on all eleven. The nine that mount a `<Video>` now carry
+`objectFit: "contain"` at the one source; the two overlays render no `<Video>`
+at all, so there was nothing in them to change, and the SEVEN ZOOMS ARE
+DELIBERATELY LEFT ON `cover` — a contained zoom drags the letterbox edge
+through frame, and they are already calibrated against a covering plate.
+
+Re-proved on ONE seam, CrossfadeZoom f720, on the landscape corpus fixture, by
+measuring the lit band rather than by looking at it:
+
+| frame | band rows | height | |
+|---|---|--:|---|
+| f60, f1160, f700 (base track, V2 empty) | 536..1031 | 496 | three controls, identical |
+| f720 BEFORE, `cover` | 0..1567 | 1568 | the whole frame — the reframe |
+| f720 AFTER, `contain` | 513..1054 | 542 | |
+
+The band is no longer full-bleed and it is CONCENTRIC with the base track's:
+both centre on row 783.5 exactly. The remaining 46px is not fit — it is the
+component's own counter-zoom, and it predicts: at f720 progress is 0.500, the
+0.25/0.46/0.45/0.94 bezier eases that to 0.7713, `scaleA` is 1.0926, and
+496 x 1.0926 = 541.9 against 542 MEASURED. A band that matches the base track's
+centre and differs from it by exactly the zoom the component declares is the
+whole claim, and it is arithmetic rather than judgement.
+
+Eight of the nine are registered in the project under `cover` still; their frame
+rows above were measured that way and say so. The source is the deliverable and
+all nine are contain; re-registering the other eight is a paste of 74KB that
+buys one bit already bought by this seam, so it is offered rather than done.
+
+**3a. What the fault was, kept because it was real.**
 Every transition mounts its own `<Video style={{objectFit:"cover"}}>` on a
 `background:"#000"` root, so it CROPS the 1920x1080 source to fill the
 1080x1920 canvas. The base track letterboxes the same source into a band. Sheet
