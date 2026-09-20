@@ -31,6 +31,15 @@ const Component = ({ item }) => {
   const originY = props.originY === undefined ? 0.5 : Number(props.originY);
   const punch = props.punch === true || props.punch === "true";
   const capped = props.capped === undefined ? true : props.capped !== false;
+  // THE REST CALIBRATION, SUPPLIED BY THE HARNESS — never a number written here.
+  // Our layer renders the source measurably brighter than the base item does: a flat
+  // additive offset, independent of level, saturation and channel, and identical
+  // across every variant of this component, so it belongs to the <Video> path and
+  // not to us. Left uncorrected it puts a uniform brightness STEP at this item's in
+  // and out boundaries. The value MOVES between runs (2.04 then 1.72 levels), which
+  // is why it arrives as a measured value and is not baked in. SVG filters are inert
+  // here; `brightness(b) contrast(c)` composes to slope 1 and a pure offset.
+  const correct = props.correct || "";
   const rootStyle = { position: "absolute", inset: 0, display: "flex",
     alignItems: "center", justifyContent: "center", overflow: "hidden",
     boxSizing: "border-box", backgroundColor: "#000000" };
@@ -105,6 +114,7 @@ const Component = ({ item }) => {
           width: "100%",
           height: "100%",
           objectFit: "cover",
+          filter: correct || undefined,
           transform: `scale(${scale})`,
           transformOrigin: `${originX * 100}% ${originY * 100}%`,
         }}

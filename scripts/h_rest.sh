@@ -19,9 +19,16 @@ BAD=$(/usr/bin/grep -c "undefined name\|redefinition of unused" /tmp/bs/h_rest_p
 K="ab-sources/reliability-fixtures-v3/talking_head-f4195ca9.mp4"
 SRC=$(python3 presign.py "$K" | cut -f1); [ -n "$SRC" ] || { echo "presign failed"; exit 4; }
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$SRC"); [ "$CODE" = "200" ] || { echo "presign GET -> $CODE"; exit 4; }
-CMD="modal run --detach chatcut_job_app.py::${FN:-zoom_rest} --clip-url '$SRC' --at-s $AT --span-s $SPAN --component $COMP"
+FN=${FN:-zoom_rest}
+# rest_matrix takes no --component: it registers its own diagnostic component, whose
+# whole point is that the variants differ from each other and not from a ported blob.
+if [ "$FN" = "rest_matrix" ] || [ "$FN" = "rest_calibration" ]; then
+  CMD="modal run --detach chatcut_job_app.py::$FN --clip-url '$SRC' --at-s $AT --span-s $SPAN"
+else
+  CMD="modal run --detach chatcut_job_app.py::$FN --clip-url '$SRC' --at-s $AT --span-s $SPAN --component $COMP"
+fi
 echo "$CMD" | sed "s|$SRC|<presigned>|"
 sh -c "$CMD" > "$LOG" 2>&1
 echo $? > "$RC"
 echo "rc=$(cat $RC)  log=$LOG"
-/usr/bin/grep -E "PROJECT|BARE SOURCE|PLACED AT REST|WITH THE LAYER|REST|PROFILE" "$LOG" | tail -8
+/usr/bin/grep -E "PROJECT|BARE SOURCE|PLACED AT REST|WITH THE LAYER|REST |PROFILE|OFFSET|DERIVED|RESIDUAL|CALIBRATION|bare|black_bg|fill|scale1" "$LOG" | tail -12

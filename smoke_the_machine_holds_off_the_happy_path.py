@@ -1902,6 +1902,43 @@ def main():
           and "edit_item_checked(" in _zr,
           "frames inside the span, scale 1.0, writes echo-checked")
 
+    # ---- THE REST OFFSET IS A CALIBRATION, NOT A CONSTANT (Zac, 2026-09-19) ----
+    # It MOVED between two runs of the same arm on the same source: 2.0367 levels, then
+    # 1.7228. A number written into the source would have been right on the day it was
+    # measured and silently wrong after — half the failures on this repo's list.
+    check("the correction is an exact affine: slope 1, intercept minus k levels",
+          J.cal_css(0) == ""
+          and J.cal_css(2.0) == "brightness(0.984556) contrast(1.015686)"
+          # brightness(b) then contrast(c): out = (c*b)*in + 0.5*(1-c)
+          and abs((1.0 + 2 * 2.0 / 255.0) * (1.0 / (1.0 + 2 * 2.0 / 255.0)) - 1.0) < 1e-12
+          and abs(0.5 * (1.0 - (1.0 + 2 * 2.0 / 255.0)) * 255.0 + 2.0) < 1e-9,
+          J.cal_css(2.0))
+    check("the gate passes only when every channel is inside the tolerance",
+          J.calibration_verdict({"state": "MEASURED", "rgb": [0.4001, -0.0081, 0.2156],
+                                 "why": "x"})["state"] == "CALIBRATED"
+          and J.calibration_verdict({"state": "MEASURED", "rgb": [0.4, 0.6, 0.1],
+                                     "why": "x"})["state"] == "UNCORRECTED"
+          and J.calibration_verdict({"state": "ABSENT", "why": "n"})["state"] == "ABSENT",
+          "0.40/-0.01/0.22 passes, one channel at 0.6 does not")
+    # SIGNED AND PER CHANNEL. An absolute mean cannot be inverted, and the channels
+    # differ by ~0.4 levels — a single number would fix the luma and leave a cast.
+    _co = J.channel_offset(["a"], ["b"], reader=_rd({
+        "a": _np.zeros((4, 4, 3), dtype="float64"),
+        "b": _np.dstack([_np.full((4, 4), 1.93), _np.full((4, 4), 1.52), _np.full((4, 4), 1.72)])}))
+    check("the offset is measured signed and per channel, never as one absolute number",
+          _co["state"] == "MEASURED" and _co["rgb"] == [1.93, 1.52, 1.72]
+          and abs(_co["mean"] - 1.7233) < 1e-3,
+          str(_co["rgb"]))
+    # AND EVERY PORTED COMPONENT TAKES IT AS A PROPERTY, so the harness supplies the
+    # measured value and nothing in the blob carries a number.
+    for _n in ("SmoothPush", "StepZoom", "StagedPush"):
+        _blob = open("port/build/%s.jsx" % _n, encoding="utf-8").read()
+        check("%s takes the rest calibration as a property and hard-codes no level" % _n,
+              "props.correct" in _blob
+              and any(q.get("key") == "correct" for q in J.PORTED_PROPS[_n])
+              and not J.component_contract(_blob, J.PORTED_PROPS[_n]),
+              "correct declared and read")
+
     # THE WORKING TREE, NOT THE COMMIT. red_proof_no_undefined_names builds an ISOLATED
     # worktree from HEAD, so it judges what is COMMITTED — and a run is launched from what
     # is on disk. A slice-based edit removed `place_theirs`, `place_ours` and PORTED_PROPS

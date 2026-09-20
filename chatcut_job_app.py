@@ -7721,6 +7721,8 @@ PORTED_PROPS = {
     # change is a property, because a hardcoded one is not editable in ChatCut at all.
     "SmoothPush": [
         {"key": "clip", "label": "Clip", "type": "video", "defaultValue": ""},
+        {"key": "correct", "label": "Rest calibration (CSS filter, supplied by the harness)",
+         "type": "text", "defaultValue": ""},
         {"key": "srcFrom", "label": "Source start frame", "type": "number", "defaultValue": 0},
         {"key": "scale", "label": "Peak magnification", "type": "number", "defaultValue": 1.2},
         {"key": "originX", "label": "Origin X", "type": "number", "defaultValue": 0.5},
@@ -7730,6 +7732,8 @@ PORTED_PROPS = {
     ],
     "StepZoom": [
         {"key": "clip", "label": "Clip", "type": "video", "defaultValue": ""},
+        {"key": "correct", "label": "Rest calibration (CSS filter, supplied by the harness)",
+         "type": "text", "defaultValue": ""},
         {"key": "srcFrom", "label": "Source start frame", "type": "number", "defaultValue": 0},
         {"key": "scale", "label": "Step magnification", "type": "number", "defaultValue": 1.3},
         {"key": "originX", "label": "Origin X", "type": "number", "defaultValue": 0.5},
@@ -7738,6 +7742,8 @@ PORTED_PROPS = {
     ],
     "StagedPush": [
         {"key": "clip", "label": "Clip", "type": "video", "defaultValue": ""},
+        {"key": "correct", "label": "Rest calibration (CSS filter, supplied by the harness)",
+         "type": "text", "defaultValue": ""},
         {"key": "srcFrom", "label": "Source start frame", "type": "number", "defaultValue": 0},
         # NO ARRAY TYPE EXISTS in ChatCut's property schema (text, number, color, boolean,
         # select, font, image, video), so the stages are "seconds:scale" pairs and the
@@ -7782,13 +7788,28 @@ const Component = ({ item }) => {
     alignItems: "center", justifyContent: "center", overflow: "hidden",
     boxSizing: "border-box" };
   if (bg !== "none") { rootStyle.backgroundColor = bg; }
+  const lift = Number(props.lift) || 0;
   const vid = { width: "100%", height: "100%", objectFit: fit };
   if (wrap === "scaled") { vid.transform = "scale(1)"; vid.transformOrigin = "50% 50%"; }
+  const css = props.css || "";
+  if (css) { vid.filter = css; }
+  else if (lift !== 0) { vid.filter = "url(#restlift)"; }
   if (!src) {
     return (<div style={rootStyle}><div style={{ color: "#FFFFFF", fontSize: 48 }}>NO CLIP PROP</div></div>);
   }
   return (
     <div style={rootStyle}>
+      {lift !== 0 ? (
+        <svg width="0" height="0" style={{ position: "absolute" }}>
+          <filter id="restlift" colorInterpolationFilters="sRGB">
+            <feComponentTransfer>
+              <feFuncR type="linear" slope="1" intercept={-lift / 255} />
+              <feFuncG type="linear" slope="1" intercept={-lift / 255} />
+              <feFuncB type="linear" slope="1" intercept={-lift / 255} />
+            </feComponentTransfer>
+          </filter>
+        </svg>
+      ) : null}
       <Video src={src} startFrom={srcFrom} muted volume={0} style={vid} />
     </div>
   );
@@ -7800,6 +7821,8 @@ REST_DIAGNOSTIC_PROPS = [
     {"key": "fit", "label": "objectFit", "type": "text", "defaultValue": "cover"},
     {"key": "bg", "label": "Root background", "type": "text", "defaultValue": "none"},
     {"key": "wrap", "label": "Transform", "type": "text", "defaultValue": "div"},
+    {"key": "lift", "label": "Subtract this many levels (0-255)", "type": "number", "defaultValue": 0},
+    {"key": "css", "label": "Raw CSS filter", "type": "text", "defaultValue": ""},
 ]
 # EACH VARIANT CHANGES ONE THING. If the +2 offset survives all of them it is the
 # <Video> element's own colour path and not anything this component does.
@@ -7808,7 +7831,118 @@ REST_VARIANTS = (
     ("black_bg", {"fit": "cover", "bg": "#000000", "wrap": "div"}),
     ("fill", {"fit": "fill", "bg": "none", "wrap": "div"}),
     ("scale1", {"fit": "cover", "bg": "none", "wrap": "scaled"}),
+    # THE EXACT INVERSE. The offset measured flat at +2.0 across every level, every
+    # saturation band and every channel, so its inverse is a linear transfer with
+    # slope 1 and intercept -2/255 — not a brightness() multiply, which would be the
+    # wrong SHAPE and would only be right at one level.
+    ("lift_minus2", {"fit": "cover", "bg": "none", "wrap": "div", "lift": 2}),
+    # THE -2 VARIANT CAME BACK IDENTICAL TO FOUR DECIMALS — the filter did NOTHING.
+    # These two separate "no filter of any kind applies" from "my intercept is wrong":
+    # a CSS brightness(0.5) is unmissable, and an SVG intercept of -0.5 is too. If the
+    # CSS one moves and the SVG one does not, url() filters are unavailable here; if
+    # neither moves, the property never reached the component at all.
+    ("css_bright_half", {"fit": "cover", "bg": "none", "wrap": "div", "css": "brightness(0.5)"}),
+    ("svg_minus128", {"fit": "cover", "bg": "none", "wrap": "div", "lift": 128}),
 )
+
+
+def cal_css(levels):
+    """The CSS filter that subtracts `levels` from every channel. PURE. -> str
+
+    MEASURED 2026-09-19, AND THIS IS WHY IT IS brightness+contrast AND NOT AN SVG
+    FILTER. An SVG `feComponentTransfer` with a linear intercept is the textbook
+    inverse of an additive offset, and inside a ChatCut motion graphic it does
+    NOTHING — proven at a hundred times the magnitude: an intercept of -128/255
+    produced a frame identical to no filter at all (worst pixel 34, the same as
+    the uncorrected arm), while a CSS `brightness(0.5)` on the same component in
+    the same run moved the worst pixel to 157. CSS filters apply here; `url(#...)`
+    filters do not.
+
+    CSS has no additive primitive, but two of its functions compose into an exact
+    affine transform:
+
+        brightness(b):  out = b * in
+        contrast(c):    out = c * in + 0.5 * (1 - c)
+        together:       out = (c*b) * in + 0.5 * (1 - c)
+
+    Setting c = 1 + 2k/255 and b = 1/c gives slope EXACTLY 1 and intercept exactly
+    -k levels — a pure offset, which is the shape the measurement says it needs. A
+    bare brightness() multiply would be the wrong shape and correct at one level only.
+    """
+    k = float(levels or 0.0)
+    if abs(k) < 1e-9:
+        return ""
+    c = 1.0 + 2.0 * k / 255.0
+    return "brightness(%.6f) contrast(%.6f)" % (1.0 / c, c)
+
+
+REST_CAL_TOLERANCE = 0.5     # levels, per channel — Zac, 2026-09-19
+
+
+def channel_offset(a_paths, b_paths, reader=None):
+    """The SIGNED per-channel offset of b relative to a. PURE (reader injectable).
+
+    WHY SIGNED AND PER CHANNEL. `frame_diff_profile` answers "do they differ",
+    which is the right question for a pair and the wrong one for a calibration: an
+    absolute mean cannot be inverted. The measured lift was +2.27 R, +1.78 G,
+    +2.06 B — close but not equal — so a single number would leave a residual
+    colour cast behind even after the luma was corrected.
+
+    -> {state, n, rgb: [r, g, b], mean, why}
+       MEASURED  both sides read
+       ABSENT    nothing common to compare
+       FAILED    a frame could not be read
+    """
+    if not a_paths or not b_paths or len(a_paths) != len(b_paths):
+        return {"state": "ABSENT", "n": 0, "rgb": None, "mean": None,
+                "why": "nothing comparable (%d vs %d frames)" % (len(a_paths or []), len(b_paths or []))}
+
+    def _read(q):
+        from PIL import Image
+        import numpy as np
+        return np.asarray(Image.open(q).convert("RGB"), dtype="float64")
+
+    rd = reader or _read
+    import numpy as np
+    sums, n = np.zeros(3), 0
+    for pa, pb in zip(a_paths, b_paths):
+        try:
+            A, B = rd(pa), rd(pb)
+        except Exception as e:                                    # noqa: BLE001
+            return {"state": "FAILED", "n": n, "rgb": None, "mean": None,
+                    "why": "could not read a frame: %s" % str(e)[:200]}
+        if getattr(A, "shape", None) != getattr(B, "shape", None):
+            return {"state": "FAILED", "n": n, "rgb": None, "mean": None,
+                    "why": "frame shapes differ (%s vs %s)" % (A.shape, B.shape)}
+        sums += (B - A).reshape(-1, 3).mean(axis=0)
+        n += 1
+    rgb = [round(float(x / n), 4) for x in sums]
+    return {"state": "MEASURED", "n": n, "rgb": rgb, "mean": round(sum(rgb) / 3.0, 4),
+            "why": "R %+0.4f  G %+0.4f  B %+0.4f over %d frame(s)" % (rgb[0], rgb[1], rgb[2], n)}
+
+
+def calibration_verdict(residual, tol=REST_CAL_TOLERANCE):
+    """Is the CORRECTED residual zero within `tol` levels, per channel? PURE.
+
+    ZAC'S RULING, 2026-09-19: the offset is carried as a MEASURED CALIBRATION, not
+    a constant. The scale-1 arm runs per deploy and per prefix version, the inverse
+    transfer's intercept is DERIVED from its result, and the gate asserts the
+    corrected residual is zero within half a level. A constant written into the
+    source would be right on the day it was measured and silently wrong after.
+    """
+    if not isinstance(residual, dict) or residual.get("state") != "MEASURED":
+        return {"state": (residual or {}).get("state", "ABSENT"), "tol": tol,
+                "why": "the residual could not be measured: %s"
+                       % (residual or {}).get("why", "no residual")}
+    worst = max(abs(x) for x in residual["rgb"])
+    if worst <= tol:
+        return {"state": "CALIBRATED", "tol": tol, "worst": round(worst, 4),
+                "why": "corrected residual within %.1f level(s) on every channel (worst %+0.4f): %s"
+                       % (tol, worst, residual["why"])}
+    return {"state": "UNCORRECTED", "tol": tol, "worst": round(worst, 4),
+            "why": "the correction did NOT bring the residual inside %.1f level(s) — worst channel "
+                   "%+0.4f. The layer still changes every frame it covers: %s"
+                   % (tol, worst, residual["why"])}
 
 
 def rest_verdict(base_by_frame, layer_by_frame, reader=None):
@@ -7849,6 +7983,102 @@ def rest_verdict(base_by_frame, layer_by_frame, reader=None):
             "profile": prof["profile"],
             "why": "all %d frame(s) pixel-identical at scale 1.0 — the layer is a no-op at rest%s"
                    % (prof["n"], dropped)}
+
+
+@app.function(image=IMG, timeout=2400, cpu=4, memory=8192,
+              secrets=[modal.Secret.from_name("chatcut-oauth")])
+def rest_calibration(clip_url: str = "", at_s: float = 12.0, span_s: float = 2.0,
+                     tol: float = REST_CAL_TOLERANCE, tag: str = ""):
+    """THE SCALE-1 ARM AS A CALIBRATION, NOT A CONSTANT (Zac, 2026-09-19).
+
+    The arm runs per deploy and per prefix version; the inverse transfer's
+    intercept is DERIVED from its own result; and the gate asserts the corrected
+    residual is zero within half a level on every channel. A number written into
+    the source would be right on the day it was measured and silently wrong after
+    — which is the shape of half the failures already on this repo's list.
+
+    THREE READS, ONE PROJECT, ONE UPLOAD:
+      1. the bare timeline
+      2. our layer at scale 1.0, uncorrected  -> DERIVE the per-channel offset
+      3. our layer at scale 1.0 with the derived inverse -> the RESIDUAL, gated
+
+    The correction is `brightness(b) contrast(c)`, which composes to slope 1 and a
+    pure additive intercept. It is NOT an SVG filter: those are inert here, proven
+    at 128 levels.
+    """
+    _t0 = time.time()
+    os.makedirs("/work", exist_ok=True)
+    subprocess.run(["curl", "-fsSL", "-o", "/work/source.mp4", clip_url], check=True, timeout=300)
+    tok = _access_token()
+    fps = 30.0
+    from_frame = max(0, int(round(at_s * fps)))
+    dur_frames = max(2, int(round(span_s * fps)))
+    probe = [from_frame + int(round(dur_frames * i / 6.0)) for i in range(7)]
+    out = {"state": "RUNNING", "tag": tag, "tol": tol, "at_s": at_s, "span_s": span_s,
+           "frames_asked": probe}
+
+    stage = prestage(tok, "", controls={}, source_path="/work/source.mp4",
+                     want_components=set(), titles=[])
+    pid, src_asset = stage["projectId"], stage.get("sourceAssetId")
+    out["project"] = pid
+
+    asset = _mcp_call(tok, "create_motion_graphic_from_code", {
+        "projectId": pid, "name": "RestCalibration", "code": REST_DIAGNOSTIC,
+        "width": 1080, "height": 1920, "durationInFrames": dur_frames,
+        "properties": normalise_properties(REST_DIAGNOSTIC_PROPS)}, expect=None)
+    mg = asset_id_from(asset or {})
+    if not mg:
+        out["state"] = "FAILED"; out["why"] = registration_refusal(asset or {})
+        RESULTS["rest-calibration"] = out
+        return out
+
+    def _read_with(css):
+        """Place the layer (optionally corrected), read the frames, delete. -> {frame: path}"""
+        r = edit_item_checked(tok, {"projectId": pid, "adds": [
+            {"type": "motion-graphic", "assetId": mg, "fromFrame": from_frame,
+             "durationInFrames": dur_frames,
+             "propertyOverrides": {"clip": src_asset, "srcFrom": from_frame,
+                                   "fit": "cover", "bg": "none", "wrap": "div",
+                                   "lift": 0, "css": css}}]},
+            "placing the calibration layer%s" % (" (corrected)" if css else " (uncorrected)"))
+        iid = ((r.get("adds") or [{}])[0] or {}).get("id")
+        f, _miss = frames_at(tok, pid, probe, "/work/cal_%s" % ("corr" if css else "raw"))
+        edit_item_checked(tok, {"projectId": pid, "deletes": [{"id": iid}]}, "clearing the calibration layer")
+        return f
+
+    base_f, _m = frames_at(tok, pid, probe, "/work/cal_base")
+    print("  BARE SOURCE     %d of %d frame(s)" % (len(base_f), len(probe)), flush=True)
+
+    raw_f = _read_with("")
+    _a, _b, _oa, _ob = frames_by_number(base_f, raw_f)
+    out["offset"] = channel_offset(_a, _b)
+    print("  OFFSET          %s — %s" % (out["offset"]["state"], out["offset"]["why"]), flush=True)
+    if out["offset"]["state"] != "MEASURED":
+        out["state"] = "FAILED"; out["why"] = "the offset could not be measured"
+        RESULTS["rest-calibration"] = out
+        return out
+
+    # DERIVED, NOT WRITTEN DOWN. CSS brightness/contrast are uniform across
+    # channels, so the correction is the MEAN of the three; the per-channel spread
+    # (~0.5 levels) is exactly what the tolerance is there to judge.
+    k = out["offset"]["mean"]
+    out["derived"] = {"levels": k, "css": cal_css(k),
+                      "why": "derived from this run's own offset, not from a constant"}
+    print("  DERIVED         subtract %.4f level(s) -> %s" % (k, out["derived"]["css"]), flush=True)
+
+    corr_f = _read_with(cal_css(k))
+    _a2, _b2, _, _ = frames_by_number(base_f, corr_f)
+    out["residual"] = channel_offset(_a2, _b2)
+    out["verdict"] = calibration_verdict(out["residual"], tol=tol)
+    print("  RESIDUAL        %s" % out["residual"]["why"], flush=True)
+    print("  CALIBRATION     %s — %s" % (out["verdict"]["state"], out["verdict"]["why"]), flush=True)
+
+    out["state"] = "MEASURED"
+    out["wall_s"] = round(time.time() - _t0, 1)
+    RESULTS["rest-calibration"] = out
+    if tag:
+        RESULTS["rest-calibration-" + tag] = out
+    return out
 
 
 @app.function(image=IMG, timeout=2400, cpu=4, memory=8192,
