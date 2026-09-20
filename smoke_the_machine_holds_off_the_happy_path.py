@@ -2001,6 +2001,47 @@ def main():
           and _defs["LowerThird"]["position"] == "bottom",
           str({v: (d["size"], d["position"]) for v, d in _defs.items()}))
 
+    # ---- A MALFORMED ENTRY IS A FAULT, NOT A LABEL IN THE VIDEO (Zac, 2026-09-19) ----
+    # StickyNotes used to render "dropped N malformed entries" INTO THE FRAME. An error
+    # rendered into a user's video is worse than an empty note; silently dropping is the
+    # other half of the same mistake, handing back a graphic missing a line with nothing
+    # saying so. It is a fault at the rewatch (so the agent can fix it) and at the
+    # read-back (which withholds the export), and it appears in neither frame.
+    check("a malformed packed entry is named, and a well-formed one is not",
+          J.packed_prop_faults("notes", "Key takeaway|#FFE066|-3; Second|#9AE6B4|2") == []
+          and J.packed_prop_faults("notes", "|#FFE066|-3")
+          and J.packed_prop_faults("stages", "0.30:1.15, 0.95:1.30") == []
+          and J.packed_prop_faults("stages", "0.30:1.15, later:big")
+          and J.packed_prop_faults("text", "anything") == [],
+          str(J.packed_prop_faults("notes", "|#FFE066|-3"))[:110])
+    check("an entry count past what the component renders is named rather than dropped",
+          J.packed_prop_faults("notes", "a|#fff|0;b|#fff|0;c|#fff|0;d|#fff|0")
+          and "would be dropped" in J.packed_prop_faults("notes", "a|#fff|0;b|#fff|0;c|#fff|0;d|#fff|0")[0]
+          and J.packed_prop_faults("notes", "a|#fff|0;b|#fff|0;c|#fff|0") == [],
+          "4 entries named, 3 clean")
+    _bad_items = [{"id": "aaaaaaaa-1111", "itemType": "motion-graphic",
+                   "asset": {"name": "StickyNotes"}, "propertyOverrides": {"notes": "|#FFE066|-3"}}]
+    check("the fault names the item and its component, read from the timeline's own properties",
+          J.component_faults(_bad_items)
+          and "aaaaaaaa" in J.component_faults(_bad_items)[0]
+          and "StickyNotes" in J.component_faults(_bad_items)[0]
+          and J.component_faults([{"id": "d", "itemType": "motion-graphic",
+                                   "propertyOverrides": {"notes": "ok|#fff|0"}}]) == [],
+          J.component_faults(_bad_items)[0][:110])
+    # THE ERROR IS NOT IN THE PICTURE, and the fault reaches BOTH seams.
+    _sn = open("port/build/StickyNotes.jsx", encoding="utf-8").read()
+    _sn_code = _re.sub(r"^\s*//.*$", "", _re.sub(r"/\*.*?\*/", "", _sn, flags=_re.S), flags=_re.M)
+    _app = open("chatcut_job_app.py", encoding="utf-8").read()
+    check("the component renders no error text, and the fault reaches the rewatch AND the read-back",
+          # THE SEAMS, NOT A COUNT. This asserted exactly three call sites and went red
+          # the moment a fourth caller appeared — a reader keyed to a number rather
+          # than to the property, which is this repo's most repeated check failure.
+          "malformed" not in _sn_code and "dropped" not in _sn_code
+          and "_pf = component_faults(_iv)" in _app           # the rewatch: the agent sees it
+          and "_pf_rw = component_faults(_items)" in _app     # the read-back: it withholds
+          and "the export is withheld" in _app,
+          "no error drawn; both seams present")
+
     # THE WORKING TREE, NOT THE COMMIT. red_proof_no_undefined_names builds an ISOLATED
     # worktree from HEAD, so it judges what is COMMITTED — and a run is launched from what
     # is on disk. A slice-based edit removed `place_theirs`, `place_ours` and PORTED_PROPS
@@ -2065,6 +2106,26 @@ def main():
           str({_n: J.component_contract(open("port/build/%s.jsx" % _n, encoding="utf-8").read(),
                                         J.PORTED_PROPS[_n])
                for _n in ("SmoothPush", "StepZoom", "StagedPush")}))
+    # RULE 5, MEASURED FROM A REFUSAL THAT COST A RUN: declared-and-read is not enough,
+    # the binding must be USED. StickyNotes read textColor and never used it (its notes
+    # carry their own paper colour), rules 1-4 all passed it, and ChatCut refused it.
+    # The first version of THIS rule also passed it, because `const textColor =
+    # props.textColor` names it twice on its own line — so uses are counted OUTSIDE
+    # the declaration.
+    check("a property read into a binding that is never USED is caught",
+          J.component_contract("const Component=({item})=>{const props=item.props;\n"
+                               "  const spare = props.spare || \"\";\n"
+                               "  const used = props.used || \"\";\n"
+                               "  return (<div>{used}</div>);};",
+                               [{"key": "spare"}, {"key": "used"}])
+          and not J.component_contract("const Component=({item})=>{const props=item.props;\n"
+                                       "  const used = props.used || \"\";\n"
+                                       "  return (<div>{used}</div>);};", [{"key": "used"}]),
+          str(J.component_contract("const Component=({item})=>{const props=item.props;\n"
+                                   "  const spare = props.spare || \"\";\n"
+                                   "  const used = props.used || \"\";\n"
+                                   "  return (<div>{used}</div>);};",
+                                   [{"key": "spare"}, {"key": "used"}]))[:110])
     check("a property declared and never read is caught, and so is a read that was never declared",
           J.component_contract("const Component=({item})=>{const props=item.props;"
                                " return (<div>{props.a}</div>);};", [{"key": "a"}, {"key": "b"}])

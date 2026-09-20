@@ -4543,6 +4543,88 @@ def before_timeline(tok, stage, reader=None):
             "why": "%d item(s) on the timeline before turn 1" % len(rows)}
 
 
+# WHICH PROPERTIES CARRY A LIST INSIDE A STRING, AND HOW TO READ ONE.
+# ChatCut's property schema has no array type, so two ported components encode a
+# list in a text property. That encoding can be malformed, and a malformed entry
+# must reach the AGENT and the GATE — never the export.
+_PACKED_PROPS = {
+    "notes": {"sep": ";", "field_sep": "|", "min_fields": 1, "max_items": 3,
+              "shape": "text|colour|rotation", "component": "StickyNotes"},
+    "stages": {"sep": ",", "field_sep": ":", "min_fields": 2, "max_items": 8,
+               "shape": "seconds:scale", "component": "StagedPush"},
+}
+
+
+def packed_prop_faults(key, raw):
+    """Entries a packed property declares that cannot be read. PURE. -> [str]
+
+    ZAC'S RULING, 2026-09-19: an error rendered into a user's video is worse than
+    an empty note. The component used to draw "dropped N malformed entries" into
+    the frame — which put the failure in the one place it must never appear. It is
+    a FAULT now: raised at the rewatch and the read-back, and it withholds the
+    export until it is fixed.
+
+    SILENTLY DROPPING IS THE OTHER HALF OF THE SAME MISTAKE. An entry that cannot
+    be read is not an entry the editor did not want; it is one they wrote wrong,
+    and the run that swallows it hands back a graphic missing a line with nothing
+    saying so.
+    """
+    spec = _PACKED_PROPS.get(key)
+    if spec is None or raw is None:
+        return []
+    text = str(raw)
+    out, kept = [], 0
+    for i, part in enumerate(text.split(spec["sep"])):
+        if not part.strip():
+            continue
+        bits = part.split(spec["field_sep"])
+        if not bits[0].strip():
+            out.append("%s entry %d (%r) has no %s"
+                       % (key, i + 1, part.strip()[:40], spec["shape"].split(spec["field_sep"])[0]))
+            continue
+        if len(bits) < spec["min_fields"]:
+            out.append("%s entry %d (%r) is not %r — it has %d field(s), not %d"
+                       % (key, i + 1, part.strip()[:40], spec["shape"], len(bits), spec["min_fields"]))
+            continue
+        if spec["min_fields"] >= 2:
+            try:
+                [float(b) for b in bits[:spec["min_fields"]]]
+            except ValueError:
+                out.append("%s entry %d (%r) is not numeric where %r requires it"
+                           % (key, i + 1, part.strip()[:40], spec["shape"]))
+                continue
+        kept += 1
+    if kept > spec["max_items"]:
+        out.append("%s declares %d entries and %s renders at most %d — %d would be dropped"
+                   % (key, kept, spec["component"], spec["max_items"], kept - spec["max_items"]))
+    if not kept and text.strip():
+        out.append("%s has %d entr(ies) and NONE of them can be read" % (key, text.count(spec["sep"]) + 1))
+    return out
+
+
+def component_faults(items, props_by_id=None):
+    """Every placed component whose packed property cannot be read. PURE. -> [str]
+
+    Read from the READ-BACK's own property values, so it judges what is on the
+    timeline rather than what was intended at placement.
+    """
+    # The same two readers check_constraints uses, spelled here so this function
+    # stays PURE and callable without it.
+    _nm = lambda i: str(((i.get("asset") or {}) if isinstance(i.get("asset"), dict) else {}).get("name") or "")
+    _i8 = lambda i: str(i.get("id") or "").replace("-", "")[:8]
+    faults = []
+    for it in (items or []):
+        pid = str(it.get("id") or "")
+        props = (it.get("propertyOverrides") or it.get("props")
+                 or (props_by_id or {}).get(pid) or {})
+        if not isinstance(props, dict):
+            continue
+        for key, raw in props.items():
+            for why in packed_prop_faults(key, raw):
+                faults.append("%s (%s): %s" % (_i8(it), _nm(it) or it.get("itemType"), why))
+    return faults
+
+
 def check_constraints(constraints, items, base_item_id, captions, end_s, props_by_id=None, text_carriers=None):
     """The timeline against the brief's checkable constraints. PURE.
 
@@ -5730,6 +5812,13 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
             _ev, _evs, _ = _cgv.timeline_end(_spv)
             _end_s = (float(_ev) / float(_rbv.get("fps") or 30)) if _evs == "MEASURED" and _ev else None
             _cf, _rows = _constraints_now(_iv, _stage.get("baseItemId"), _end_s)
+            # A PACKED PROPERTY THAT CANNOT BE READ IS A FAULT HERE, at the rewatch,
+            # so the agent can fix it on its own next turn. It used to be a label the
+            # component drew INTO the frame — the one place an error must never be.
+            _pf = component_faults(_iv)
+            if _pf:
+                _cf = _cf + ["COMPONENT PROPERTY UNREADABLE — %s" % f for f in _pf]
+                _rows = _rows + [{"kind": "component_props", "state": "FAIL", "read": f} for f in _pf]
         except Exception as _ve:                                  # noqa: BLE001
             _cf, _rows = ["constraints UNVERIFIED: the read failed (%s)" % str(_ve)[:100]], [{"kind": "read", "state": "FAILED", "read": str(_ve)[:100]}]
         _constraint_reads.append({"n": n, "faults": _cf, "rows": _rows})
@@ -5887,6 +5976,16 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         except Exception as _cfe:                                 # noqa: BLE001
             _cf_rw, _crows_rw = ["constraints UNVERIFIED: %s" % str(_cfe)[:100]], [{"kind": "read", "state": "FAILED", "read": str(_cfe)[:100]}]
         _faults = _faults + ["BRIEF CONSTRAINT VIOLATED — %s" % f for f in _cf_rw]
+        # AND AT THE READ-BACK, WHICH IS WHAT WITHHOLDS. The export is the one place
+        # a malformed entry must never reach: an error in a user's video is worse
+        # than an empty note, and worse still than a run that refuses to finish.
+        _pf_rw = component_faults(_items)
+        if _pf_rw:
+            _faults = _faults + ["COMPONENT PROPERTY UNREADABLE — %s" % f for f in _pf_rw]
+            _crows_rw = _crows_rw + [{"kind": "component_props", "state": "FAIL", "read": f}
+                                     for f in _pf_rw]
+            print("  COMPONENT PROPS : FAIL  %d unreadable entr(ies) — the export is withheld"
+                  % len(_pf_rw), flush=True)
         if _constraints:
             print("  CONSTRAINTS rw%d : %s" % (n, constraint_line(_constraints, _crows_rw)), flush=True)
         _scan = []
@@ -7368,6 +7467,23 @@ def component_contract(code, properties=None):
         if undeclared:
             bad.append("read through props but not declared as a property: %s"
                        % ", ".join(undeclared))
+    # RULE 5, MEASURED 2026-09-19 FROM THE VALIDATOR'S OWN WORDS: "props.textColor is
+    # read into \"textColor\", but that local binding is never used. Remove the unused
+    # read or use \"textColor\" in the rendered component." DECLARED-AND-READ is not
+    # enough — the binding must be USED. StickyNotes read textColor and never used it,
+    # because its notes carry their own colours, and rules 1-4 all passed it through
+    # to a refusal that cost a run.
+    for m in re.finditer(r"^[ \t]*const\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*[^;\n]*\bprops\.[^;\n]*;?[ \t]*$",
+                         stripped, re.M):
+        nm = m.group(1)
+        # COUNT USES OUTSIDE THE DECLARATION. `const textColor = props.textColor` names
+        # it TWICE on its own line, so a naive count of the whole file passes an unused
+        # binding straight through — which is exactly what happened on the first pass
+        # of this very rule.
+        elsewhere = stripped[:m.start()] + stripped[m.end():]
+        if not re.search(r"\b%s\b" % re.escape(nm), elsewhere):
+            bad.append("props read into %r and that binding is never used — remove the read "
+                       "or use it in the rendered component" % nm)
     return bad
 
 
@@ -7756,6 +7872,8 @@ PORTED_PROPS = {
         {"key": "textColor", "label": "Text colour", "type": "color", "defaultValue": "#FFFFFF"},
         {"key": "accentColor", "label": "Accent colour", "type": "color", "defaultValue": "#C8551F"},
     ],
+    # NO textColor: each note carries its own paper colour and the ink is fixed dark.
+    # A property this component cannot honour is a REFUSAL, not a harmless extra.
     "StickyNotes": [
         {"key": "notes", "label": "Notes — text|colour|rotation, separated by ;", "type": "text",
          "defaultValue": "Key takeaway|#FFE066|-3"},
@@ -7763,7 +7881,6 @@ PORTED_PROPS = {
          "options": ["small", "medium", "large", "xlarge"]},
         {"key": "position", "label": "Position", "type": "select", "defaultValue": "middle",
          "options": ["top", "middle", "bottom"]},
-        {"key": "textColor", "label": "Text colour", "type": "color", "defaultValue": "#FFFFFF"},
         {"key": "accentColor", "label": "Accent colour", "type": "color", "defaultValue": "#C8551F"},
     ],
 
@@ -8080,6 +8197,105 @@ def rest_verdict(base_by_frame, layer_by_frame, reader=None):
             "profile": prof["profile"],
             "why": "all %d frame(s) pixel-identical at scale 1.0 — the layer is a no-op at rest%s"
                    % (prof["n"], dropped)}
+
+
+@app.function(image=IMG, timeout=2400, cpu=4, memory=8192,
+              secrets=[modal.Secret.from_name("chatcut-oauth")])
+def text_family_check(clip_url: str = "", at_s: float = 6.0, span_s: float = 3.0):
+    """TWO CHECKS ON THE TEXT FAMILY (Zac, 2026-09-19). No model calls.
+
+    1. WHICH VARIANT IS PLAIN/MEDIUM/MIDDLE? Builder-2 measured the references'
+       text as plain, medium, middle. Four of the five are CARDS by construction —
+       torn strips, sticky notes, a serif quote card, a broadcast lower third — so
+       caption_match is the only candidate, and the old spec says it renders in the
+       CAPTIONS' OWN register and is for mono-brand work where that sameness is the
+       point. Rendering it at medium/middle on a real frame is the only way to
+       settle whether "the caption's register" is the same thing as "plain".
+
+    2. DOES A MALFORMED ENTRY FAULT AND WITHHOLD? A malformed sticky-note entry is
+       planted deliberately. The fault must appear in the read-back and the export
+       must be withheld. An error rendered into a user's video is worse than an
+       empty note, so it must also appear in NEITHER frame.
+    """
+    _t0 = time.time()
+    os.makedirs("/work", exist_ok=True)
+    subprocess.run(["curl", "-fsSL", "-o", "/work/source.mp4", clip_url], check=True, timeout=300)
+    tok = _access_token()
+    fps = 30.0
+    from_frame = max(0, int(round(at_s * fps)))
+    dur = max(2, int(round(span_s * fps)))
+    probe = [from_frame + 12, from_frame + int(dur * 0.6)]
+    out = {"state": "RUNNING", "rendered": {}, "fault_check": {}}
+
+    stage = prestage(tok, "", controls={}, source_path="/work/source.mp4",
+                     want_components=set(), titles=[])
+    pid = stage["projectId"]
+    out["project"] = pid
+    print("  PROJECT         %s" % str(pid)[:8], flush=True)
+
+    # THE BARE FRAME, as the reference for "what a plain overlay sits on".
+    bare, _m = frames_at(tok, pid, probe, "/work/tf_bare")
+    out["bare_frames"] = len(bare)
+
+    def _place_and_shoot(name, overrides, label):
+        code = ported_code(name)
+        v = component_contract(code, PORTED_PROPS[name])
+        if v:
+            return {"state": "FAILED", "why": "contract: %s" % "; ".join(v)}
+        a = _mcp_call(tok, "create_motion_graphic_from_code", {
+            "projectId": pid, "name": name, "code": code, "width": 1080, "height": 1920,
+            "durationInFrames": dur,
+            "properties": normalise_properties(PORTED_PROPS[name])}, expect=None)
+        mg = asset_id_from(a or {})
+        if not mg:
+            return {"state": "REFUSED", "why": registration_refusal(a or {})}
+        r = edit_item_checked(tok, {"projectId": pid, "adds": [
+            {"type": "motion-graphic", "assetId": mg, "fromFrame": from_frame,
+             "durationInFrames": dur, "propertyOverrides": overrides}]},
+            "placing %s (%s)" % (name, label))
+        iid = ((r.get("adds") or [{}])[0] or {}).get("id")
+        f, _ms = frames_at(tok, pid, probe, "/work/tf_%s" % name)
+        rb = read_back(tok, stage)
+        faults = component_faults(rb.get("items") or [])
+        import base64 as _b64
+        row = {"state": "MEASURED", "item": iid, "overrides": overrides,
+               "faults": faults,
+               "b64": [_b64.b64encode(open(q, "rb").read()).decode() for q in list(f.values())[:2]]}
+        edit_item_checked(tok, {"projectId": pid, "deletes": [{"id": iid}]},
+                          "clearing %s" % name)
+        return row
+
+    # ── 1. the plain/medium/middle candidate, on a real frame ────────────
+    out["rendered"]["CaptionMatch"] = _place_and_shoot(
+        "CaptionMatch", {"text": "this is the moment", "size": "medium", "position": "middle",
+                         "textColor": "#FFFFFF", "accentColor": "#C8551F"}, "medium/middle")
+    print("  CaptionMatch    %s" % out["rendered"]["CaptionMatch"].get("state"), flush=True)
+
+    # ── 2. the planted malformed entry ───────────────────────────────────
+    bad = _place_and_shoot(
+        "StickyNotes", {"notes": "|#FFE066|-3; Second note|#9AE6B4|2", "size": "medium",
+                        "position": "middle", "textColor": "#FFFFFF", "accentColor": "#C8551F"},
+        "one entry deliberately malformed")
+    out["rendered"]["StickyNotes_malformed"] = bad
+    out["fault_check"] = {
+        "faults": bad.get("faults") or [],
+        "fired": bool(bad.get("faults")),
+        "why": ("the read-back named %d unreadable entr(ies); the export is withheld while any stands"
+                % len(bad.get("faults") or [])) if bad.get("faults") else
+               "NO FAULT FIRED — a malformed entry passed the read-back, which is the defect",
+    }
+    print("  MALFORMED ENTRY %s — %s" % ("FAULT FIRED" if out["fault_check"]["fired"] else "NO FAULT",
+                                         out["fault_check"]["why"]), flush=True)
+    for f in out["fault_check"]["faults"]:
+        print("      %s" % f, flush=True)
+
+    out["state"] = "MEASURED"
+    out["wall_s"] = round(time.time() - _t0, 1)
+    RESULTS["text-family-check"] = out
+    return {"state": out["state"], "wall_s": out["wall_s"], "project": pid,
+            "fault_check": out["fault_check"],
+            "rendered": {k: {kk: vv for kk, vv in (v or {}).items() if kk != "b64"}
+                         for k, v in out["rendered"].items()}}
 
 
 @app.function(image=IMG, timeout=2400, cpu=4, memory=8192,

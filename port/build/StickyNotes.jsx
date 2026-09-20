@@ -31,7 +31,10 @@ const Component = ({ item }) => {
   const size = props.size || "medium";
   const position = props.position || "middle";
   const accent = props.accentColor || "#C8551F";
-  const textColor = props.textColor || "#FFFFFF";
+  // NO textColor HERE. Each note carries its own paper colour and the ink is fixed
+  // dark so it stays legible on any of them. ChatCut refuses a property read into a
+  // binding that is never used, so declaring one this component cannot honour is not
+  // a harmless extra — it is a refusal.
   // THE REFERENCE SCALE, the same ladder the component sheet already uses.
   const fontSize = size === "xlarge" ? 168 : size === "large" ? 128 : size === "small" ? 72 : 96;
   const justify = position === "top" ? "flex-start" : position === "bottom" ? "flex-end" : "center";
@@ -45,12 +48,16 @@ const Component = ({ item }) => {
   const t = Math.min(Math.max(frame / Math.max(1, Math.round(0.28 * fps)), 0), 1);
   const ease = 1 - Math.pow(1 - t, 3);
   const notesRaw = String(props.notes === undefined ? "" : props.notes);
+  // A MALFORMED ENTRY IS NOT DRAWN AND NOT ANNOUNCED HERE. An earlier version
+  // rendered "dropped N malformed entries" into the frame; an error rendered into a
+  // user's video is worse than an empty note. The harness reads the property at the
+  // rewatch and the read-back and raises it as a FAULT that withholds the export, so
+  // the agent sees it and the viewer never can.
   const notes = [];
-  let dropped = 0;
   for (const part of notesRaw.split(";")) {
     if (!part.trim()) { continue; }
     const bits = part.split("|");
-    if (!bits[0] || !bits[0].trim()) { dropped += 1; continue; }
+    if (!bits[0] || !bits[0].trim()) { continue; }
     const rot = Number(bits[2]);
     notes.push({ text: bits[0].trim(),
                  color: (bits[1] || "#FFE066").trim(),
@@ -71,10 +78,6 @@ const Component = ({ item }) => {
           transform: "rotate(" + n.rotation + "deg) translateY(" + ((1 - ease) * (26 + i * 10)) + "px)" }}>
           {n.text}
         </div>))}
-      {dropped > 0 ? (
-        <div style={{ color: "#FFD166", fontSize: 30, fontFamily: "sans-serif" }}>
-          {"NOTES: dropped " + dropped + " malformed entry(ies)"}
-        </div>) : null}
     </div>
   );
 };
