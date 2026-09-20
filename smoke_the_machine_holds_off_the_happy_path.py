@@ -14,6 +14,9 @@ import os
 import random
 import sys
 import re as _re
+_os_list = __import__('os').listdir
+import sys as _sys
+import subprocess as _sub
 import os.path as _os_p
 import tempfile
 import time
@@ -1812,6 +1815,25 @@ def main():
           _zp.count("prestage(") == 1 and '"removes": [item_id]' in _zp
           and "control_a=" in _zp and "def split_sheets" in _zp,
           "prestage x%d, removes=%s" % (_zp.count("prestage("), '"removes": [item_id]' in _zp))
+    # THE WORKING TREE, NOT THE COMMIT. red_proof_no_undefined_names builds an ISOLATED
+    # worktree from HEAD, so it judges what is COMMITTED — and a run is launched from what
+    # is on disk. A slice-based edit removed `place_theirs`, `place_ours` and PORTED_PROPS
+    # from zoom_pair, the proof kept reporting the committed line numbers, and the container
+    # died on NameError after paying for a prestage. pyflakes says it on disk, for free.
+    _pf = _sub.run([_sys.executable, "-m", "pyflakes", "chatcut_job_app.py"],
+                   capture_output=True, text=True)
+    _pf_bad = [l for l in (_pf.stdout + _pf.stderr).splitlines()
+               if "undefined name" in l or "redefinition of unused" in l]
+    check("the WORKING tree carries no undefined name and no shadowed definition",
+          not _pf_bad, "; ".join(_pf_bad[:3]) if _pf_bad else "pyflakes clean on disk")
+    # AND EVERY BLOB THE HARNESS CAN SEND HAS PROPERTIES. A component registered with no
+    # property entry gives the user nothing to edit — the registered-default failure this
+    # repo has already paid for once: 135 defaults wrong, 0 of 14 components drawing.
+    _built = sorted(f[:-4] for f in _os_list("port/build") if f.endswith(".jsx"))
+    check("every built component has a property table, and the table has no orphans",
+          bool(_built) and not [b for b in _built if b not in J.PORTED_PROPS]
+          and not [k for k in J.PORTED_PROPS if k not in _built],
+          "built %s vs props %s" % (_built, sorted(J.PORTED_PROPS)))
     check("an unread or absent comparison is ABSENT or FAILED, never a proven pair",
           J.pair_differs(_mk([]), _mk(["b"]), reader=_rd(_same))["state"] == "ABSENT"
           and J.pair_differs(_mk(["a"]), _mk(["b"]), reader=_boom)["state"] == "FAILED"

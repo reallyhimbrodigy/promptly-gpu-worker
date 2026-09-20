@@ -7325,100 +7325,6 @@ def mg_runtime_probe(clip_url: str = ""):
     return out
 
 
-def pair_labels(theirs_name, ours_name):
-    """The two captions, written HONESTLY (Zac, 2026-09-19). PURE.
-
-    He asked for the sides labelled "our timing carried" or "their default", and
-    those words are not decoration: a preset that takes only a start frame and a
-    duration HAS no timing to carry, so calling its side anything else would be
-    the claim doing the work the picture is supposed to do.
-    """
-    return ("THEIRS — %s: their default (start frame and duration only; constant speed, no curve)" % theirs_name,
-            "OURS — %s: our timing carried (ramp lands on the word, holds, releases; velocity-capped)" % ours_name)
-
-
-def stack_pair(top_path, bottom_path, labels, out_path, writer=None):
-    """Two sheets, stacked, each captioned. -> {state, path, why}. Reader/writer injectable.
-
-    The sheets are frame GRIDS in time order, so stacking them puts the two arms'
-    same moments directly above one another — which is the comparison, and is why
-    this is a stack and not two files in a folder.
-    """
-    if not top_path or not bottom_path:
-        return {"state": "ABSENT", "path": None,
-                "why": "one side has no sheet (%s / %s)" % (bool(top_path), bool(bottom_path))}
-    try:
-        from PIL import Image, ImageDraw
-        A, B = Image.open(top_path).convert("RGB"), Image.open(bottom_path).convert("RGB")
-        w = max(A.width, B.width)
-        bar = 34
-        out = Image.new("RGB", (w, A.height + B.height + bar * 2), (14, 14, 16))
-        d = ImageDraw.Draw(out)
-        d.text((10, 9), labels[0], fill=(235, 235, 235))
-        out.paste(A, (0, bar))
-        d.text((10, bar + A.height + 9), labels[1], fill=(235, 235, 235))
-        out.paste(B, (0, bar * 2 + A.height))
-        (writer or (lambda im, p: im.save(p, quality=92)))(out, out_path)
-        return {"state": "MEASURED", "path": out_path,
-                "why": "%dx%d, theirs above ours at matched times" % (out.width, out.height)}
-    except Exception as e:                                        # noqa: BLE001
-        return {"state": "FAILED", "path": None, "why": str(e)[:200]}
-
-
-def frame_diff_profile(a_paths, b_paths, reader=None):
-    """Per-frame difference between two arms' contact sheets. PURE (reader injectable).
-
-    NO THRESHOLD, BY DESIGN. This repo's determinism law is byte-identity, not a
-    PSNR bar, and a threshold here would be a number calibrated on one pair that
-    then decides every future pair. The question asked is the binary one: is any
-    pixel different? A pair that renders identically is the failure; how big the
-    difference is, is Zac's judgement and not a gate's.
-
-    -> {state, n, differing, max_abs, profile, why}
-       state MEASURED  both sides read and compared
-             ABSENT    one or both sides produced no frames — NOTHING is claimed
-             FAILED    a sheet could not be read, with what it said
-    `profile` is the per-frame mean absolute difference IN ORDER, so a pair that
-    differs only at the edges (a misalignment) is distinguishable from one that
-    differs through the middle (the curve), which is the thing being shown.
-    """
-    if not a_paths or not b_paths:
-        return {"state": "ABSENT", "n": 0, "differing": None, "max_abs": None, "profile": [],
-                "why": "no frames on %s side" % ("either" if not a_paths and not b_paths
-                                                 else "theirs" if not a_paths else "ours")}
-    if len(a_paths) != len(b_paths):
-        return {"state": "FAILED", "n": 0, "differing": None, "max_abs": None, "profile": [],
-                "why": "the arms produced different frame counts (%d vs %d) — not comparable"
-                       % (len(a_paths), len(b_paths))}
-
-    def _read(p):
-        from PIL import Image
-        import numpy as np
-        return np.asarray(Image.open(p).convert("RGB"), dtype="int16")
-
-    rd = reader or _read
-    profile, differing, max_abs = [], 0, 0
-    for pa, pb in zip(a_paths, b_paths):
-        try:
-            A, B = rd(pa), rd(pb)
-        except Exception as e:                                    # noqa: BLE001
-            return {"state": "FAILED", "n": len(profile), "differing": None, "max_abs": None,
-                    "profile": profile, "why": "could not read a sheet: %s" % str(e)[:200]}
-        if getattr(A, "shape", None) != getattr(B, "shape", None):
-            return {"state": "FAILED", "n": len(profile), "differing": None, "max_abs": None,
-                    "profile": profile, "why": "sheet shapes differ (%s vs %s) — not comparable"
-                                               % (getattr(A, "shape", "?"), getattr(B, "shape", "?"))}
-        d = abs(A - B)
-        mad = float(d.mean())
-        profile.append(round(mad, 4))
-        if float(d.max()) > 0:
-            differing += 1
-        max_abs = max(max_abs, float(d.max()))
-    return {"state": "MEASURED", "n": len(profile), "differing": differing,
-            "max_abs": max_abs, "profile": profile,
-            "why": "%d of %d sheet(s) carry at least one differing pixel" % (differing, len(profile))}
-
-
 def pair_differs(arm_a, arm_b, reader=None, control_a=None, control_b=None):
     """RULE 3, WITH A CONTROL. Two arms are deliverable only once proven to differ
     BECAUSE OF THE THING UNDER TEST.
@@ -7562,6 +7468,45 @@ def frame_diff_profile(a_paths, b_paths, reader=None):
             "why": "%d of %d sheet(s) carry at least one differing pixel" % (differing, len(profile))}
 
 
+PORTED_PROPS = {
+    # WHAT A USER CAN EDIT ON A PORTED ZOOM. Every value a user may reasonably want to
+    # change is a property, because a hardcoded one is not editable in ChatCut at all.
+    "SmoothPush": [
+        {"key": "clip", "label": "Clip", "type": "video", "defaultValue": ""},
+        {"key": "srcFrom", "label": "Source start frame", "type": "number", "defaultValue": 0},
+        {"key": "scale", "label": "Peak magnification", "type": "number", "defaultValue": 1.2},
+        {"key": "originX", "label": "Origin X", "type": "number", "defaultValue": 0.5},
+        {"key": "originY", "label": "Origin Y", "type": "number", "defaultValue": 0.5},
+        {"key": "punch", "label": "Punch (accelerate into the word)", "type": "boolean", "defaultValue": False},
+        {"key": "capped", "label": "Velocity cap", "type": "boolean", "defaultValue": True},
+    ],
+    "StepZoom": [
+        {"key": "clip", "label": "Clip", "type": "video", "defaultValue": ""},
+        {"key": "srcFrom", "label": "Source start frame", "type": "number", "defaultValue": 0},
+        {"key": "scale", "label": "Step magnification", "type": "number", "defaultValue": 1.3},
+        {"key": "originX", "label": "Origin X", "type": "number", "defaultValue": 0.5},
+        {"key": "originY", "label": "Origin Y", "type": "number", "defaultValue": 0.5},
+        {"key": "stepAtFrame", "label": "Step at frame", "type": "number", "defaultValue": 0},
+    ],
+    "StagedPush": [
+        {"key": "clip", "label": "Clip", "type": "video", "defaultValue": ""},
+        {"key": "srcFrom", "label": "Source start frame", "type": "number", "defaultValue": 0},
+        # NO ARRAY TYPE EXISTS in ChatCut's property schema (text, number, color, boolean,
+        # select, font, image, video), so the stages are "seconds:scale" pairs and the
+        # component drops a malformed pair by NAME rather than reading it as zero.
+        {"key": "stages", "label": "Stages (seconds:scale, comma separated)", "type": "text",
+         "defaultValue": "0.30:1.15, 0.95:1.30"},
+        {"key": "pushMs", "label": "Push into each stage (ms)", "type": "number", "defaultValue": 280},
+        {"key": "holdMs", "label": "Hold at full push (ms)", "type": "number", "defaultValue": 260},
+        {"key": "releaseMs", "label": "Release (ms)", "type": "number", "defaultValue": 360},
+        {"key": "originX", "label": "Origin X", "type": "number", "defaultValue": 0.5},
+        {"key": "originY", "label": "Origin Y", "type": "number", "defaultValue": 0.5},
+        {"key": "cutTerminated", "label": "Cut ends the clip (stay pushed)", "type": "boolean", "defaultValue": False},
+        {"key": "capped", "label": "Velocity cap", "type": "boolean", "defaultValue": True},
+    ],
+}
+
+
 def ported_code(name):
     """The BUILT blob, read from the image. Never re-emitted in the container.
 
@@ -7676,6 +7621,38 @@ def zoom_pair(clip_url: str = "", at_s: float = 12.0, span_s: float = 2.0,
                 a["state"] = "FAILED"
                 a["why"] = "the arm could not be removed, so the next arm would be measured on top of it"
         return a
+
+    # ── THEIRS: their preset, as an effect ON the base item ──────────────
+    def place_theirs(pid, base, _src):
+        return _mcp_call(tok, "edit_item", {"projectId": pid, "adds": [
+            {"type": "effect", "assetId": "builtin:zoom", "targetItemId": base,
+             "fromFrame": from_frame, "durationInFrames": dur_frames,
+             "propertyOverrides": {"magnification": magnification, "shape": theirs}}]},
+            expect="adds")
+
+    # ── OURS: our ported component, as a layer OVER the base ─────────────
+    def place_ours(pid, base, src_asset):
+        code = ported_code("SmoothPush")
+        _v = component_contract(code)
+        if _v:
+            # REFUSED HERE, NOT BY THE SERVER. Sending a component we already know
+            # breaks a measured rule spends a round trip to be told what we knew.
+            raise RuntimeError("SmoothPush violates the ChatCut component contract: %s" % "; ".join(_v))
+        asset = _mcp_call(tok, "create_motion_graphic_from_code", {
+            "projectId": pid, "name": "SmoothPush",
+            "code": code, "width": 1080, "height": 1920,
+            "durationInFrames": dur_frames,
+            "properties": normalise_properties(PORTED_PROPS["SmoothPush"])}, expect=None)
+        mg = asset_id_from(asset or {})
+        if not mg:
+            raise RuntimeError("SmoothPush did not register: %s" % registration_refusal(asset or {}))
+        out["our_asset"] = mg
+        return _mcp_call(tok, "edit_item", {"projectId": pid, "adds": [
+            {"type": "motion-graphic", "assetId": mg,
+             "fromFrame": from_frame, "durationInFrames": dur_frames,
+             "propertyOverrides": {"clip": src_asset, "srcFrom": from_frame,
+                                   "scale": magnification, "punch": bool(punch),
+                                   "capped": True}}]}, expect="adds")
 
     stage = prestage(tok, "", controls={}, source_path="/work/source.mp4",
                      want_components=set(), titles=[])

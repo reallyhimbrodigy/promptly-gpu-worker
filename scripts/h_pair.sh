@@ -14,6 +14,13 @@ RUNNING=$(modal app list 2>/dev/null | /usr/bin/grep -i 'chatcut' | /usr/bin/gre
 # pair built from one would be a measurement of the wrong component.
 python3 red_proof_the_cap_has_one_source.py > /tmp/bs/h_pair_gate.log 2>&1
 [ $? -eq 0 ] || { echo "REFUSED: the cap gate is not green — see /tmp/bs/h_pair_gate.log"; exit 5; }
+# THE NAMES ON DISK, BEFORE THE SPEND. red_proof_no_undefined_names judges the COMMITTED
+# tree from an isolated worktree; a run is launched from what is on disk. A slice edit once
+# removed two closures and a table from zoom_pair, the proof reported the committed state,
+# and the container died on NameError after paying for a prestage.
+python3 -m pyflakes chatcut_job_app.py > /tmp/bs/h_pair_pyflakes.log 2>&1
+BAD=$(/usr/bin/grep -c "undefined name\|redefinition of unused" /tmp/bs/h_pair_pyflakes.log)
+[ "$BAD" = "0" ] || { echo "REFUSED: $BAD undefined/shadowed name(s) on disk:"; /usr/bin/grep "undefined name\|redefinition of unused" /tmp/bs/h_pair_pyflakes.log; exit 6; }
 K="ab-sources/reliability-fixtures-v3/talking_head-f4195ca9.mp4"
 SRC=$(python3 presign.py "$K" | cut -f1); [ -n "$SRC" ] || { echo "presign failed"; exit 4; }
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$SRC"); [ "$CODE" = "200" ] || { echo "presign GET -> $CODE"; exit 4; }
