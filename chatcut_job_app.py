@@ -1521,6 +1521,52 @@ def registry_fingerprint(path="/craft/chatcut_registry_baked.json"):
     return out
 
 
+def presign_left(url, now_s=None):
+    """Seconds of life left in a presigned URL. -> {state, left_s, scheme, why}
+
+    HOISTED OUT OF main() SO A CHECK CAN DRIVE IT. It was inline in the launch
+    guard, which meant the only way to test it was to restate it -- and then
+    the test proves the restatement while the shipped path goes untested. This
+    repo has that lesson twice already.
+
+    THE BUG IT WAS HOISTED TO FIX, kept as the correction. The SigV4 branch read
+
+        time.mktime(strptime(X-Amz-Date)) - time.timezone + X-Amz-Expires
+
+    and X-Amz-Date is UTC by definition. mktime interprets a naive struct as
+    LOCAL, so the subtraction was a second correction in the same direction;
+    time.timezone is also the NON-DST offset, so the residual was exactly the
+    DST hour. Measured 2026-09-20 on a real URL: timezone 28800, altzone 25200,
+    and a URL signed for 3600s read as +0s -- the error and the expiry cancelled
+    to zero, and the guard refused a VALID source. Correct every winter, wrong
+    every summer, and only wrong by a whole hour so nothing looked approximate.
+    """
+    import calendar as _cal
+    out = {"state": "ABSENT", "left_s": None, "scheme": None,
+           "why": "not attempted"}
+    if not url:
+        return dict(out, why="no url")
+    now_s = time.time() if now_s is None else now_s
+    m = re.search(r"[?&]Expires=(\d+)", url)
+    if m:
+        return {"state": "MEASURED", "left_s": int(m.group(1)) - int(now_s),
+                "scheme": "sigv2", "why": "Expires= epoch"}
+    m = re.search(r"X-Amz-Date=(\d{8}T\d{6}Z).*?X-Amz-Expires=(\d+)", url)
+    if m:
+        try:
+            t = _cal.timegm(time.strptime(m.group(1), "%Y%m%dT%H%M%SZ"))
+        except ValueError as e:
+            return dict(out, state="FAILED", scheme="sigv4",
+                        why="unreadable X-Amz-Date %r: %s" % (m.group(1), e))
+        return {"state": "MEASURED", "left_s": int(t + int(m.group(2)) - now_s),
+                "scheme": "sigv4", "why": "X-Amz-Date %s + %ss, read as UTC"
+                                          % (m.group(1), m.group(2))}
+    # NOT A FAILURE. An unsigned CDN URL has no expiry to read, which is an
+    # answer about the URL rather than a fault in the reader -- and the caller
+    # HEADs it instead.
+    return dict(out, state="ABSENT", why="no expiry parameter — an unsigned URL")
+
+
 def prestage_key(source_sha=None, registry_digest=None, account=None,
                  w=None, h=None, fps=None, version=PRESTAGE_KEY_VERSION):
     """The lookup key for a prestaged project. -> {state, key, parts, why}
@@ -12117,15 +12163,12 @@ def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
     # reads the container log.
     #
     # The expiry is knowable BEFORE spending anything, so it is checked here.
-    _exp = re.search(r"[?&]Expires=(\d+)", clip_url)
-    _x_amz = re.search(r"X-Amz-Date=(\d{8}T\d{6}Z).*?X-Amz-Expires=(\d+)",
-                       clip_url)
-    _left = None
-    if _exp:
-        _left = int(_exp.group(1)) - int(time.time())
-    elif _x_amz:
-        _t = time.mktime(time.strptime(_x_amz.group(1), "%Y%m%dT%H%M%SZ"))
-        _left = int(_t - time.timezone + int(_x_amz.group(2)) - time.time())
+    _pl = presign_left(clip_url)
+    _left = _pl["left_s"]
+    if _pl["state"] == "FAILED":
+        raise SystemExit("REFUSING TO LAUNCH: the clip URL's expiry could not "
+                         "be read (%s). An unreadable clock is not a valid one."
+                         % _pl["why"])
     if _left is None:
         # A URL WITH NO EXPIRY IS THE ANSWER, NOT A GAP. This bucket's policy
         # allows ONLY the CloudFront service principal, so a presigned S3 URL

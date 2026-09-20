@@ -20,6 +20,7 @@ import subprocess as _sub
 import os.path as _os_p
 import tempfile
 import time
+import time as _time
 import json
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -2893,6 +2894,51 @@ def main():
               _fman["fixtures"]["talking_head"]["duration"],
               _fman["fixtures"]["zac_blueshirt"]["width"],
               _fman["fixtures"]["zac_blueshirt"]["height"]))
+
+    # ---- THE PRESIGN CLOCK ----
+    # A guard that refuses a VALID source is the false-red half of this file's
+    # family: it does not fail open, it fails the run, and the message blames
+    # the source rather than the clock that mis-read it. This one cost a launch.
+    import calendar as _calm
+    _now = _calm.timegm(_time.strptime("20260920T204000Z", "%Y%m%dT%H%M%SZ"))
+    _u4 = ("https://b.s3.amazonaws.com/k.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256"
+           "&X-Amz-Date=20260920T203932Z&X-Amz-Expires=3600&X-Amz-Signature=d")
+    _got = J.presign_left(_u4, now_s=_now)
+    check("a SigV4 expiry is read as UTC, not as local time minus the non-DST offset",
+          _got["state"] == "MEASURED" and _got["scheme"] == "sigv4"
+          and 3500 < _got["left_s"] <= 3600,
+          "left=%ss (the mktime-minus-timezone form read +0s on this exact URL "
+          "and refused the launch)" % _got["left_s"])
+    # THE PROPERTY THAT MAKES IT A CLOCK AND NOT A CONSTANT: it must not move
+    # with the machine's own timezone. The old form did, by exactly the DST
+    # hour, which is why it was right in winter and wrong in summer.
+    import os as _osm
+    _spans = []
+    for _tz in ("UTC", "America/Los_Angeles", "Asia/Kolkata", "Pacific/Auckland"):
+        _prev = _osm.environ.get("TZ")
+        _osm.environ["TZ"] = _tz
+        _time.tzset()
+        _spans.append(J.presign_left(_u4, now_s=_now)["left_s"])
+        if _prev is None:
+            _osm.environ.pop("TZ", None)
+        else:
+            _osm.environ["TZ"] = _prev
+        _time.tzset()
+    check("the presign clock reads the same in every timezone, including one at +05:30",
+          len(set(_spans)) == 1,
+          "readings %s across UTC/LA/Kolkata/Auckland" % _spans)
+    # AN UNSIGNED CDN URL HAS NO EXPIRY TO READ, which is an answer about the
+    # URL and not a fault in the reader — the caller HEADs it instead.
+    check("an unsigned URL is ABSENT and an unreadable date is FAILED, and neither is a number",
+          J.presign_left("https://d1iax8jos987n3.cloudfront.net/x.mp4")["state"] == "ABSENT"
+          and J.presign_left("https://b/k?X-Amz-Date=NOTADATE0T000000Z&X-Amz-Expires=60")["state"]
+              in ("ABSENT", "FAILED")
+          and J.presign_left("")["state"] == "ABSENT"
+          and J.presign_left("https://b/k?Expires=%d" % (_now + 120), now_s=_now)["left_s"] == 120,
+          "cdn=%s empty=%s sigv2=%ss" % (
+              J.presign_left("https://d1iax8jos987n3.cloudfront.net/x.mp4")["state"],
+              J.presign_left("")["state"],
+              J.presign_left("https://b/k?Expires=%d" % (_now + 120), now_s=_now)["left_s"]))
 
     if FAILS:
         print("\n%d FAILURE(S)" % len(FAILS))
