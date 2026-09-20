@@ -2184,13 +2184,24 @@ def main():
           "%d of 9 styles named" % sum(1 for _n in _nine if _n in _cmb_code))
     # THE SIGNATURES MUST ACTUALLY DIFFER, or "follows the style" renders identically
     # and the property is decorative.
-    _sig = dict(_re.findall(r'(\w+): \["([^"]+)", (\d+), "(\w+)", (-?\d+)\]',
-                            _cmb_code.replace('", ', '", ')) and [] or [])
-    _rows = _re.findall(r'(\w+): \["([^"]+)", (\d+), "(\w+)", (-?\d+)\]', _cmb_code)
+    # THE SIGNATURE IS SPLIT ON PURPOSE: weight and case live in the component, the
+    # FACE lives in the harness's map, because only a declared `font`-typed property
+    # loads a typeface. Measured: two styles differing only in family rendered
+    # pixel-identical, so a bare CSS fontFamily names a face nothing ever fetched.
+    _rows = _re.findall(r'(\w+): \[(\d+), "(\w+)", (-?\d+)\]', _cmb_code)
+    _combined = {(J.CAPTION_STYLE_FONT.get(_n), _w, _t) for _n, _w, _t, _ls in _rows}
     check("the nine styles carry genuinely different typography, not nine names for one look",
-          len(_rows) == 9 and len({(f, w, t) for _n, f, w, t, _ls in _rows}) >= 6,
-          "%d styles, %d distinct font/weight/case signatures"
-          % (len(_rows), len({(f, w, t) for _n, f, w, t, _ls in _rows})))
+          len(_rows) == 9
+          and set(dict(( _n, 1) for _n, _w, _t, _ls in _rows)) == set(J.CAPTION_STYLE_FONT)
+          and len(_combined) >= 6,
+          "%d styles, %d distinct face/weight/case signatures" % (len(_rows), len(_combined)))
+    check("the face is a font-TYPED property and the harness supplies the canonical name",
+          any(q["key"] == "fontFamily" and q.get("type") == "font"
+              for q in J.PORTED_PROPS["CaptionMatch"])
+          and "props.fontFamily" in _cmb_code
+          and J.CAPTION_STYLE_FONT["Quintessence"] == "Playfair Display"
+          and J.CAPTION_STYLE_FONT["CleanCut"] == "Inter",
+          "font-typed, canonical names from search_fonts")
     _pt = open("port/build/PlainText.jsx", encoding="utf-8").read()
     _pt_code = _re.sub(r"^\s*//.*$", "", _re.sub(r"/\*.*?\*/", "", _pt, flags=_re.S), flags=_re.M)
     check("PlainText is plain by construction: no card, no strip, no caption style",
@@ -2225,6 +2236,35 @@ def main():
     check("each placement writes its frames to its own directory",
           '"/work/tf_%s" % re.sub(r"[^A-Za-z0-9]+", "_", "%s_%s" % (name, label))' in _tfc,
           "directory keyed by component AND label")
+
+    # ---- AN ERROR THE RUNTIME CANNOT PICKLE COSTS THE WHOLE RECORD ----
+    # Measured 2026-09-19: ChatCut answered 502, urllib raised HTTPError — which holds
+    # an OPEN SOCKET — and Modal died with "cannot pickle '_io.BufferedReader'". The
+    # container returned NOTHING, so a transient gateway error threw away three caption
+    # styles already placed and compared. The TEXT of an error survives serialisation;
+    # the object does not.
+    def _boom():
+        import urllib.error as _ue
+        import io as _bio
+        raise _ue.HTTPError("u", 502, "Bad Gateway", {}, _bio.BytesIO(b""))
+    import pickle as _pk
+    try:
+        J.unpicklable_safe(_boom)
+        _raised = None
+    except Exception as _ex:                                      # noqa: BLE001
+        _raised = _ex
+    check("an unpicklable error is re-raised as plain text that survives the wire",
+          isinstance(_raised, RuntimeError) and "502" in str(_raised)
+          and "HTTPError" in str(_raised) and bool(_pk.dumps(_raised)),
+          str(_raised)[:90] if _raised else "nothing raised")
+    # AND THE RECORD IS WRITTEN BEFORE THE PARTS THAT CAN STILL DIE.
+    _tfsrc = open("chatcut_job_app.py", encoding="utf-8").read()
+    _tf = _tfsrc[_tfsrc.index("def text_family_check("):]
+    _tf = _tf[:_tf.index("@app.function")] if "@app.function" in _tf else _tf
+    check("the run records what it has before the steps that can still fail",
+          _tf.count('RESULTS["text-family-check"] = out') >= 2
+          and _tf.index('out["state"] = "PARTIAL"') < _tf.index("1b. the workhorse"),
+          "%d record writes" % _tf.count('RESULTS["text-family-check"] = out'))
 
     # THE WORKING TREE, NOT THE COMMIT. red_proof_no_undefined_names builds an ISOLATED
     # worktree from HEAD, so it judges what is COMMITTED — and a run is launched from what

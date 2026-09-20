@@ -51,20 +51,29 @@ const Component = ({ item }) => {
   const ease = 1 - Math.pow(1 - t, 3);
   const text = String(props.text || "");
   const captionStyle = props.captionStyle || "CleanCut";
+  // THE FAMILY ARRIVES AS A `font`-TYPED PROPERTY, NOT AS A CSS STRING. Measured
+  // 2026-09-19: CleanCut and Quintessence differ ONLY in typeface and rendered
+  // PIXEL-IDENTICAL, while Gadzhi (which uppercases) differed from both — so the
+  // property was read and the TYPEFACE was not honoured. Both families exist in
+  // ChatCut's catalogue under those exact names, so the family was available and
+  // simply never loaded: a bare fontFamily string names a face the renderer was
+  // never told to fetch. ChatCut's own guidance is to resolve through search_fonts
+  // and carry the canonical name in a `font` property, which is what loads it.
+  const fontFamily = props.fontFamily || "Inter";
   const pop = 0.94 + 0.06 * ease;
   // THE NINE, from src/remotion/src/captions/<style>/: the font each one actually
   // renders with, its weight, and whether it transforms case. A style this does not
   // know falls back to CleanCut rather than silently rendering something else.
   const styles = {
-    CleanCut: ["Inter, sans-serif", 700, "none", 0],
-    Cove: ["Montserrat, sans-serif", 700, "none", 0],
-    Gadzhi: ["Montserrat, sans-serif", 700, "uppercase", -1],
-    Lumen: ["Montserrat, sans-serif", 800, "none", 0],
-    Prime: ["Inter, sans-serif", 800, "lowercase", 0],
-    Pulse: ["DM Sans, sans-serif", 800, "none", 0],
-    Quintessence: ["Playfair Display, Georgia, serif", 700, "none", 0],
-    TwoTone: ["Montserrat, sans-serif", 900, "none", -1],
-    TypewriterReveal: ["Space Mono, monospace", 700, "none", 1],
+    CleanCut: [700, "none", 0],
+    Cove: [700, "none", 0],
+    Gadzhi: [700, "uppercase", -1],
+    Lumen: [800, "none", 0],
+    Prime: [800, "lowercase", 0],
+    Pulse: [800, "none", 0],
+    Quintessence: [700, "none", 0],
+    TwoTone: [900, "none", -1],
+    TypewriterReveal: [700, "none", 1],
   };
   const sty = styles[captionStyle] || styles.CleanCut;
   if (!text) {
@@ -72,8 +81,8 @@ const Component = ({ item }) => {
   }
   return (
     <div style={rootStyle}>
-      <div style={{ transform: "scale(" + pop + ")", color: textColor, fontFamily: sty[0],
-                    fontWeight: sty[1], textTransform: sty[2], letterSpacing: sty[3],
+      <div style={{ transform: "scale(" + pop + ")", color: textColor, fontFamily: fontFamily,
+                    fontWeight: sty[0], textTransform: sty[1], letterSpacing: sty[2],
                     fontSize: fontSize, lineHeight: 1.06, textAlign: "center",
                     maxWidth: "94%", whiteSpace: "normal", overflowWrap: "break-word",
                     textShadow: "0 6px 22px rgba(0,0,0,0.55)" }}>

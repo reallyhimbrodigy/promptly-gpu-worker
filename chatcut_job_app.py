@@ -7987,6 +7987,18 @@ def frame_diff_profile(a_paths, b_paths, reader=None):
             "why": "%d of %d sheet(s) carry at least one differing pixel" % (differing, len(profile))}
 
 
+# THE FACE EACH CAPTION STYLE RENDERS WITH, from the renderer's own components, and
+# the names are the CANONICAL ones search_fonts returns ("Inter", "Playfair Display"
+# — both confirmed present in ChatCut's catalogue). The harness passes this; the
+# component does not guess, because only a declared `font` property loads a face.
+CAPTION_STYLE_FONT = {
+    "CleanCut": "Inter", "Cove": "Montserrat", "Gadzhi": "Montserrat",
+    "Lumen": "Montserrat", "Prime": "Inter", "Pulse": "DM Sans",
+    "Quintessence": "Playfair Display", "TwoTone": "Montserrat",
+    "TypewriterReveal": "Space Mono",
+}
+
+
 PORTED_PROPS = {
     "TornPaper": [
         {"key": "topText", "label": "Top line", "type": "text", "defaultValue": ""},
@@ -8022,6 +8034,12 @@ PORTED_PROPS = {
         {"key": "text", "label": "Text", "type": "text", "defaultValue": ""},
         # THE EDIT'S OWN CHOICE, passed in by the harness: a ChatCut component sees
         # only item.props, so it cannot read the project's caption style itself.
+        # A `font`-TYPED PROPERTY IS WHAT LOADS THE FACE. A bare CSS fontFamily
+        # string names a family the renderer was never told to fetch, which is why
+        # two styles differing only in typeface rendered pixel-identical. The
+        # canonical names come from search_fonts, verbatim.
+        {"key": "fontFamily", "label": "Typeface (from the edit's caption style)",
+         "type": "font", "defaultValue": "Inter"},
         {"key": "captionStyle", "label": "Caption style (matches the edit's captions)",
          "type": "select", "defaultValue": "CleanCut",
          "options": ["CleanCut", "Cove", "Gadzhi", "Lumen", "Prime", "Pulse",
@@ -8371,6 +8389,89 @@ def rest_verdict(base_by_frame, layer_by_frame, reader=None):
                    % (prof["n"], dropped)}
 
 
+@app.function(image=IMG, timeout=600, cpu=2, memory=4096,
+              secrets=[modal.Secret.from_name("chatcut-oauth")])
+def font_probe(families: str = "Inter,Montserrat,Playfair Display,DM Sans,Space Mono"):
+    """WHICH FONT FAMILIES CAN ChatCut ACTUALLY RENDER? No model calls.
+
+    MEASURED 2026-09-19, and this is why it matters. The caption-style proof placed
+    three styles and compared them pairwise:
+
+        CleanCut vs Gadzhi        differing=2  max=255   (Gadzhi UPPERCASES)
+        Gadzhi vs Quintessence    differing=2  max=255
+        CleanCut vs Quintessence  differing=0  max=0     <-- IDENTICAL
+
+    CleanCut and Quintessence differ ONLY in font family — Inter against Playfair
+    Display. Rendering identically means the family is NOT being applied and both
+    fall back to the same default. So the property IS read (the case transform
+    proves it) and the TYPEFACE is not honoured, which is the half a pairwise
+    comparison could not have told me apart without a pair that isolates it.
+
+    ChatCut's own guidance says to resolve families through `search_fonts` and use
+    the canonical name verbatim; a machine-specific or unavailable family silently
+    falls back. This asks it, for every family the nine styles name.
+    """
+    tok = _access_token()
+    out = {"state": "RUNNING", "asked": [], "found": {}, "missing": []}
+    for fam in [f.strip() for f in str(families).split(",") if f.strip()]:
+        out["asked"].append(fam)
+        try:
+            r = _mcp_call(tok, "search_fonts", {"query": fam}, expect=None)
+            # THE TEXT, NOT THE ENVELOPE. A 1500-char slice of the whole JSON was
+            # consumed entirely by `_meta` — the live-project card ChatCut attaches to
+            # every answer — so the capture showed none of the actual result.
+            _t = str((r or {}).get("_text") or "")
+            if not _t:
+                for _c in ((r or {}).get("content") or []):
+                    if isinstance(_c, dict) and _c.get("type") == "text":
+                        _t += _c.get("text") or ""
+            blob = _t or json.dumps({k: v for k, v in (r or {}).items() if k != "_meta"}, default=str)
+            names = sorted(set(re.findall(r'"(?:family|name|fontFamily)"\s*:\s*"([^"]{2,40})"', blob)))
+            if not names:
+                names = sorted(set(re.findall(r"^\s*[-*]?\s*([A-Z][A-Za-z0-9 ]{2,30})\s*$",
+                                              str((r or {}).get("_text") or ""), re.M)))[:12]
+            exact = [n for n in names if n.lower() == fam.lower()]
+            out["found"][fam] = {"exact": exact, "near": names[:8],
+                                 # THE RAW ANSWER, KEPT. The first reader of this
+                                 # matched 'show_preview' — a KEY in the envelope, not
+                                 # a font — and reported it as a near match for every
+                                 # family. Guessing a response's shape is the failure
+                                 # this whole session keeps paying for; the bytes stay.
+                                 "raw": blob[:2500],
+                                 "state": "MEASURED" if names else "ABSENT"}
+            if not exact:
+                out["missing"].append(fam)
+            print("  %-20s %-9s exact=%s near=%s"
+                  % (fam, out["found"][fam]["state"], exact, names[:5]), flush=True)
+        except Exception as e:                                    # noqa: BLE001
+            out["found"][fam] = {"state": "FAILED", "why": "%s: %s" % (type(e).__name__, str(e)[:200])}
+            out["missing"].append(fam)
+            print("  %-20s FAILED    %s" % (fam, str(e)[:120]), flush=True)
+    out["state"] = "MEASURED"
+    RESULTS["font-probe"] = out
+    return out
+
+
+def unpicklable_safe(fn, *a, **k):
+    """Run `fn`, and re-raise anything it throws as a PLAIN RuntimeError. -> result
+
+    MEASURED 2026-09-19: ChatCut answered 502 mid-run, urllib raised HTTPError —
+    which holds an OPEN SOCKET — and Modal could not pickle it:
+
+        Failed to serialize exception HTTP Error 502: Bad Gateway of type
+        <class 'urllib.error.HTTPError'>: cannot pickle '_io.BufferedReader'
+
+    The container then died with NO RESULT AT ALL, so a transient gateway error
+    cost the entire run's record: three caption styles placed and compared, and
+    nothing kept. The text of an error survives serialisation; the exception
+    object does not.
+    """
+    try:
+        return fn(*a, **k)
+    except Exception as e:                                        # noqa: BLE001
+        raise RuntimeError("%s: %s" % (type(e).__name__, str(e)[:500])) from None
+
+
 @app.function(image=IMG, timeout=2400, cpu=4, memory=8192,
               secrets=[modal.Secret.from_name("chatcut-oauth")])
 def text_family_check(clip_url: str = "", at_s: float = 6.0, span_s: float = 3.0):
@@ -8478,6 +8579,7 @@ def text_family_check(clip_url: str = "", at_s: float = 6.0, span_s: float = 3.0
     for _cs in ("CleanCut", "Gadzhi", "Quintessence"):
         out["rendered"]["CaptionMatch_" + _cs] = _place_and_shoot(
             "CaptionMatch", {"text": "this is the moment", "captionStyle": _cs,
+                             "fontFamily": CAPTION_STYLE_FONT.get(_cs, "Inter"),
                              "size": "medium", "position": "middle",
                              "textColor": "#FFFFFF", "accentColor": "#C8551F"}, _cs)
         print("  CaptionMatch %-13s %s" % (_cs, out["rendered"]["CaptionMatch_" + _cs].get("state")), flush=True)
@@ -8501,8 +8603,15 @@ def text_family_check(clip_url: str = "", at_s: float = 6.0, span_s: float = 3.0
         "AT LEAST ONE PAIR IS IDENTICAL — the component is ignoring captionStyle, which is "
         "the defect this proof exists to catch: %s"
         % {k: v.get("differing") for k, v in _follow.items()})
-    print("  STYLE FOLLOWS   %s — %s" % ("YES" if out["style_follows"]["follows"] else "NO",
-                                         out["style_follows"]["why"][:150]), flush=True)
+    print("  STYLE FOLLOWS   %s" % ("YES" if out["style_follows"]["follows"] else "NO"), flush=True)
+    for _k, _v in (out["style_follows"]["pairs"] or {}).items():
+        print("      %-28s %s  differing=%s  max=%s"
+              % (_k, _v.get("state"), _v.get("differing"), _v.get("max_abs")), flush=True)
+
+    # THE RECORD IS WRITTEN HERE, BEFORE ANYTHING ELSE CAN DIE. A 502 after this
+    # point used to cost the whole run: three styles placed and compared, nothing kept.
+    out["state"] = "PARTIAL"
+    RESULTS["text-family-check"] = out
 
     # ── 1b. the workhorse, plain/medium/middle, beside the bare frame ────
     out["rendered"]["PlainText"] = _place_and_shoot(
@@ -8706,7 +8815,7 @@ def rest_matrix(clip_url: str = "", at_s: float = 12.0, span_s: float = 2.0):
             edit_item_checked(tok, {"projectId": pid, "deletes": [{"id": iid}]},
                               "clearing the %s variant" % name)
         except Exception as e:                                    # noqa: BLE001
-            row["verdict"] = {"state": "FAILED", "why": str(e)[:300]}
+            row["verdict"] = {"state": "FAILED", "why": "%s: %s" % (type(e).__name__, str(e)[:300])}
         out["variants"][name] = row
         _v = row["verdict"]
         print("  %-10s %-10s %s" % (name, _v.get("state"), str(_v.get("why"))[:110]), flush=True)
