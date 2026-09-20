@@ -1,3 +1,9 @@
+/* NO HARDCODED FALLBACK LIVES HERE (Zac, 2026-09-20). Defaults belong to the
+ * property table and nowhere else. ChatCut REWRITES the code at registration, so a
+ * fallback in source is dead code that looks live — and with none to strip, the
+ * registered blob comes back byte-identical and port/registered_diff.mjs can assert
+ * exact equality, which is the only way to know the code that runs is the code we
+ * built. */
 /* StepZoom — OUR step, on ChatCut's timeline.
  *
  * Instant jump cuts between zoom levels. No easing, no animation: the scale is
@@ -19,13 +25,13 @@ const Component = ({ item }) => {
   const { durationInFrames } = useVideoConfig();
   const props = (item && item.props) || {};
   const src = props.clip;
-  const srcFrom = Math.max(0, Math.round(Number(props.srcFrom) || 0));
-  const targetScale = Number(props.scale) || 1.3;
-  const originX = props.originX === undefined ? 0.5 : Number(props.originX);
-  const originY = props.originY === undefined ? 0.5 : Number(props.originY);
+  const srcFrom = Math.max(0, Math.round(Number(props.srcFrom)));
+  const targetScale = Number(props.scale);
+  const originX = Number(props.originX);
+  const originY = Number(props.originY);
   // The step can start late inside the item, so a single placement can hold the
   // wide shot and then cut tight on the word rather than opening on the cut.
-  const stepAt = Math.max(0, Math.round(Number(props.stepAtFrame) || 0));
+  const stepAt = Math.max(0, Math.round(Number(props.stepAtFrame)));
   // THE REST CALIBRATION, SUPPLIED BY THE HARNESS — never a number written here.
   // Our layer renders the source measurably brighter than the base item does: a flat
   // additive offset, independent of level, saturation and channel, and identical
@@ -34,7 +40,7 @@ const Component = ({ item }) => {
   // and out boundaries. The value MOVES between runs (2.04 then 1.72 levels), which
   // is why it arrives as a measured value and is not baked in. SVG filters are inert
   // here; `brightness(b) contrast(c)` composes to slope 1 and a pure offset.
-  const correct = props.correct || "";
+  const correct = props.correct;
   const rootStyle = { position: "absolute", inset: 0, display: "flex",
     alignItems: "center", justifyContent: "center", overflow: "hidden",
     boxSizing: "border-box", backgroundColor: "#000000" };
@@ -62,7 +68,7 @@ const Component = ({ item }) => {
           width: "100%",
           height: "100%",
           objectFit: "cover",
-          filter: correct || undefined,
+          filter: correct,
           transform: `scale(${scale})`,
           transformOrigin: `${originX * 100}% ${originY * 100}%`,
         }}

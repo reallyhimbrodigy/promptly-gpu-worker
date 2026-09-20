@@ -1,3 +1,9 @@
+/* NO HARDCODED FALLBACK LIVES HERE (Zac, 2026-09-20). Defaults belong to the
+ * property table and nowhere else. ChatCut REWRITES the code at registration, so a
+ * fallback in source is dead code that looks live — and with none to strip, the
+ * registered blob comes back byte-identical and port/registered_diff.mjs can assert
+ * exact equality, which is the only way to know the code that runs is the code we
+ * built. */
 /* CaptionMatch - the caption_match text overlay, ported from the old pipeline's family.
  *
  * WHY IT IS BACK. text_overlays was a FAMILY in the live pipeline and it is absent
@@ -33,10 +39,10 @@ const Component = ({ item }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const props = (item && item.props) || {};
-  const size = props.size || "medium";
-  const position = props.position || "middle";
-  const accent = props.accentColor || "#C8551F";
-  const textColor = props.textColor || "#FFFFFF";
+  const size = props.size;
+  const position = props.position;
+  const accent = props.accentColor;
+  const textColor = props.textColor;
   // THE REFERENCE SCALE, the same ladder the component sheet already uses.
   const fontSize = size === "xlarge" ? 168 : size === "large" ? 128 : size === "small" ? 72 : 96;
   const justify = position === "top" ? "flex-start" : position === "bottom" ? "flex-end" : "center";
@@ -49,8 +55,8 @@ const Component = ({ item }) => {
   // FRAME-1-IS-FINAL for readable text, so the words are legible on frame one.
   const t = Math.min(Math.max(frame / Math.max(1, Math.round(0.28 * fps)), 0), 1);
   const ease = 1 - Math.pow(1 - t, 3);
-  const text = String(props.text || "");
-  const captionStyle = props.captionStyle || "CleanCut";
+  const text = String(props.text);
+  const captionStyle = props.captionStyle;
   // THE FAMILY ARRIVES AS A `font`-TYPED PROPERTY, NOT AS A CSS STRING. Measured
   // 2026-09-19: CleanCut and Quintessence differ ONLY in typeface and rendered
   // PIXEL-IDENTICAL, while Gadzhi (which uppercases) differed from both — so the
@@ -59,7 +65,7 @@ const Component = ({ item }) => {
   // simply never loaded: a bare fontFamily string names a face the renderer was
   // never told to fetch. ChatCut's own guidance is to resolve through search_fonts
   // and carry the canonical name in a `font` property, which is what loads it.
-  const fontFamily = props.fontFamily || "Inter";
+  const fontFamily = props.fontFamily;
   const pop = 0.94 + 0.06 * ease;
   // THE NINE, from src/remotion/src/captions/<style>/: the font each one actually
   // renders with, its weight, and whether it transforms case. A style this does not

@@ -6348,6 +6348,11 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
             except Exception as _ie:                              # noqa: BLE001
                 _props[str(it.get("id"))] = {"inspect_item": "FAILED %s" % str(_ie)[:80]}
         mark("rewatch%d.props" % n)
+        # THE PROPS LOOP IS N NETWORK ROUND TRIPS, one inspect_item per placed item,
+        # and at the FINAL read-back the timeline is full — at rewatch 1 it was empty
+        # and cost 0.00s, which is why it has never shown up. Marked so the tail has an
+        # owner instead of reading as a container that would not die.
+        mark("readback%d.props" % n)
         _rec = derive_record(_items, _beats, _base, "\n".join(_shim_whys()))
         _g = gate_b(tok, _stage, _rec.get("rulings"), _rec.get("spec"),
                     source_duration_s=(_dur_for_detect or None), prefetched=_rb, beats=_beats)
@@ -6990,6 +6995,7 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     out["route"] = run_route(_beats, _beats_box.get("state"), _beats_box.get("why"))
     print("  ROUTE           : %s — %s" % (out["route"]["route"], out["route"]["why"]), flush=True)
 
+    mark("tail.record")
     out["timeline_sample"] = {
         "count": len(_fi),
         "video_count": sum(1 for i in _fi
@@ -7149,10 +7155,23 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                     % (_after_export_s, EXPORT_TO_EXIT_BUDGET_S)})
         print("  OWNER PAGE      : CONTAINER LINGERED — %ss after the export against a %ss budget; "
               "ledger entry written (run %s)" % (_after_export_s, EXPORT_TO_EXIT_BUDGET_S, run_id), flush=True)
+    mark("tail.export")
     _budget_txt, _budget_rows = budget_line(_st, out.get("wall_s"), cold_prefix=_cold_prefix)
     out["run_line"]["budget"] = _budget_rows
     out["run_line"]["budget_target_s"] = WALL_TARGET_S
     print("  BUDGET %ds     : %s" % (WALL_TARGET_S, _budget_txt), flush=True)
+    # THE TAIL, ITEMISED. 30.3s sat after the last mark on the item-2 run and was
+    # reported as a container LINGERING — but an unmeasured window is not a linger,
+    # it is an unmeasured window, and calling it a defect names the wrong thing.
+    _mk = out.get("marks") or {}
+    _tail = [(k, v) for k, v in sorted(_mk.items(), key=lambda kv: kv[1]) if v >= (_mk.get("agent") or 0)]
+    if len(_tail) > 1:
+        _prev = _tail[0][1]
+        _parts = []
+        for _k, _v in _tail[1:]:
+            _parts.append("%s %.1fs" % (_k.replace("tail.", ""), _v - _prev)); _prev = _v
+        print("  TAIL AFTER AGENT: %s  (unattributed %.1fs)"
+              % (" | ".join(_parts), max(0.0, float(out.get("wall_s") or 0) - _prev)), flush=True)
     _cost = cost_anatomy(_tm.get("turns"), out.get("wall_s"), model)
     out["run_line"]["cost_anatomy"] = _cost
     print("  COST WARM       : $%.4f vs $%.2f — %s  (reads $%.4f + output $%.4f + uncached in $%.4f + container $%.4f)"
@@ -8468,6 +8487,41 @@ PORTED_PROPS = {
         {"key": "capped", "label": "Velocity cap", "type": "boolean", "defaultValue": True},
     ],
 }
+
+
+def _load_port_property_files(props, where=None):
+    """Merge every port/*_properties.json into the table. PURE-ish (reads files).
+
+    WHY THIS EXISTS. Builder-2 authors bodies; the property table lives in this file,
+    which is mine. Twice in one night a body landed and the orphan leg went red until
+    I hand-wrote its table — not because anything was wrong, but because I was on
+    their critical path for a file they cannot edit. A convention removes me from it:
+    ship `<family>_properties.json` beside the body and the harness picks it up.
+
+    IN-FILE ENTRIES WIN. A table written here is the considered one; a JSON file
+    cannot silently redefine a component the harness already knows, because a
+    redefinition nobody noticed is how two sources of truth start.
+    """
+    import glob as _g
+    root = where or os.path.join(os.path.dirname(os.path.abspath(__file__)), "port")
+    added, skipped = [], []
+    for f in sorted(_g.glob(os.path.join(root, "*_properties.json"))):
+        try:
+            d = json.load(open(f, encoding="utf-8"))
+        except Exception:                                         # noqa: BLE001
+            continue
+        for k, v in (d or {}).items():
+            if k.startswith("_") or not isinstance(v, list):
+                continue
+            if k in props:
+                skipped.append(k)
+                continue
+            props[k] = v
+            added.append(k)
+    return {"added": sorted(added), "in_file_won": sorted(set(skipped)), "root": root}
+
+
+PORT_PROPS_LOADED = _load_port_property_files(PORTED_PROPS)
 
 
 def ported_code(name):

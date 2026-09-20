@@ -1,3 +1,9 @@
+/* NO HARDCODED FALLBACK LIVES HERE (Zac, 2026-09-20). Defaults belong to the
+ * property table and nowhere else. ChatCut REWRITES the code at registration, so a
+ * fallback in source is dead code that looks live — and with none to strip, the
+ * registered blob comes back byte-identical and port/registered_diff.mjs can assert
+ * exact equality, which is the only way to know the code that runs is the code we
+ * built. */
 /* PlainText - the workhorse text overlay: words on the picture, nothing else.
  *
  * WHY IT EXISTS, AND WHY IT IS NOT CaptionMatch. Builder-2 measured the references'
@@ -24,10 +30,10 @@ const Component = ({ item }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const props = (item && item.props) || {};
-  const text = String(props.text || "");
-  const size = props.size || "medium";
-  const position = props.position || "middle";
-  const textColor = props.textColor || "#FFFFFF";
+  const text = String(props.text);
+  const size = props.size;
+  const position = props.position;
+  const textColor = props.textColor;
   const fontSize = size === "xlarge" ? 168 : size === "large" ? 128 : size === "small" ? 72 : 96;
   const justify = position === "top" ? "flex-start" : position === "bottom" ? "flex-end" : "center";
   const pad = Math.round(fontSize * 0.9);
@@ -38,7 +44,7 @@ const Component = ({ item }) => {
   // present by search_fonts — "Georgia" is NOT in the catalogue (it answers with
   // Noto Sans/Serif Georgian, which are Georgian-SCRIPT faces), so the serif here
   // is Lora, which is.
-  const fontFamily = props.fontFamily || "Inter";
+  const fontFamily = props.fontFamily;
   const rootStyle = { position: "absolute", inset: 0, display: "flex",
     flexDirection: "column", alignItems: "center", justifyContent: justify,
     overflow: "hidden", boxSizing: "border-box", padding: pad };

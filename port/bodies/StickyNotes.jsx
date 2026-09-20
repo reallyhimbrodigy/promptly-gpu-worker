@@ -1,3 +1,9 @@
+/* NO HARDCODED FALLBACK LIVES HERE (Zac, 2026-09-20). Defaults belong to the
+ * property table and nowhere else. ChatCut REWRITES the code at registration, so a
+ * fallback in source is dead code that looks live — and with none to strip, the
+ * registered blob comes back byte-identical and port/registered_diff.mjs can assert
+ * exact equality, which is the only way to know the code that runs is the code we
+ * built. */
 /* StickyNotes - the sticky_note text overlay, ported from the old pipeline's family.
  *
  * WHY IT IS BACK. text_overlays was a FAMILY in the live pipeline and it is absent
@@ -28,9 +34,9 @@ const Component = ({ item }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const props = (item && item.props) || {};
-  const size = props.size || "medium";
-  const position = props.position || "middle";
-  const accent = props.accentColor || "#C8551F";
+  const size = props.size;
+  const position = props.position;
+  const accent = props.accentColor;
   // NO textColor HERE. Each note carries its own paper colour and the ink is fixed
   // dark so it stays legible on any of them. ChatCut refuses a property read into a
   // binding that is never used, so declaring one this component cannot honour is not
@@ -46,7 +52,7 @@ const Component = ({ item }) => {
   // present by search_fonts — "Georgia" is NOT in the catalogue (it answers with
   // Noto Sans/Serif Georgian, which are Georgian-SCRIPT faces), so the serif here
   // is Lora, which is.
-  const fontFamily = props.fontFamily || "Lora";
+  const fontFamily = props.fontFamily;
   const rootStyle = { position: "absolute", inset: 0, display: "flex",
     flexDirection: "column", alignItems: "center", justifyContent: justify,
     overflow: "hidden", boxSizing: "border-box", padding: pad,
@@ -55,7 +61,7 @@ const Component = ({ item }) => {
   // FRAME-1-IS-FINAL for readable text, so the words are legible on frame one.
   const t = Math.min(Math.max(frame / Math.max(1, Math.round(0.28 * fps)), 0), 1);
   const ease = 1 - Math.pow(1 - t, 3);
-  const notesRaw = String(props.notes === undefined ? "" : props.notes);
+  const notesRaw = String(props.notes);
   // A MALFORMED ENTRY IS NOT DRAWN AND NOT ANNOUNCED HERE. An earlier version
   // rendered "dropped N malformed entries" into the frame; an error rendered into a
   // user's video is worse than an empty note. The harness reads the property at the

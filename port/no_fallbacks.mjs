@@ -46,15 +46,10 @@ const BODIES = join(HERE, "bodies");
  * here being read as a fact.
  */
 const QUARANTINE = {
-  CaptionMatch:  { owner: "Builder 1", since: "2026-09-20" },
-  LowerThird:    { owner: "Builder 1", since: "2026-09-20" },
-  PlainText:     { owner: "Builder 1", since: "2026-09-20" },
-  QuoteCard:     { owner: "Builder 1", since: "2026-09-20" },
-  SmoothPush:    { owner: "Builder 1", since: "2026-09-20" },
-  StagedPush:    { owner: "Builder 1", since: "2026-09-20" },
-  StepZoom:      { owner: "Builder 1", since: "2026-09-20" },
-  StickyNotes:   { owner: "Builder 1", since: "2026-09-20" },
-  TornPaper:     { owner: "Builder 1", since: "2026-09-20" },
+  // EMPTY, 2026-09-20. All nine of Builder-1's bodies were cleared in one
+  // change and their pins removed with them, because this gate FAILS a clean
+  // body that is still pinned — a stale pin would otherwise sit here being read
+  // as a fact about code that no longer looks like that.
 };
 
 /** Comments are not code — the rule is about what the component DOES. */

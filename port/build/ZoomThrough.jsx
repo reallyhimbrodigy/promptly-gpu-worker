@@ -1,56 +1,50 @@
-/* NO HARDCODED FALLBACK LIVES HERE (Zac, 2026-09-20). Defaults belong to the
- * property table and nowhere else. ChatCut REWRITES the code at registration, so a
- * fallback in source is dead code that looks live — and with none to strip, the
- * registered blob comes back byte-identical and port/registered_diff.mjs can assert
- * exact equality, which is the only way to know the code that runs is the code we
- * built. */
-/* StagedPush — OUR multi-stage push, on ChatCut's timeline.
+/* ZoomThrough — a whip THROUGH A into B, on ChatCut's timeline.
  *
- * A push that lands on TWO OR MORE words in a row: each stage's peak is nailed
- * to its own word, the scale carries forward between them, and the release only
- * happens after the last one. ChatCut has no preset of this shape at all — their
- * six are single moves at constant speed — so this component has no counterpart
- * to be compared against, only a before and after.
+ * OUR CURVES ON TWO SOURCE LAYERS, per Zac's ruling — so the ramps are the
+ * module's TRAPEZOID, not the Remotion original's cubic-bezier. That is the
+ * whole point of the ruling: a cubic peaks at 3x its linear average and puts
+ * that peak on the first frame, which is the front-loading defect the cap was
+ * written to remove. A trapezoid at blend b peaks at 1/(1-b/2) instead, and the
+ * PUNCH/GLIDE skew moves where that peak sits without raising it. A whip should
+ * accelerate INTO the cut and decelerate out of it, which is exactly what the
+ * two registers express.
  *
- * THE STAGES ARE A TEXT PROPERTY, AND THAT IS NOT A SHORTCUT. ChatCut's property
- * types are text, number, color, boolean, select, font, image and video: there is
- * no array. A multi-stage component either encodes its stages in one of those or
- * cannot be edited by a user at all, so `stages` is "seconds:scale" pairs
- * relative to the item's own start, and a malformed pair is DROPPED and named in
- * the frame rather than silently treated as zero.
+ * THE CEILING IS EXCEEDED ON PURPOSE, AND MEASURED OFFLINE. A whip-zoom drives
+ * A to 3x in under half a second — far past 11px/frame, deliberately: the smear
+ * IS the transition. The cap's ceiling bounds a move meant to be INVISIBLE, and
+ * this one is meant to be seen. So the module is carried for its CURVE and the
+ * ceiling is not applied. The peak is measured OUTSIDE the component, in
+ * measured/transition_peaks_2026-09-20.md, because a number computed in here
+ * would be read by nothing — a measured value no consumer reads is the most
+ * expensive kind of dead code. An exemption nobody measured is what the build
+ * step exists to prevent; this one is measured, just not here.
  *
  * THE CAP IS NOT WRITTEN HERE. The section below the marker is EMITTED from
- * src/remotion/src/zoom/shared/velocity-cap.ts. Edit the module and re-emit.
+ * src/remotion/src/zoom/shared/velocity-cap.ts by port/emit_zoom_component.mjs.
+ * Edit the module and re-emit; never edit here or in the built blob.
  *
- * CONTRACT (from ChatCut's validator): exactly one top-level component and no
- * top-level constants; the root is a plain div; editable values are read through
- * an identifier literally named `props`.
+ * CONTRACT (from ChatCut's validator): exactly one top-level component and NO
+ * top-level constants, so the cap nests inside Component; a plain div root,
+ * never AbsoluteFill; editable values read through an identifier literally
+ * named `props`; every declared property read and used; and NO HARDCODED
+ * FALLBACKS — defaults live in the property table alone.
  */
 const Component = ({ item }) => {
   const frame = useCurrentFrame();
-  const { fps, width, height, durationInFrames } = useVideoConfig();
+  const { durationInFrames } = useVideoConfig();
   const props = (item && item.props) || {};
   const src = props.clip;
-  const srcFrom = Math.max(0, Math.round(Number(props.srcFrom)));
-  const originX = Number(props.originX);
-  const originY = Number(props.originY);
-  const capped = props.capped === true || props.capped === "true";   // the DEFAULT is true in the property table, not here
-  const cutTerminated = props.cutTerminated === true || props.cutTerminated === "true";
-  const pushF = Math.max(1, Math.round(((Number(props.pushMs)) / 1000) * fps));
-  const holdF = Math.max(0, Math.round(((Number(props.holdMs)) / 1000) * fps));
-  const releaseF = Math.max(1, Math.round(((Number(props.releaseMs)) / 1000) * fps));
-  // THE REST CALIBRATION, SUPPLIED BY THE HARNESS — never a number written here.
-  // Our layer renders the source measurably brighter than the base item does: a flat
-  // additive offset, independent of level, saturation and channel, and identical
-  // across every variant of this component, so it belongs to the <Video> path and
-  // not to us. Left uncorrected it puts a uniform brightness STEP at this item's in
-  // and out boundaries. The value MOVES between runs (2.04 then 1.72 levels), which
-  // is why it arrives as a measured value and is not baked in. SVG filters are inert
-  // here; `brightness(b) contrast(c)` composes to slope 1 and a pure offset.
+  const srcFromA = Math.max(0, Math.round(Number(props.srcFromA)));
+  const srcFromB = Math.max(0, Math.round(Number(props.srcFromB)));
+  const seamRoom = Math.max(1, Math.round(Number(props.seamRoom)));
+  const duration = Math.max(2, Math.round(Number(props.duration)));
+  const through = Number(props.through);
+  const punch = props.punch === true || props.punch === "true";
   const correct = props.correct;
   const rootStyle = { position: "absolute", inset: 0, display: "flex",
     alignItems: "center", justifyContent: "center", overflow: "hidden",
     boxSizing: "border-box", backgroundColor: "#000000" };
+  const plate = { width: "100%", height: "100%", objectFit: "cover", filter: correct };
 
   /* ── PROMPTLY VELOCITY CAP — EMITTED, DO NOT EDIT ──
      source:  src/remotion/src/zoom/shared/velocity-cap.ts
@@ -322,88 +316,20 @@ const Component = ({ item }) => {
   }
   /* ── END VELOCITY CAP ── */
 
-  // ── the stages ─────────────────────────────────────────────────────────────
-  // "0.30:1.15, 0.95:1.30" — seconds into the item, and the scale its peak reaches.
-  // A pair that does not parse is dropped and counted, never read as 0:0, because a
-  // stage silently at scale zero would black the frame and look like a render bug.
-  const raw = String(props.stages);
-  const st = [];
-  let dropped = 0;
-  for (const part of raw.split(",")) {
-    const bits = part.split(":");
-    const at = Number(bits[0]);
-    const sc = Number(bits[1]);
-    if (bits.length !== 2 || !isFinite(at) || !isFinite(sc) || at < 0 || sc <= 0) {
-      if (part.trim() !== "") dropped += 1;
-      continue;
-    }
-    st.push({ peak: Math.floor(at * fps), scale: sc });
-  }
-  st.sort((a, b) => a.peak - b.peak);
+  const clamp01 = (t) => Math.min(Math.max(t, 0), 1);
+  const start = Math.max(0, seamRoom - Math.round(duration / 2));
+  const progress = clamp01((frame - start) / duration);
+  const lerp = (t, a, b) => a + (b - a) * t;
 
-  let scale = 1;
-  if (st.length >= 2) {
-    const corner = cornerPx(width, height, originX, originY);
-    // Solved CUMULATIVELY: stage i travels from whatever stage i-1 actually
-    // reached after its own cap, and each push may only grow BACKWARDS into the
-    // hold before it, because every peak is nailed to its own word.
-    const staged = [];
-    let cum = 1;
-    for (let i = 0; i < st.length; i++) {
-      const c = capped
-        ? planCappedRampIn({
-            fromScale: cum, toScale: st[i].scale, landFrame: st[i].peak,
-            earliestFrame: i === 0 ? 0 : st[i - 1].peak,
-            authoredFrames: pushF, fps, corner,
-          })
-        : null;
-      staged.push({ start: c ? c.startFrame : st[i].peak - pushF,
-                    scale: c ? c.toScale : st[i].scale,
-                    easing: c ? c.easing : null });
-      cum = staged[i].scale;
-    }
-    const last = st[st.length - 1];
-    const lastScale = staged[staged.length - 1].scale;
-    const releaseStartF = last.peak + holdF;
-    const capRelease = capped
-      ? planCappedRelease({
-          fromScale: lastScale, toScale: 1, startFrame: releaseStartF,
-          latestFrame: durationInFrames, authoredFrames: releaseF, fps, corner,
-        })
-      : null;
-    const releaseEndF = capRelease ? capRelease.endFrame : releaseStartF + releaseF;
-    const beginF = staged[0].start;
-    const spanEndF = cutTerminated ? releaseStartF : releaseEndF;
-    const clamp01 = (t) => Math.min(Math.max(t, 0), 1);
-    const cubicOut = (t) => 1 - Math.pow(1 - t, 3);
-    const cubicInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+  // OUR curve: the trapezoid, skewed by the register. A accelerates into the
+  // cut (PUNCH) or eases out of it (GLIDE); B always settles, so it glides.
+  const outEase = trapezoidEasing(1.0, punch ? SKEW_PUNCH : SKEW_GLIDE);
+  const inEase = trapezoidEasing(1.0, SKEW_GLIDE);
 
-    if (frame >= beginF && frame <= spanEndF) {
-      let s = 1;
-      let prevScale = 1;
-      let resolved = false;
-      for (let i = 0; i < st.length; i++) {
-        if (frame < staged[i].start) { s = prevScale; resolved = true; break; }
-        if (frame <= st[i].peak) {
-          const t = clamp01((frame - staged[i].start) / Math.max(1, st[i].peak - staged[i].start));
-          const e = staged[i].easing ? staged[i].easing(t) : cubicOut(t);
-          s = prevScale + (staged[i].scale - prevScale) * e;
-          resolved = true; break;
-        }
-        prevScale = staged[i].scale;
-      }
-      if (!resolved) {
-        if (frame <= releaseStartF || cutTerminated) {
-          s = lastScale;
-        } else {
-          const t = clamp01((frame - releaseStartF) / Math.max(1, releaseEndF - releaseStartF));
-          const e = capRelease ? capRelease.easing(t) : cubicInOut(t);
-          s = lastScale + (1 - lastScale) * e;
-        }
-      }
-      scale = s;
-    }
-  }
+  const scaleA = lerp(outEase(clamp01(progress / 0.6)), 1, through);
+  const opacityA = 1 - clamp01((progress - 0.2) / 0.35);
+  const scaleB = lerp(inEase(clamp01((progress - 0.3) / 0.7)), 0.6, 1);
+  const opacityB = clamp01((progress - 0.3) / 0.3);
 
   if (!src) {
     return (
@@ -416,26 +342,14 @@ const Component = ({ item }) => {
   }
   return (
     <div style={rootStyle}>
-      <Video
-        src={src}
-        startFrom={srcFrom}
-        muted
-        volume={0}
-        style={{
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-          filter: correct,
-          transform: `scale(${scale})`,
-          transformOrigin: `${originX * 100}% ${originY * 100}%`,
-        }}
-      />
-      {st.length < 2 || dropped > 0 ? (
-        <div style={{ position: "absolute", left: 24, bottom: 24, color: "#FFD166",
-                      fontSize: 34, fontFamily: "sans-serif" }}>
-          {st.length < 2
-            ? "STAGES: need at least 2, got " + st.length
-            : "STAGES: dropped " + dropped + " malformed pair(s)"}
+      <div style={{ position: "absolute", inset: 0,
+        transform: `scale(${scaleB})`, opacity: opacityB }}>
+        <Video src={src} startFrom={srcFromB} muted volume={0} style={plate} />
+      </div>
+      {opacityA > 0.01 ? (
+        <div style={{ position: "absolute", inset: 0,
+          transform: `scale(${scaleA})`, opacity: opacityA }}>
+          <Video src={src} startFrom={srcFromA} muted volume={0} style={plate} />
         </div>
       ) : null}
     </div>
