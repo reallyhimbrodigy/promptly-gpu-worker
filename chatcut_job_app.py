@@ -7946,6 +7946,18 @@ def frame_diff_profile(a_paths, b_paths, reader=None):
         return {"state": "FAILED", "n": 0, "differing": None, "max_abs": None, "profile": [],
                 "why": "the arms produced different frame counts (%d vs %d) — not comparable"
                        % (len(a_paths), len(b_paths))}
+    # COMPARING A THING WITH ITSELF ANSWERS ZERO BY CONSTRUCTION. Measured 2026-09-19:
+    # three caption styles were each written to /work/tf_CaptionMatch/f000.jpg, so the
+    # style proof compared every file against itself and reported "identical" — which
+    # is exactly what a genuinely broken component looks like. The proof had NO
+    # discriminating power in either direction and would have said the same thing about
+    # a component that worked perfectly. A fixed path shared by every invocation is the
+    # same failure as the shared copy directory that once destroyed a red proof.
+    if list(a_paths) == list(b_paths):
+        return {"state": "FAILED", "n": 0, "differing": None, "max_abs": None, "profile": [],
+                "why": ("both sides name the SAME %d file(s) — this compares a thing with "
+                        "itself and can only answer zero: %s"
+                        % (len(a_paths), list(a_paths)[:2]))}
 
     def _read(p):
         from PIL import Image
@@ -8414,7 +8426,10 @@ def text_family_check(clip_url: str = "", at_s: float = 6.0, span_s: float = 3.0
              "durationInFrames": dur, "propertyOverrides": overrides}]},
             "placing %s (%s)" % (name, label))
         iid = ((r.get("adds") or [{}])[0] or {}).get("id")
-        f, _ms = frames_at(tok, pid, probe, "/work/tf_%s" % name)
+        # A DIRECTORY PER PLACEMENT, NOT PER COMPONENT. Three caption styles all wrote
+        # to /work/tf_CaptionMatch and the later fetches overwrote the earlier ones.
+        f, _ms = frames_at(tok, pid, probe,
+                           "/work/tf_%s" % re.sub(r"[^A-Za-z0-9]+", "_", "%s_%s" % (name, label)))
         rb = read_back(tok, stage)
         # THE VALUES LIVE BEHIND inspect_item, NOT ON THE READ-BACK ITEM. Reading the
         # item's own propertyOverrides returned nothing on two paid runs and reported

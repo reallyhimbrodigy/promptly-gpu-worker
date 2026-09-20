@@ -2208,6 +2208,24 @@ def main():
           and "incomplete" in (_lib2.get("_why") or ""),
           "%d items" % sum(len(v) for v in _lib2.values() if isinstance(v, list)))
 
+    # ---- COMPARING A THING WITH ITSELF ANSWERS ZERO BY CONSTRUCTION ----
+    # Measured 2026-09-19: three caption styles were each written to
+    # /work/tf_CaptionMatch/f000.jpg, so the style proof compared every file against
+    # ITSELF and reported "identical" — which is exactly what a genuinely broken
+    # component looks like. The proof had no discriminating power in EITHER direction:
+    # it would have said the same about a component that worked perfectly. Same class
+    # as the fixed copy path that once destroyed a red proof mid-run.
+    check("a comparison whose two sides name the same files is a FAULT, not a zero",
+          J.frame_diff_profile(["/x/a.jpg", "/x/b.jpg"], ["/x/a.jpg", "/x/b.jpg"])["state"] == "FAILED"
+          and "itself" in J.frame_diff_profile(["/x/a.jpg"], ["/x/a.jpg"])["why"]
+          # and it is not a blanket refusal: different paths still reach the reader
+          and J.frame_diff_profile(["/x/a.jpg"], ["/y/a.jpg"])["state"] == "FAILED",
+          J.frame_diff_profile(["/x/a.jpg"], ["/x/a.jpg"])["why"][:100])
+    _tfc = open("chatcut_job_app.py", encoding="utf-8").read()
+    check("each placement writes its frames to its own directory",
+          '"/work/tf_%s" % re.sub(r"[^A-Za-z0-9]+", "_", "%s_%s" % (name, label))' in _tfc,
+          "directory keyed by component AND label")
+
     # THE WORKING TREE, NOT THE COMMIT. red_proof_no_undefined_names builds an ISOLATED
     # worktree from HEAD, so it judges what is COMMITTED — and a run is launched from what
     # is on disk. A slice-based edit removed `place_theirs`, `place_ours` and PORTED_PROPS
