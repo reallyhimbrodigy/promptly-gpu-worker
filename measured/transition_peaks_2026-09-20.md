@@ -9,20 +9,53 @@ Measured at **1080x1920, 30fps, centred origin** (corner 1101.45 px), with the
 SAME `peakDisplacementPx` the cap itself uses for scale moves; translate moves
 are differenced directly in px. Cap is **11 px/frame**.
 
+### DipToBlack is not in this table, and that is the point
+
+**DipToBlack moves no pixels at all.** The dip is pure opacity: no translate, no
+scale, no rotation. It has no per-frame displacement to compare against a
+per-frame displacement ceiling, so it is exempt BY NATURE rather than by margin.
+Putting a 0.0 in a column of 126.6, 321.7 and 328.2 invites the reader to treat
+it as the low end of one scale, and it is not on that scale at all — a different
+KIND of fact from "this one has 11.5x less headroom than that one".
+
+### The transitions that do move
+
 | component | what the move is | peak px/frame | vs cap |
 |---|---|---|---|
-| **DipToBlack** | opacity only — no geometry at all | **0.0** | — |
-| SlideOver | B slides a full frame width in 16f | 126.6 | **11.5x** |
-| ZoomThrough | A driven to 3x in 14f, our trapezoid | 321.7 | **29.2x** |
-| CardSwipe | A thrown 120% of width in 16f | 328.2 | **29.8x** |
+| **CrossfadeZoom** | counter-zoom 1.0<->1.12 across 20f | **12.2** | **1.1x** |
+| StepPush | a full frame width in 18f, our trapezoid | 119.2 | 10.8x |
+| SlideOver | B slides a full frame width in 16f | 126.6 | 11.5x |
+| ZoomThrough | A driven to 3x in 14f, our trapezoid | 321.7 | 29.2x |
+| CardSwipe | A thrown 120% of width in 16f | 328.2 | 29.8x |
+
+### OUR CURVE IS MEASURABLY SMOOTHER THAN THE ONE IT REPLACED
+
+StepPush is the clean comparison, because only the curve changed — same
+translate, same 18 frames, same everything else:
+
+| curve | peak px/frame | |
+|---|---|---|
+| the Remotion original's cubic `bezier(0.65, 0, 0.35, 1)` | **162.9** | 14.8x |
+| the module's trapezoid, GLIDE skew | **119.2** | 10.8x |
+
+**27% lower peak velocity for free**, with no change to timing or distance. That
+is the trapezoid's stated property arriving on a real component: a cubic peaks
+at 3x its linear average, a trapezoid at blend b peaks at 1/(1-b/2). Zac's "our
+curves" ruling is not a preference about house style — it buys a measurably
+smoother move on the same edit.
+
+### CROSSFADEZOOM IS ALMOST INSIDE THE CEILING
+
+At 1.1x it is the only transition in the set within touching distance of the
+11px cap, and it is the one whose move is genuinely meant to be unnoticed — the
+counter-zoom is texture under a dissolve, not the effect itself. If any
+transition should later HOLD the ceiling rather than be exempt from it, this is
+the one, and the cost would be roughly two extra frames. Recorded as the
+observation it is; nothing is changed on it today.
 
 ## Reading these
 
-**DipToBlack needs no argument at all.** It moves no pixels — the dip is pure
-opacity — so its exemption is a fact rather than a judgement. That is worth
-separating from the other three, which are genuine decisions.
-
-**The other three are 11x to 30x over, and that is the point.** The ceiling
+**The three above are 11x to 30x over, and that is the point.** The ceiling
 bounds a move that is meant to be INVISIBLE: a ramp zoom the viewer should feel
 and not see, where per-frame displacement reads as judder. A transition is a
 deliberate sub-500ms event where the motion IS the effect. Capping CardSwipe to

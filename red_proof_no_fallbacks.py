@@ -35,8 +35,14 @@ import tempfile
 ROOT = pathlib.Path(__file__).resolve().parent
 GATE = ROOT / "port" / "no_fallbacks.mjs"
 BODIES = ROOT / "port" / "bodies"
-CLEAN = "SnapReframe"      # one I own and cleared
-PINNED = "SmoothPush"      # one that is quarantined
+CLEAN = "SnapReframe"      # any body; the legs do not depend on which
+# THE QUARANTINE SCENARIO IS BUILT, NOT BORROWED. Naming a body that happens to
+# be pinned today makes this proof defend a DECISION: when Builder-1 cleared all
+# nine — exactly what the gate exists to cause — two legs went red on correct
+# code. The legs now WRITE a quarantine.json for whichever body they are
+# testing, so they assert that quarantining WORKS rather than that anyone is
+# currently quarantined.
+PINNED = "StepZoom"        # arbitrary; this harness pins it itself
 FALLBACK_LINE = '  const _planted = props.scale || 1.3;\n'
 
 
@@ -47,9 +53,13 @@ def gate(dirpath):
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
-def copy_bodies():
+def copy_bodies(quarantine=None):
+    """A throwaway tree: bodies/ plus an optional quarantine.json beside it."""
     d = pathlib.Path(tempfile.mkdtemp(prefix="nofb_"))
     shutil.copytree(BODIES, d / "bodies")
+    if quarantine:
+        import json
+        (d / "quarantine.json").write_text(json.dumps(quarantine), encoding="utf-8")
     return d, d / "bodies"
 
 
@@ -85,7 +95,7 @@ def main():
         shutil.rmtree(d, ignore_errors=True)
 
     # 3. RED — a quarantined body that has become clean is a STALE PIN.
-    d, bodies = copy_bodies()
+    d, bodies = copy_bodies({PINNED: {"owner": "test", "since": "2026-09-20"}})
     try:
         p = bodies / (PINNED + ".jsx")
         src = p.read_text(encoding="utf-8")
@@ -118,7 +128,7 @@ def main():
     # 5. RED-CONTROL — the same plant inside a QUARANTINED body only pins.
     #    This is what proves the quarantine suppresses it, rather than the
     #    scanner being blind to that file.
-    d, bodies = copy_bodies()
+    d, bodies = copy_bodies({PINNED: {"owner": "test", "since": "2026-09-20"}})
     try:
         if not plant(bodies, PINNED):
             legs.append(("RED   quarantine suppresses, scanner still sees", False,
