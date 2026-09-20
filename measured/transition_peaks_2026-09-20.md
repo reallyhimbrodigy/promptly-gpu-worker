@@ -29,6 +29,7 @@ KIND of fact from "this one has 11.5x less headroom than that one".
 | ZoomThrough | A driven to 3x in 14f, our trapezoid | 321.7 | 29.2x |
 | CardSwipe | A thrown 120% of width in 16f | 328.2 | 29.8x |
 | **ShutterFlash** | A's picture collapses to 0.6% of frame height in 18f | **369.0** | **33.5x** |
+| **FilmStrip** | full-viewport-to-tile morph in 30f (scroll is 135.6) | **371.0** | **33.7x** |
 
 ### OUR CURVE IS MEASURABLY SMOOTHER THAN THE ONE IT REPLACED
 
@@ -46,9 +47,9 @@ at 3x its linear average, a trapezoid at blend b peaks at 1/(1-b/2). Zac's "our
 curves" ruling is not a preference about house style — it buys a measurably
 smoother move on the same edit.
 
-### SHUTTERFLASH IS THE LARGEST, AND ITS EXEMPTION NEEDS THE LEAST ARGUMENT
+### SHUTTERFLASH AND FILMSTRIP ARE THE LARGEST, AND THEIR EXEMPTIONS NEED THE LEAST ARGUMENT
 
-At **33.5x** it is the largest in the set, just past CardSwipe's 29.8x, and the
+At **33.5x** and **33.7x** they are the largest in the set, just past CardSwipe's 29.8x, and the
 collapse to 0.6% of frame height IS the effect. Capping it would need roughly 34
 times the frames — an 18-frame CRT power-off becomes 600 frames, twenty seconds
 — which is not a slower power-off, it is a squash. Measured against H/2 rather
@@ -66,10 +67,18 @@ to prevent, and I produced one while writing the file that prevents it. The
 sentence stays so the next reader distrusts the next tidy number, including
 mine.
 
-Two overlays are not in this table at all and never will be: ShutterFlashOverlay
-and LightLeak move NO pixels. Every value in them is an opacity, so like
-DipToBlack they have no per-frame displacement to compare against a per-frame
-ceiling.
+THREE COMPONENTS ARE NOT IN THIS TABLE AND NEVER WILL BE — DipToBlack,
+ShutterFlashOverlay and LightLeakOverlay. DipToBlack and ShutterFlashOverlay
+are pure opacity and move nothing at all. LightLeakOverlay's glows DO translate,
+but they are blurred by 28-40px and drawn in `screen` at partial opacity, so
+there is no edge whose per-frame displacement can read as judder — which is the
+thing the 11px ceiling exists to bound. Exempt by nature in all three cases, not
+by margin.
+
+FILMSTRIP AND SHUTTERFLASH ARE A DEAD HEAT at 371.0 and 369.0 px/frame, from
+completely different mechanisms — a full-viewport-to-tile morph against a
+vertical collapse to a beam. Worth noting only because it is a coincidence and
+not a shared cause; nothing connects them.
 
 ### CROSSFADEZOOM IS ALMOST INSIDE THE CEILING
 

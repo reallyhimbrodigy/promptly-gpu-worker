@@ -398,5 +398,105 @@
    "type": "text",
    "defaultValue": ""
   }
+ ],
+ "FilmStrip": [
+  {
+   "key": "clip",
+   "label": "Clip",
+   "type": "video",
+   "defaultValue": ""
+  },
+  {
+   "key": "srcFromA",
+   "label": "Source start frame, outgoing",
+   "type": "number",
+   "defaultValue": 0
+  },
+  {
+   "key": "srcFromB",
+   "label": "Source start frame, incoming",
+   "type": "number",
+   "defaultValue": 0
+  },
+  {
+   "key": "seamRoom",
+   "label": "Frames before the cut this item covers",
+   "type": "number",
+   "defaultValue": 15
+  },
+  {
+   "key": "duration",
+   "label": "Transition duration (frames)",
+   "type": "number",
+   "defaultValue": 30
+  },
+  {
+   "key": "frameBackground",
+   "label": "Device frame background",
+   "type": "text",
+   "defaultValue": "#0b0a0a"
+  },
+  {
+   "key": "caption",
+   "label": "Caption under the tile (blank for none)",
+   "type": "text",
+   "defaultValue": ""
+  },
+  {
+   "key": "showBookmark",
+   "label": "Draw the bookmark chip",
+   "type": "boolean",
+   "defaultValue": false
+  },
+  {
+   "key": "showGrid",
+   "label": "Draw the masked grid",
+   "type": "boolean",
+   "defaultValue": true
+  },
+  {
+   "key": "advanceFrames",
+   "label": "Tiles the strip advances",
+   "type": "number",
+   "defaultValue": 1
+  },
+  {
+   "key": "correct",
+   "label": "Rest calibration (CSS filter, from the harness)",
+   "type": "text",
+   "defaultValue": ""
+  }
+ ],
+ "LightLeakOverlay": [
+  {
+   "key": "seamRoom",
+   "label": "Frames before the cut this item covers",
+   "type": "number",
+   "defaultValue": 10
+  },
+  {
+   "key": "duration",
+   "label": "Leak duration (frames)",
+   "type": "number",
+   "defaultValue": 20
+  },
+  {
+   "key": "palette",
+   "label": "Palette (warm, gold, cool, magenta)",
+   "type": "text",
+   "defaultValue": "warm"
+  },
+  {
+   "key": "direction",
+   "label": "Drift (tl-br, tr-bl, left-right, top-down)",
+   "type": "text",
+   "defaultValue": "tl-br"
+  },
+  {
+   "key": "intensity",
+   "label": "Leak intensity",
+   "type": "number",
+   "defaultValue": 1.0
+  }
  ]
 }
