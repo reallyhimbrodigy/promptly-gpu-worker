@@ -2120,6 +2120,10 @@ def main():
         "component_faults":  (lambda: J.component_faults(
             [{"id": "x", "itemType": "motion-graphic"}]), "ABSENT"),
         "item_props_from_inspect": (lambda: J.item_props_from_inspect({"keys": 1}), "ABSENT"),
+        # two frames with nothing drawn between them: the overlay left no glyphs
+        "glyph_mask": (lambda: J.glyph_mask("a", "b", reader=lambda _p: _blank[:, :, 0]), "ABSENT"),
+        # one candidate face is not a discrimination — there is nothing to choose between
+        "face_verdict": (lambda: J.face_verdict({"Inter": 0.9}, "Inter"), "ABSENT"),
         "frame_diff_profile": (lambda: J.frame_diff_profile([], ["b"], reader=_rdr), "ABSENT"),
         "channel_offset":    (lambda: J.channel_offset([], ["b"], reader=_rdr), "ABSENT"),
         "rest_verdict":      (lambda: J.rest_verdict({}, {0: "b"}, reader=_rdr), "ABSENT"),

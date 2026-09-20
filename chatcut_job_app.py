@@ -72,7 +72,11 @@ IMG = (
     # res10 model. Production's image pins 4.x, so an unpinned copy of its
     # detector was always going to drift away from the weights it was written
     # for. Same class as copying wget with its surroundings left behind.
-    .pip_install("pillow", "numpy", "opencv-python-headless<5")
+    # fonttools converts Google's woff to a TrueType PIL can open. The TTF endpoint
+    # that Google serves to an ancient User-Agent returns an unrecognised container
+    # (magic 0x18fc0400, not 0x00010000), so the woff route with a real conversion is
+    # the honest one — and it is verified by the FILE'S MAGIC BYTES, not by its URL.
+    .pip_install("pillow", "numpy", "opencv-python-headless<5", "fonttools>=4.50")
     # THE REAL DETECTORS, NOT INVENTED ZONES. The sweep's face and burned-text
     # legs were judging against constants I made up — a face zone of 0.04-0.34
     # that reported "30% overlap" for every title, and an edge-density scan
@@ -4633,6 +4637,8 @@ def item_props_from_inspect(envelope):
 STATEFUL_READERS = (
     ("component_faults", "a timeline whose items expose no properties at all", "ABSENT"),
     ("item_props_from_inspect", "an inspect_item answer with no text", "ABSENT"),
+    ("glyph_mask", "two frames with nothing drawn between them", "ABSENT"),
+    ("face_verdict", "fewer than two candidate faces rendered", "ABSENT"),
     ("frame_diff_profile", "one side with no frames", "ABSENT"),
     ("channel_offset", "one side with no frames", "ABSENT"),
     ("rest_verdict", "no frames common to both reads", "ABSENT"),
@@ -8462,6 +8468,120 @@ def font_probe(families: str = "Inter,Montserrat,Playfair Display,DM Sans,Space 
     return out
 
 
+def google_ttf(family, weight=700, timeout=30):
+    """Fetch a family's TTF from Google Fonts. -> {state, path, why}
+
+    THE USER-AGENT DECIDES THE FORMAT. css2 serves woff2 to a modern UA and TTF to
+    an old one, and PIL reads TTF, not woff2. Asking with a modern UA and then
+    failing to open the file would look like "the font is unavailable" when it is
+    only the wrong container — a failure with a plausible innocent explanation,
+    which this repo treats as the expensive kind.
+    """
+    import urllib.request as _ur
+    import io as _bio
+    url = "https://fonts.googleapis.com/css2?family=%s:wght@%d" % (family.replace(" ", "+"), weight)
+    # A FIREFOX-6 UA GETS woff; an ancient one gets a container PIL cannot read and a
+    # modern one gets woff2. Measured: the "old UA gives you a TTF" trick answers with
+    # magic 0x18fc0400 — not 0x00010000 — so it is checked by BYTES, never by URL.
+    try:
+        req = _ur.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 6.1; rv:6.0) Gecko/20110814 Firefox/6.0"})
+        css = _ur.urlopen(req, timeout=timeout).read().decode("utf-8", "replace")
+    except Exception as e:                                        # noqa: BLE001
+        return {"state": "FAILED", "path": None, "why": "css2 fetch: %s: %s" % (type(e).__name__, str(e)[:160])}
+    m = re.search(r"url\((https://[^)]+)\)", css)
+    if not m:
+        return {"state": "ABSENT", "path": None,
+                "why": "css2 named no font url for %r weight %d; css=%r" % (family, weight, css[:200])}
+    try:
+        raw = _ur.urlopen(m.group(1), timeout=timeout).read()
+    except Exception as e:                                        # noqa: BLE001
+        return {"state": "FAILED", "path": None, "why": "font fetch: %s: %s" % (type(e).__name__, str(e)[:160])}
+    os.makedirs("/work/fonts", exist_ok=True)
+    out = "/work/fonts/%s-%d.ttf" % (re.sub(r"[^A-Za-z0-9]+", "_", family), weight)
+    magic = raw[:4]
+    try:
+        if magic in (b"\x00\x01\x00\x00", b"true", b"ttcf", b"OTTO"):
+            open(out, "wb").write(raw)
+        elif magic in (b"wOFF", b"wOF2"):
+            from fontTools.ttLib import TTFont as _TT
+            f = _TT(_bio.BytesIO(raw))
+            f.flavor = None
+            f.save(out)
+        else:
+            return {"state": "ABSENT", "path": None,
+                    "why": ("the %d bytes served for %r are neither TrueType nor woff "
+                            "(magic %r) — nothing to render with" % (len(raw), family, magic))}
+    except Exception as e:                                        # noqa: BLE001
+        return {"state": "FAILED", "path": None,
+                "why": "converting %r (magic %r): %s: %s" % (family, magic, type(e).__name__, str(e)[:160])}
+    return {"state": "MEASURED", "path": out,
+            "why": "%d bytes, magic %r -> %d on disk" % (len(raw), magic, os.path.getsize(out))}
+
+
+def glyph_mask(a_path, b_path, reader=None):
+    """The TEXT, isolated: |with-overlay - bare|, binarised. -> {state, mask, why}
+
+    THE DIFFERENCE IS THE MASK. A caption sits over moving video, so thresholding
+    brightness would pick up the picture as much as the letters. Subtracting the
+    SAME FRAME without the overlay leaves only what the overlay drew — which this
+    harness already fetches for the control, so it costs nothing extra.
+    """
+    def _read(q):
+        from PIL import Image
+        import numpy as np
+        return np.asarray(Image.open(q).convert("L"), dtype="int16")
+    rd = reader or _read
+    try:
+        A, B = rd(a_path), rd(b_path)
+    except Exception as e:                                        # noqa: BLE001
+        return {"state": "FAILED", "mask": None, "why": "could not read: %s" % str(e)[:160]}
+    if getattr(A, "shape", None) != getattr(B, "shape", None):
+        return {"state": "FAILED", "mask": None, "why": "shapes differ %s vs %s" % (A.shape, B.shape)}
+    import numpy as np
+    d = np.abs(B - A)
+    if int(d.max()) < 8:
+        return {"state": "ABSENT", "mask": None,
+                "why": "the two frames are effectively identical (max %d) — nothing was drawn" % int(d.max())}
+    return {"state": "MEASURED", "mask": (d > max(24, int(d.max()) // 4)), "why": "max %d" % int(d.max())}
+
+
+def mask_iou(m1, m2):
+    """Intersection over union of two boolean masks. PURE. -> float in [0,1]"""
+    import numpy as np
+    if m1 is None or m2 is None or getattr(m1, "shape", None) != getattr(m2, "shape", None):
+        return -1.0
+    inter = int(np.logical_and(m1, m2).sum())
+    union = int(np.logical_or(m1, m2).sum())
+    return (inter / union) if union else -1.0
+
+
+def face_verdict(scores, specified):
+    """Which face the glyphs most resemble, against which the style names. PURE.
+
+    -> {state, best, specified, matched, margin, why}
+
+    ARGMAX, NOT A THRESHOLD. "Is this Inter or Playfair" is a discrimination, and a
+    discrimination has no calibration constant to get wrong. A threshold on glyph
+    similarity would be a number fitted to one pair of faces and applied to every
+    future one — the mistake this repo names as learning a population.
+    """
+    usable = {k: v for k, v in (scores or {}).items() if isinstance(v, (int, float)) and v >= 0}
+    if len(usable) < 2:
+        return {"state": "ABSENT", "best": None, "specified": specified, "matched": None,
+                "margin": None,
+                "why": "fewer than two candidate faces rendered, so nothing was discriminated"}
+    best = max(usable, key=usable.get)
+    rest = sorted((v for k, v in usable.items() if k != best), reverse=True)
+    margin = round(usable[best] - (rest[0] if rest else 0.0), 4)
+    return {"state": "MEASURED", "best": best, "specified": specified,
+            "matched": best == specified, "margin": margin,
+            "why": ("the glyphs match %r best (IoU %.3f, next %.3f, margin %.3f); the style "
+                    "specifies %r — %s"
+                    % (best, usable[best], rest[0] if rest else 0.0, margin, specified,
+                       "MATCH" if best == specified else "MISMATCH"))}
+
+
 def unpicklable_safe(fn, *a, **k):
     """Run `fn`, and re-raise anything it throws as a PLAIN RuntimeError. -> result
 
@@ -8480,6 +8600,158 @@ def unpicklable_safe(fn, *a, **k):
         return fn(*a, **k)
     except Exception as e:                                        # noqa: BLE001
         raise RuntimeError("%s: %s" % (type(e).__name__, str(e)[:500])) from None
+
+
+@app.function(image=IMG, timeout=3000, cpu=4, memory=8192,
+              secrets=[modal.Secret.from_name("chatcut-oauth")])
+def caption_face_check(clip_url: str = "", at_s: float = 6.0, span_s: float = 2.0,
+                       text: str = "this is the moment"):
+    """IS THE FACE ON THE FRAME THE FACE THE STYLE SPECIFIES? No model calls.
+
+    NINE STYLES RENDERING DIFFERENTLY IS NOT NINE STYLES RENDERING CORRECTLY. The
+    pairwise proof showed the family is applied; it cannot say WHICH family landed,
+    because every wrong-but-distinct face would pass it just as well.
+
+    THE INSTRUMENT, and it is threshold-free. For each style: place CaptionMatch,
+    fetch the frame, and subtract the SAME FRAME WITHOUT THE OVERLAY — the
+    difference is the glyphs, isolated from the moving picture behind them. Render
+    the same string locally in EVERY candidate family at the same geometry, and take
+    the ARGMAX of mask IoU. "Is this Inter or Playfair" is a discrimination, and a
+    discrimination has no calibration constant to get wrong; a similarity threshold
+    would be a number fitted to one pair of faces and applied to every future one.
+
+    THE VERDICT IS PER STYLE: the face the glyphs most resemble must be the face the
+    style names. A silent fallback puts every style on one face, and the argmax then
+    names that face for all nine — which is visible in the table rather than hidden
+    in a pass.
+    """
+    _t0 = time.time()
+    os.makedirs("/work", exist_ok=True)
+    subprocess.run(["curl", "-fsSL", "-o", "/work/source.mp4", clip_url], check=True, timeout=300)
+    tok = _access_token()
+    fps = 30.0
+    from_frame = max(0, int(round(at_s * fps)))
+    dur = max(2, int(round(span_s * fps)))
+    probe = [from_frame + 10]
+    out = {"state": "RUNNING", "text": text, "styles": {}, "fonts": {}}
+
+    stage = prestage(tok, "", controls={}, source_path="/work/source.mp4",
+                     want_components=set(), titles=[])
+    pid, = (stage["projectId"],)
+    out["project"] = pid
+    bare, _m = frames_at(tok, pid, probe, "/work/face_bare")
+    if not bare:
+        out["state"] = "FAILED"; out["why"] = "no bare frame"
+        RESULTS["caption-face-check"] = out
+        return out
+    bare_path = list(bare.values())[0]
+
+    # ── the candidate faces, fetched once ────────────────────────────────
+    families = sorted(set(CAPTION_STYLE_FONT.values()))
+    for fam in families:
+        g = google_ttf(fam, 700)
+        out["fonts"][fam] = {k: v for k, v in g.items() if k != "path"}
+        out["fonts"][fam]["have"] = g["state"] == "MEASURED"
+        if g["state"] == "MEASURED":
+            out["fonts"][fam]["_path"] = g["path"]
+        print("  FONT %-18s %-9s %s" % (fam, g["state"], str(g["why"])[:90]), flush=True)
+    usable = {f: out["fonts"][f]["_path"] for f in families if out["fonts"][f].get("_path")}
+    if len(usable) < 2:
+        out["state"] = "FAILED"
+        out["why"] = ("fewer than two candidate faces could be fetched (%s) — nothing can be "
+                      "discriminated, so no verdict is claimed" % sorted(usable))
+        RESULTS["caption-face-check"] = out
+        return out
+
+    from PIL import Image as _PI, ImageDraw as _PD, ImageFont as _PF
+    import numpy as _np
+    _h, _w = _np.asarray(_PI.open(bare_path).convert("L")).shape
+    # THE SAME GEOMETRY THE COMPONENT USES, scaled to the preview: centred, and the
+    # component's 96px at 1080 wide becomes 96 * (_w/1080) here.
+    _fs = max(8, int(round(96.0 * _w / 1080.0)))
+
+    def _local_mask(fam):
+        img = _PI.new("L", (_w, _h), 0)
+        try:
+            fnt = _PF.truetype(usable[fam], _fs)
+        except Exception:                                         # noqa: BLE001
+            return None
+        d = _PD.Draw(img)
+        try:
+            bb = d.textbbox((0, 0), text, font=fnt)
+        except Exception:                                         # noqa: BLE001
+            return None
+        d.text(((_w - (bb[2] - bb[0])) / 2 - bb[0], (_h - (bb[3] - bb[1])) / 2 - bb[1]),
+               text, font=fnt, fill=255)
+        return _np.asarray(img) > 128
+
+    locals_ = {f: _local_mask(f) for f in usable}
+    out["local_rendered"] = sorted(f for f, m in locals_.items() if m is not None)
+
+    for style, fam in sorted(CAPTION_STYLE_FONT.items()):
+        row = {"specified": fam}
+        try:
+            code = ported_code("CaptionMatch")
+            a = _mcp_call(tok, "create_motion_graphic_from_code", {
+                "projectId": pid, "name": "CaptionMatch", "code": code,
+                "width": 1080, "height": 1920, "durationInFrames": dur,
+                "properties": normalise_properties(PORTED_PROPS["CaptionMatch"])}, expect=None)
+            mg = asset_id_from(a or {})
+            if not mg:
+                row["state"] = "REFUSED"; row["why"] = registration_refusal(a or {})
+                out["styles"][style] = row
+                continue
+            r = edit_item_checked(tok, {"projectId": pid, "adds": [
+                {"type": "motion-graphic", "assetId": mg, "fromFrame": from_frame,
+                 "durationInFrames": dur,
+                 "propertyOverrides": {"text": text, "captionStyle": style, "fontFamily": fam,
+                                       "size": "medium", "position": "middle",
+                                       "textColor": "#FFFFFF", "accentColor": "#C8551F"}}]},
+                "placing %s" % style)
+            iid = ((r.get("adds") or [{}])[0] or {}).get("id")
+            f, _ms = frames_at(tok, pid, probe, "/work/face_%s" % style)
+            edit_item_checked(tok, {"projectId": pid, "deletes": [{"id": iid}]}, "clearing %s" % style)
+            if not f:
+                row["state"] = "ABSENT"; row["why"] = "no frame came back"
+                out["styles"][style] = row
+                continue
+            gm = glyph_mask(bare_path, list(f.values())[0])
+            row["glyphs"] = {"state": gm["state"], "why": gm["why"]}
+            if gm["state"] != "MEASURED":
+                row["state"] = gm["state"]; row["why"] = gm["why"]
+                out["styles"][style] = row
+                continue
+            scores = {fm: mask_iou(gm["mask"], m) for fm, m in locals_.items() if m is not None}
+            row["scores"] = {k: round(v, 4) for k, v in scores.items()}
+            row.update(face_verdict(scores, fam))
+            print("  %-16s %-12s best=%-18s margin=%s  %s"
+                  % (style, row.get("state"), row.get("best"), row.get("margin"),
+                     "MATCH" if row.get("matched") else "MISMATCH"), flush=True)
+        except Exception as e:                                    # noqa: BLE001
+            row["state"] = "FAILED"; row["why"] = "%s: %s" % (type(e).__name__, str(e)[:250])
+            print("  %-16s FAILED  %s" % (style, str(e)[:110]), flush=True)
+        out["styles"][style] = row
+        RESULTS["caption-face-check"] = out        # durable before the next style
+
+    _judged = [r for r in out["styles"].values() if r.get("state") == "MEASURED"]
+    _matched = [r for r in _judged if r.get("matched")]
+    out["verdict"] = {
+        "state": "MEASURED" if _judged else "ABSENT",
+        "judged": len(_judged), "matched": len(_matched),
+        "faces_named": sorted({r.get("best") for r in _judged}),
+        "why": ("%d of %d styles render in the face they specify" % (len(_matched), len(_judged)))
+               if _judged else "no style produced a comparable glyph mask",
+    }
+    # ONE FACE NAMED FOR EVERY STYLE IS THE SIGNATURE OF A SILENT FALLBACK, and it
+    # is visible here rather than hidden inside a pass.
+    if _judged and len(out["verdict"]["faces_named"]) == 1 and len(_judged) > 2:
+        out["verdict"]["why"] += (" — BUT every style resolved to the SAME face (%s), which is what "
+                                  "a silent fallback looks like" % out["verdict"]["faces_named"][0])
+    print("  FACE VERDICT    %s" % out["verdict"]["why"], flush=True)
+    out["state"] = "MEASURED"
+    out["wall_s"] = round(time.time() - _t0, 1)
+    RESULTS["caption-face-check"] = out
+    return {k: v for k, v in out.items() if k != "fonts"}
 
 
 @app.function(image=IMG, timeout=2400, cpu=4, memory=8192,
