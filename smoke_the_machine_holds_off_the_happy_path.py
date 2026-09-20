@@ -13,6 +13,7 @@ import io
 import os
 import random
 import sys
+import re as _re
 import tempfile
 import time
 import json
@@ -1637,6 +1638,141 @@ def main():
     check("an errored category is ABSENT with its message, and a non-object answer is FAILED",
           J.library_ids({"isError": True, "_text": "unknown category"})[1] == "ABSENT"
           and J.library_ids("nope")[1] == "FAILED")
+
+    # ---- THE THREE CLASSES THE SEAM WAS BLIND TO (Builder-2, 2026-09-19) ----
+    # Measured against fixtures/production_briefs.v1.jsonl: 12 of 30 rows carry a negative constraint
+    # and 7 carry an only/do-not-alter form, and an English-only pattern read none of the non-English
+    # ones. A constraint the user stated plainly in their own language read as NO constraint.
+    _k2 = lambda b: [c["kind"] for c in J.brief_constraints(b)]
+    check("a caption constraint is read in the languages this corpus actually contains, not only English",
+          _k2("Viral engaging video Bez teksta") == ["no_captions"]
+          and _k2("Melhores jogadas, sem legendas, com transicoes") == ["no_captions"]
+          and _k2("sin subtitulos por favor") == ["no_captions"]
+          and _k2("make it viral, without captions") == ["no_captions"],
+          "%s / %s / %s" % (_k2("Viral engaging video Bez teksta"), _k2("sem legendas"), _k2("sin subtitulos")))
+    _only = J.brief_constraints("IMPORTANT: Add captions ONLY. Do not edit or alter my video in any other way.")
+    check("an ONLY / do-not-alter brief is a CHECKABLE scope constraint naming the licensed family",
+          [c["kind"] for c in _only] == ["scope_only"] and _only[0]["checkable"] is True
+          and (_only[0].get("value") or {}).get("allowed") == "caption", str(_only))
+    _sc_items = [{"id": "base-1", "itemType": "video", "timelineRange": {"fromFrame": 0, "toFrame": 900}},
+                 {"id": "c1", "itemType": "motion-graphic", "asset": {"name": "caption:TwoTone"}, "timelineRange": {"fromFrame": 0, "toFrame": 900}},
+                 {"id": "z1", "itemType": "effect", "asset": {"name": "builtin:zoom"}, "timelineRange": {"fromFrame": 30, "toFrame": 90}}]
+    _sf, _sr = J.check_constraints(_only, _sc_items, "base-1", {"state": "MEASURED", "cards": 0}, 30.0)
+    _sf2, _sr2 = J.check_constraints(_only, _sc_items[:2], "base-1", {"state": "MEASURED", "cards": 0}, 30.0)
+    check("ONE unasked op fails a captions-only brief, and the fault names the item and its family",
+          len(_sf) == 1 and _sr[0]["state"] == "FAIL" and "z1" in _sf[0] and "zoom" in _sf[0]
+          and _sf2 == [] and _sr2[0]["state"] == "PASS", "%s / %s" % (_sf, _sr2))
+    # ---- WHAT THE CORPUS'S `only` SENTENCES ACTUALLY SAY (2026-09-19) ----
+    # Builder-2 reported pb-024 as a missed scope_only. It is a miss, and a WIDER scope rule is the
+    # wrong fix: of the corpus's five `only` sentences, FOUR limit a CATEGORY inside the brief, not
+    # the brief. pb-003 allows "Only zoom in / zoom out effects" in a brief whose first four items
+    # are captions; pb-012 heads a list naming cuts, zoom, captions and b-roll; pb-021 says "Only
+    # trim and combine" then "Add simple, accurate captions"; pb-024 says "Zoom in / zoom out only"
+    # then asks for captions, number badges and sound effects. A scope_only on any of them fails the
+    # agent for placing what the brief asked for. The separating property is not the sentence's
+    # shape — it is whether the brief asks for anything outside the licensed family.
+    _fam = lambda b: [(c["kind"], (c.get("value") or {}).get("allowed")) for c in J.brief_constraints(b)]
+    _pb003 = ("1. Captions: All captions in English.\n"
+              "6. Allowed visual edits: Only zoom in / zoom out effects - no other transitions or cuts.")
+    _pb024 = ("Auto captions - add auto-generated captions synced to my speech.\n"
+              "2. Zoom in / zoom out only, no cuts - keep the footage as one continuous take.")
+    check("a category-scoped `only` never becomes a whole-timeline licence",
+          not [c for c in _fam(_pb003) if c[0] == "scope_only"]
+          and not [c for c in _fam(_pb024) if c[0] == "scope_only"]
+          and not [c for c in _fam("Only trim and combine the strongest soundbites. Add simple captions.") if c[0] == "scope_only"],
+          "%s / %s" % (_fam(_pb003), _fam(_pb024)))
+    check("a brief-scoped `only` still reads, because nothing outside the family is asked for",
+          _fam("IMPORTANT: Add captions ONLY. Do not edit or alter my video in any other way.")[-1] == ("scope_only", "caption"),
+          str(_fam("Add captions ONLY. Do not edit or alter my video in any other way.")))
+    # THE CONSTRAINT pb-024 REALLY CARRIES, and the density note that must not impersonate it.
+    check("`one continuous take` is a checkable no-cuts constraint, and a cut-density note is not",
+          [c[0] for c in _fam(_pb024)] == ["no_cuts"]
+          and [c[0] for c in _fam("Use subtle, smooth cuts. Do not cut every breath or micro-pause.")] == [],
+          "%s / %s" % (_fam(_pb024), _fam("Use subtle cuts. Do not cut every breath.")))
+    _nc = J.brief_constraints(_pb024)
+    _one = [{"id": "base-1", "itemType": "video", "timelineRange": {"fromFrame": 0, "toFrame": 900}}]
+    _two = _one + [{"id": "v2", "itemType": "video", "timelineRange": {"fromFrame": 900, "toFrame": 1500}}]
+    _f1, _r1 = J.check_constraints(_nc, _one, "base-1", {"state": "MEASURED", "cards": 0}, 30.0)
+    _f2, _r2 = J.check_constraints(_nc, _two, "base-1", {"state": "MEASURED", "cards": 0}, 30.0)
+    # A TIMELINE THAT CANNOT BE READ MUST REACH A STATE, NEVER AN EXCEPTION. Caught here
+    # so that deleting the ABSENT branch fails THIS leg instead of killing the run: the
+    # red proof measured exactly that difference (rc=1, leg_failed=False) and it is the
+    # same class as a failed measurement being indistinguishable from a clean result.
+    try:
+        _f0, _r0 = J.check_constraints(_nc, [], "base-1", {"state": "MEASURED", "cards": 0}, 30.0)
+    except Exception as _e0:                                      # noqa: BLE001
+        _f0, _r0 = [], [{"state": "RAISED", "read": "%s: %s" % (type(_e0).__name__, _e0)}]
+    check("no-cuts passes on one video item, fails on two, and an unreadable timeline is ABSENT not PASS",
+          _f1 == [] and _r1[0]["state"] == "PASS"
+          and len(_f2) == 1 and _r2[0]["state"] == "FAIL" and "2 video items" in _r2[0]["read"]
+          and _r0[0]["state"] == "ABSENT" and len(_f0) == 1,
+          "%s / %s / %s" % (_r1[0]["state"], _r2[0]["state"], _r0[0]["state"]))
+    # THE SEAM. A word the extractor emits that `_fam_of` cannot produce fails EVERY placed item
+    # silently. "music only" against an audio item the checker calls "sound" was exactly that.
+    _emit = set()
+    for _w in ("captions", "subtitles", "legendas", "cuts", "trims", "zoom in", "zoom-out",
+               "titles", "text", "graphics", "music", "sounds", "sfx", "transitions"):
+        for _c in J.brief_constraints("%s only" % _w):
+            if _c["kind"] == "scope_only":
+                _emit.add((_c.get("value") or {}).get("allowed"))
+    _produced = {"caption", "sound", "cut", "zoom", "title", "transition"}
+    check("every family the extractor can emit is one the read-back checker can classify",
+          _emit and not (_emit - _produced), "emits %s, orphans %s" % (sorted(_emit), sorted(_emit - _produced)))
+    # AND EVERY KIND IT EMITS HAS A BRANCH. A kind with no branch is extracted, never read, and
+    # reported as no fault — the exact shape of a false green.
+    import inspect as _insp
+    _handled = set(_re.findall(r'k == "(\w+)"', _insp.getsource(J.check_constraints)))
+    _uncheckable = {k for k, ck, _rx in J._CONSTRAINT_RULES if not ck}
+    check("every checkable constraint kind has a branch in the checker",
+          not ({k for k, ck, _rx in J._CONSTRAINT_RULES if ck} - _handled),
+          "missing %s (uncheckable, routed to UNCHECKED: %s)" % (
+              sorted({k for k, ck, _rx in J._CONSTRAINT_RULES if ck} - _handled), sorted(_uncheckable)))
+    # A CONSTRAINT THE AGENT IS NEVER TOLD IN WORDS. `scope_only` and `no_cuts` were both checked and
+    # both terminal while `constraint_prompt` rendered them as their own variable names — the harness
+    # refusing an export for a rule it had not stated. Ledgering a rule is not telling anyone.
+    check("every checkable constraint kind is stated to the agent in words, never as its kind name",
+          not [k for k, ck, _rx in J._CONSTRAINT_RULES if ck and k not in J._CONSTRAINT_MEANING],
+          "no meaning for %s" % [k for k, ck, _rx in J._CONSTRAINT_RULES if ck and k not in J._CONSTRAINT_MEANING])
+    _cp = J.constraint_prompt(J.brief_constraints("Zoom in / zoom out only, no cuts - one continuous take."))
+    _cp2 = J.constraint_prompt(J.brief_constraints("Do not alter my video in any other way. Nothing else."))
+    check("the rendered constraint block names the licensed family and leaves no placeholder unfilled",
+          "ONE video item" in _cp and "must be zoom" in _cp and "no_cuts" not in _cp and "scope_only" not in _cp
+          and "%s" not in _cp and "%s" not in _cp2 and "explicitly asked for" in _cp2, _cp)
+    # ---- THE TIMELINE BEFORE TURN 1 (Builder-2's re-edit contract, 2026-09-19) ----
+    # A re-edit is judged on what it did NOT touch, and the final timeline cannot answer that:
+    # an item that was never there and an item that was removed look identical afterwards.
+    _bi = [{"id": "d196b800", "itemType": "video", "timelineRange": {"fromFrame": 0, "toFrame": 335}, "trackAlias": "V1"},
+           {"id": "64648857", "itemType": "motion-graphic", "timelineRange": {"fromFrame": 565, "toFrame": 611}, "trackAlias": "V2"},
+           {"id": "z1", "itemType": "effect", "durationInFrames": 30, "timelineRange": {"fromFrame": 150, "toFrame": 180}, "trackAlias": "V3"}]
+    _bm = J.before_timeline("tok", {}, reader=lambda t, st: {"items": _bi})
+    _ba = J.before_timeline("tok", {}, reader=lambda t, st: {"items": [], "read_why": "no tracks"})
+    def _boom(t, st):
+        raise RuntimeError("401 from preview_timeline")
+    _bf = J.before_timeline("tok", {}, reader=_boom)
+    check("the before-timeline carries the judge's four fields for EVERY item, in the spec's shape",
+          _bm["state"] == "MEASURED" and len(_bm["items"]) == 3
+          and _bm["items"][0] == {"id": "d196b800", "from": 0, "dur": 335, "track": "V1", "kind": "video"}
+          and _bm["items"][2] == {"id": "z1", "from": 150, "dur": 30, "track": "V3", "kind": "effect"},
+          str(_bm["items"][:1]))
+    check("an empty read is ABSENT and an errored read is FAILED — neither reads as nothing was touched",
+          _ba["state"] == "ABSENT" and _ba["items"] is None and "no tracks" in _ba["why"]
+          and _bf["state"] == "FAILED" and _bf["items"] is None and "401" in _bf["why"],
+          "%s / %s" % (_ba["state"], _bf["state"]))
+    # DURATION IS DERIVED WHEN CHATCUT OMITS IT. Item 2 has no durationInFrames and the judge
+    # compares dur — a None there would read as a changed item on every single row.
+    check("dur is derived from the frame range when the item does not carry it",
+          _bm["items"][1]["dur"] == 46 and all(i["dur"] is not None for i in _bm["items"]),
+          str([i["dur"] for i in _bm["items"]]))
+    _src_e = open("chatcut_job_app.py", encoding="utf-8").read()
+    check("the before-timeline is captured BEFORE turn 1 and reaches the record",
+          _src_e.index("_before = before_timeline(tok, _stage)") < _src_e.index("_first_message = pass1_message(")
+          and '"before_timeline": _before' in _src_e
+          and 'out["before_timeline"] = _state.get("before_timeline")' in _src_e,
+          "capture/record wiring")
+    check("a brief this extractor cannot read is UNCHECKED, never a clean read",
+          [c["kind"] for c in J.brief_constraints("Сделай видео динамичным")] == ["language_unchecked"]
+          and J.brief_constraints("Сделай видео динамичным")[0]["checkable"] is False
+          and J.brief_constraints("just make it pop") == [])
 
     if FAILS:
         print("\n%d FAILURE(S)" % len(FAILS))

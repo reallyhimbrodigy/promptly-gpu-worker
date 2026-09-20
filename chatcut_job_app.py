@@ -4135,11 +4135,90 @@ def fault_lines(gate_report, hop6, hop5, items, base_item_id, brief_mode="full_e
 #                            cannot prove a region is hidden
 # ---------------------------------------------------------------------------
 _NEG = r"(?:no|without|zero|skip|drop|remove|omit|avoid|don'?t\s+(?:add|use|put|want|include)(?:\s+any)?|not?\s+(?:any\s+)?)"
+# THE CAPTION WORD IN THE LANGUAGES THIS CORPUS ACTUALLY CONTAINS (Builder-2, 2026-09-19). Derived from
+# fixtures/production_briefs.v1.jsonl, not invented: `sem legendas` (pt, pb-023) and `Bez teksta`
+# (ru/bs, pb-022) both read as NO CONSTRAINT under an English-only pattern, so a user who stated the
+# constraint plainly in their own language got a run that was free to ignore it. This list is a FLOOR
+# from one corpus, never a claim of coverage — which is why an unreadable brief now says so (see
+# `language_unchecked` below) instead of passing silently.
+_CAPTION_WORD = (r"(?:captions?|subtitles?|subs|legendas?|subt[ií]tulos?|sous-titres?|untertitel|"
+                 r"tekst[aou]?|字幕|캡션)")
+_NEG_XL = r"(?:no|without|sem|sin|sans|ohne|bez|nie|zonder|senza)"
+# WHAT A SCOPE CONSTRAINT CAN NAME: the families this harness places, and nothing else. Enumerable by
+# construction rather than fitted to a corpus — a scope check can only ever enforce what it can classify
+# on the read-back, so this list and `_fam_of` in the checker are the same set said twice.
+_FAMILY_WORD = (r"captions?|subtitles?|legendas?|cuts?|trims?|zoom(?:\s*-?\s*(?:in|out|ins|outs))?|"
+                r"titles?|text|graphics?|music|sounds?|sfx|transitions?")
+def _brief_asks(text):
+    """The families the brief EXPLICITLY ASKS FOR, as a set of canonical family words.
+
+    WHY THIS EXISTS. Four of this corpus's five `only` sentences do not limit the
+    brief — they limit a CATEGORY inside it. pb-003's "Allowed visual edits: Only
+    zoom in / zoom out effects" sits in a brief whose first four numbered items are
+    all about captions; pb-012's "Only do: hard cuts ..." heads a list naming cuts,
+    zoom, captions and b-roll; pb-021 says "Only trim and combine" and then "Add
+    simple, accurate captions"; pb-024 says "Zoom in / zoom out only" and then asks
+    for captions, number badges and sound effects. Reading any of those as a
+    whole-timeline licence produces a TERMINAL FAULT on a correct run — the check
+    would fail the agent for placing exactly what the brief asked for, four times
+    out of five. The property that separates them is not the sentence's shape, which
+    is why a wider pattern made this worse: it is whether the brief asks for
+    anything outside the licensed family.
+    """
+    out = set()
+    _canon = {"subtitle": "caption", "legenda": "caption", "trim": "cut", "graphic": "title",
+              "text": "title", "sfx": "sound", "music": "sound"}
+    def _add(w):
+        w = re.sub(r"[\s-]*(?:in|out|ins|outs)$", "", w.lower().strip()).rstrip("s")
+        out.add(_canon.get(w, w))
+    for clause in re.split(r"[.;\n\u2022]", text or ""):
+        # A NEGATED ASK IS NOT AN ASK. pb-015's "Do not cut, trim, rearrange, zoom,
+        # transition, crop, change the speed, add music" would otherwise register
+        # music as a request in the one brief that forbids it.
+        neg = re.search(r"\b(?:no|not|n[o']t|never|without|avoid)\b", clause, re.I)
+        for m in re.finditer(r"\b(?:add|include|generate|create|use|put|overlay|apply)\s+"
+                             r"(?:[\w%-]+[,\s]+){0,3}?(" + _FAMILY_WORD + r")\b", clause, re.I):
+            if neg and neg.start() < m.start():
+                continue
+            _add(m.group(1))
+        for m in re.finditer(r"(?:^|\n)[-*\d.\t ]*(" + _FAMILY_WORD + r")\s*[:\u2014]\s", clause, re.I):
+            _add(m.group(1))
+    return out
+
+
 _CONSTRAINT_RULES = (
-    ("no_captions", True, re.compile(r"\b" + _NEG + r"\s+(?:the\s+)?(?:captions?|subtitles?|subs)\b|\b(?:caption|subtitle)-?(?:free|less)\b|\buncaptioned\b|\bcaptions?\s*[:=]\s*(?:false|off|none|no)\b", re.I)),
+    ("no_captions", True, re.compile(r"\b" + _NEG + r"\s+(?:the\s+)?" + _CAPTION_WORD + r"\b"
+                                     r"|\b" + _NEG_XL + r"\s+" + _CAPTION_WORD + r"\b"
+                                     r"|\b(?:caption|subtitle)-?(?:free|less)\b|\buncaptioned\b"
+                                     r"|\bcaptions?\s*[:=]\s*(?:false|off|none|no)\b", re.I)),
+    # NO CUTS — the one constraint pb-024 actually carries. "keep the footage as one continuous take"
+    # is checkable exactly: more than one video item on the timeline means the clip was cut.
+    ("no_cuts", True, re.compile(
+        r"\b(?:no|without)\s+(?:more\s+)?(?:cuts?|cutting|trims?|trimming)\b"
+        r"|\bdo\s*n[o']?t\s+(?:cut|trim)\b"
+        r"|\bone\s+continuous\s+(?:take|shot|clip)\b"
+        r"|\bkeep\s+(?:the\s+)?(?:full\s+|whole\s+|entire\s+)?footage\s+as\s+(?:is|it\s+is|one)\b"
+        r"|\bwithout\s+cutting\s+the\s+clip\b", re.I)),
     ("no_music", True, re.compile(r"\b" + _NEG + r"\s+(?:the\s+|any\s+|background\s+)?(?:music|soundtrack|score|bgm|songs?|backing\s+track)\b|\bmusic\s*[:=]\s*(?:false|off|none|no)\b", re.I)),
     ("no_text", True, re.compile(r"\b" + _NEG + r"\s+(?:the\s+|any\s+)?(?:on-?screen\s+|overlay\s+)?(?:text(?:\s+overlays?)?|titles?|text\s+cards?|words\s+on\s+screen|graphics|overlays)\b"
                                   r"|\b" + _NEG + r"\s+(?:any\s+)?(?:captions?|subtitles?|music)\s*(?:,|or|and)\s*(?:on-?screen\s+)?(?:titles?|text|graphics)\b|\btext\s*[:=]\s*(?:false|off|none|no)\b", re.I)),
+    # THE FAMILIES ARE THE ONES THIS HARNESS CAN PLACE, not a word list fitted to a corpus — that set is
+    # enumerable and it is the only set a scope check could ever enforce.
+    ("scope_only", True, re.compile(
+        # "<family> only" / "only <family>" / "only do: <family>" / "the only change should be <family>",
+        # in the four shapes fixtures/production_briefs.v1.jsonl actually uses (pb-003, pb-012, pb-015,
+        # pb-021, pb-024) — and NEVER "only when|if|where", which is a CONDITION on when to use
+        # something, not a restriction on what may be placed. That trap appears twice in pb-009 and
+        # pb-015 ("use subtle zoom-ins ... only when they add emphasis"), and reading it as a scope
+        # limit would fail a brief that permits the very thing it is describing.
+        r"\b(?P<fam>" + _FAMILY_WORD + r")[^.;\n]{0,24}?\bonly\b(?!\s+(?:when|if|where|after|before|during|to\b))"
+        # The family can sit a word or two past the verb — pb-012 is "Only do: HARD cuts", and a rule
+        # that demanded the family adjacent to the verb read that row as no constraint at all.
+        r"|\bonly\b(?!\s+(?:when|if|where|after|before|during))\s*"
+        r"(?:(?:do|use|add|make|include|apply|keep)\s*:?\s*(?:[\w-]+\s+){0,2})?(?P<fam2>" + _FAMILY_WORD + r")"
+        r"|\bthe\s+only\s+(?:change|edit|thing)\s+(?:should\s+be|is)\s+[^.;\n]{0,20}?(?P<fam3>" + _FAMILY_WORD + r")"
+        r"|\bdo\s*n[o']?t\s+(?:edit|alter|change|touch|modify)[^.;\n]{0,40}?\b(?:any\s+other\s+way|anything\s+else|other\s+than)"
+        r"|\bnothing\s+else\b", re.I)),
     ("hide_region", False, re.compile(r"\b(?:blur|hide|cover|mask|obscure|pixelate|censor|black\s+out)\b[^.;\n]{0,40}?\b(?:faces?|logos?|plates?|licen[sc]e|screens?|names?|address(?:es)?|phone|numbers?|badges?|watermarks?|eyes|person|people|kids?|children)\b", re.I)),
 )
 _DUR_UNIT = r"(\d+(?:\.\d+)?)\s*(?:-\s*)?(s|secs?|seconds?|m|mins?|minutes?)\b"
@@ -4190,9 +4269,38 @@ def brief_constraints(brief):
     for kind, checkable, rx in _CONSTRAINT_RULES:
         m = rx.search(norm)
         if m and kind not in found:
+            # A PROHIBITION THE BRIEF CONTRADICTS IS NOT A PROHIBITION. pb-009 says "Do not cut
+            # every breath or micro-pause" in a brief whose own line above asks for "subtle, smooth
+            # cuts" — a density note, not a ban, and reading it as a ban fails a correct run.
+            # ONLY no_cuts. The canonical family word collapses music and sfx into "sound" and
+            # titles and text into "title", so the same guard on the audio or text negatives would
+            # drop a TRUE constraint from a brief that asks for the neighbouring family.
+            if kind == "no_cuts" and "cut" in _brief_asks(text):
+                continue
             found.add(kind)
-            out.append({"kind": kind, "checkable": checkable, "text": m.group(0).strip(),
-                        "why": None if checkable else "needs a pixel detector on the composed frames; the timeline read-back cannot prove a region is hidden"})
+            row = {"kind": kind, "checkable": checkable, "text": m.group(0).strip(),
+                   "why": None if checkable else "needs a pixel detector on the composed frames; the timeline read-back cannot prove a region is hidden"}
+            if kind == "scope_only":
+                # WHICH FAMILY IS LICENSED. "Add captions ONLY" licenses captions and nothing else; a
+                # bare "do not alter anything else" licenses nothing beyond what the brief asked for,
+                # and the check says so rather than guessing a family.
+                _g = m.groupdict()
+                fam = (_g.get("fam") or _g.get("fam2") or _g.get("fam3") or "").lower().strip()
+                fam = re.sub(r"[\s-]*(?:in|out|ins|outs)$", "", fam).rstrip("s")
+                # THE TWO SIDES SAY THE SAME SET. `_fam_of` in check_constraints classifies a placed
+                # item as caption|sound|cut|zoom|title|<itemType>; a word this extractor emits that
+                # side cannot produce fails EVERY item silently — "music only" against an audio item
+                # the checker calls "sound" is a 100% FAIL on a correct timeline.
+                fam = {"subtitle": "caption", "legenda": "caption", "trim": "cut",
+                       "graphic": "title", "text": "title", "sfx": "sound",
+                       "music": "sound"}.get(fam, fam)
+                _asks = _brief_asks(text)
+                if fam and (_asks - {fam}):
+                    # CATEGORY-SCOPED, NOT BRIEF-SCOPED. Say so and emit nothing: a scope
+                    # constraint that contradicts the brief's own asks is not a constraint.
+                    continue
+                row["value"] = {"allowed": fam or None}
+            out.append(row)
     for op, rx in _DUR_RULES:
         m = rx.search(norm)
         if m and "duration" not in found:
@@ -4201,7 +4309,73 @@ def brief_constraints(brief):
             found.add("duration")
             out.append({"kind": "duration", "checkable": True, "text": m.group(0).strip(), "value": {"op": op, "seconds": secs}})
             break
+    # A BRIEF THIS EXTRACTOR CANNOT READ SAYS SO (Builder-2, 2026-09-19). An English-only pattern is
+    # structurally blind to a constraint stated plainly in another language, and silence is
+    # indistinguishable from "no constraint". AFTER every rule has run, not between them: a brief that
+    # yielded a duration is not unread, and firing mid-way said "unchecked" about a brief the extractor
+    # had in fact read (pb-018, measured).
+    _nonascii = sum(1 for ch in text if ord(ch) > 127)
+    if not out and (_nonascii > max(3, 0.02 * max(1, len(text)))):
+        out.append({"kind": "language_unchecked", "checkable": False, "text": text[:80],
+                    "why": "this brief carries %d non-ASCII characters and matched no constraint this "
+                           "extractor knows; a constraint stated in another language reads as no "
+                           "constraint at all, so it is UNCHECKED rather than absent" % _nonascii})
     return out
+
+
+def before_rows(items):
+    """The four fields the re-edit judge compares, from a read-back's items. PURE.
+
+    THE CONTRACT IS BUILDER-2'S (reports/REEDIT_ENTRY_SPEC.md, lane/fulfilment-main
+    @69b986a): id, from, dur, track, kind — anything else recorded is carried and
+    ignored. Identity is the ITEM ID, and that decides a real case: an item
+    re-created with a new id reads as REMOVED plus an unasked addition, which is
+    the correct reading, because replacing an item the user accepted is not
+    leaving it alone.
+
+    WHY THIS IS A SEPARATE FUNCTION. `timeline_sample` records the FINAL timeline,
+    three items deep, at record time. A re-edit judge needs the timeline as it
+    stood BEFORE turn 1 and needs ALL of it — a sample cannot say an item was
+    left alone.
+    """
+    out = []
+    for i in (items or []):
+        tr = i.get("timelineRange") or {}
+        frm, to = tr.get("fromFrame"), tr.get("toFrame")
+        dur = i.get("durationInFrames")
+        if dur is None and frm is not None and to is not None:
+            dur = int(to) - int(frm)
+        out.append({"id": str(i.get("id") or ""),
+                    "from": int(frm) if frm is not None else None,
+                    "dur": int(dur) if dur is not None else None,
+                    "track": i.get("trackAlias") or i.get("track") or None,
+                    "kind": i.get("itemType") or None})
+    return out
+
+
+def before_timeline(tok, stage, reader=None):
+    """The timeline as it stood BEFORE turn 1, in three states, never a bare list.
+
+    MEASURED  the read returned items — a first edit's single source item is a
+              real before-state, not an absence
+    ABSENT    the read returned nothing at all; NOTHING is claimed by the judge
+    FAILED    the read raised, with what it said
+
+    A LIST THAT CAME BACK EMPTY IS NOT A PASS. This is the same distinction the
+    alpha guard lost: a measurement has three outcomes and a reader written
+    against the value silently accepts the other two.
+    """
+    try:
+        rb = (reader or read_back)(tok, stage)
+    except Exception as e:                                        # noqa: BLE001
+        return {"state": "FAILED", "items": None, "why": "read_back raised: %s" % str(e)[:160]}
+    items = rb.get("items")
+    if not items:
+        return {"state": "ABSENT", "items": None,
+                "why": "the read returned no items (%s)" % (str(rb.get("read_why") or "no reason given")[:120])}
+    rows = before_rows(items)
+    return {"state": "MEASURED", "items": rows,
+            "why": "%d item(s) on the timeline before turn 1" % len(rows)}
 
 
 def check_constraints(constraints, items, base_item_id, captions, end_s, props_by_id=None, text_carriers=None):
@@ -4240,6 +4414,20 @@ def check_constraints(constraints, items, base_item_id, captions, end_s, props_b
             else:
                 read = "native captions could not be read (%s: %s)" % (cap.get("state"), str(cap.get("why"))[:120])
                 rows.append({"kind": k, "state": cap.get("state") or "ABSENT", "read": read}); faults.append("no captions (brief) UNVERIFIED: %s" % read)
+        elif k == "no_cuts":
+            # ONE CONTINUOUS TAKE. A cut in this harness splits the source into more than one video
+            # item, so the read is a COUNT and it carries its evidence. Zero video items is ABSENT,
+            # not a pass: a timeline nobody could read has not proven the footage is intact.
+            vids = [i for i in (items or []) if str(i.get("itemType") or "") == "video"]
+            if not vids:
+                read = "no video item could be read on the timeline"
+                rows.append({"kind": k, "state": "ABSENT", "read": read}); faults.append("no cuts (brief) UNVERIFIED: %s" % read)
+            elif len(vids) > 1:
+                read = "%d video items — the source was cut: %s" % (
+                    len(vids), ", ".join("%s %.1fs" % (_id8(i), _dur(i) / 30.0) for i in vids[:6]))
+                rows.append({"kind": k, "state": "FAIL", "read": read}); faults.append("no cuts (brief): %s" % read)
+            else:
+                rows.append({"kind": k, "state": "PASS", "read": "one video item, %.1fs — the take is continuous" % (_dur(vids[0]) / 30.0)})
         elif k == "no_music":
             fps = 30.0
             music = [i for i in placed if str(i.get("itemType") or "") == "audio" and _dur(i) >= 5 * fps]
@@ -4258,6 +4446,31 @@ def check_constraints(constraints, items, base_item_id, captions, end_s, props_b
                 rows.append({"kind": k, "state": "FAIL", "read": read}); faults.append("no text (brief): %s" % read)
             else:
                 rows.append({"kind": k, "state": "PASS", "read": "no text-carrying overlay, no captions%s" % ("" if text_carriers is not None else " (every overlay counted as text: no component text map)")})
+        elif k == "scope_only":
+            allowed = ((c.get("value") or {}).get("allowed") or "")
+            # WHAT COUNTS AS AN UNASKED CHANGE: any placed item that is not of the licensed family.
+            # Captions licensed -> caption items and native cards are fine, a zoom or a card is not.
+            def _fam_of(i):
+                t = str(i.get("itemType") or "")
+                nm = _name(i)
+                if t == "caption" or nm.startswith("caption:"):
+                    return "caption"
+                if t == "audio":
+                    return "sound"
+                if t == "video":
+                    return "cut"
+                if t == "effect":
+                    return "zoom"
+                return "title" if t == "motion-graphic" else t
+            extra = [i for i in placed if not (allowed and _fam_of(i) == allowed)]
+            if extra:
+                read = "%d item(s) outside the licensed scope%s: %s" % (
+                    len(extra), (" (%s only)" % allowed) if allowed else " (the brief licensed nothing beyond what it asked for)",
+                    ", ".join("%s %s/%s" % (_id8(i), _fam_of(i), _name(i) or i.get("itemType")) for i in extra[:6]))
+                rows.append({"kind": k, "state": "FAIL", "read": read}); faults.append("scope (brief): %s" % read)
+            else:
+                rows.append({"kind": k, "state": "PASS",
+                             "read": "every placed item is %s" % (allowed or "within what the brief asked for")})
         elif k == "duration":
             v = c.get("value") or {}; op, tgt = v.get("op"), float(v.get("seconds") or 0)
             if end_s is None:
@@ -4284,9 +4497,15 @@ def constraint_line(constraints, rows=None):
                       for c in constraints)
 
 
+# A CONSTRAINT WITH NO MEANING HERE IS TOLD TO THE AGENT AS ITS OWN VARIABLE NAME. `scope_only` and
+# `no_cuts` were both checked, both terminal, and both described to the agent as "scope_only" and
+# "no_cuts" — the harness refusing an export for a rule it never stated in words. A leg now proves
+# every checkable kind has an entry.
 _CONSTRAINT_MEANING = {"no_captions": "no caption track item and no edit_captions cards on the timeline",
                        "no_music": "no added audio item of 5 seconds or more (short sound effects are not music)",
                        "no_text": "no text-carrying overlay and no captions",
+                       "no_cuts": "the source stays ONE video item — do not split, trim or cut it; place your work over it",
+                       "scope_only": "every item you place must be %s, and nothing else may be added",
                        "duration": "the timeline must end %s"}
 _OP_WORDS = {"<=": "at or under %gs", ">=": "at or over %gs", "==": "at %gs (half a second either way)", "~": "within 10%% of %gs"}
 
@@ -4305,6 +4524,9 @@ def constraint_prompt(constraints):
         if c["kind"] == "duration":
             v = c.get("value") or {}
             m = m % (_OP_WORDS.get(v.get("op"), "%gs") % float(v.get("seconds") or 0))
+        elif c["kind"] == "scope_only":
+            _a = (c.get("value") or {}).get("allowed")
+            m = (m % _a) if _a else "nothing beyond what the brief explicitly asked for may be added"
         lines.append("  - %s (\"%s\"): %s" % (c["kind"].replace("_", " "), c.get("text"), m))
     for c in unc:
         lines.append("  - \"%s\": the harness cannot verify this from the timeline — it is yours to honor" % c.get("text"))
@@ -5327,6 +5549,16 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         print("  CONSTRAINTS %d   : %s" % (n, constraint_line(_constraints, _rows)), flush=True)
         return _cf
 
+    # THE TIMELINE BEFORE TURN 1 — the only thing that can say an item was LEFT ALONE.
+    # A re-edit is judged on what it did NOT touch, and that question is unanswerable from
+    # the final timeline alone: an item that was never there and an item that was removed
+    # look identical afterwards. Captured here, before the agent has seen anything.
+    try:
+        _before = before_timeline(tok, _stage)
+    except Exception as _be:                                      # noqa: BLE001
+        _before = {"state": "FAILED", "items": None, "why": "capture raised: %s" % str(_be)[:160]}
+    print("  BEFORE TIMELINE : %s — %s" % (_before["state"], _before["why"]), flush=True)
+
     _first_message = pass1_message(prompt, _beats, "/craft/component_sheet.png",
                                    _watch_box, deciding=not bool(plan),
                                    face=_face_lines, platter=_platter, constraints=_constraints)
@@ -5559,7 +5791,8 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     # ── what the record tail reads, from the loop ──
     _turns = _tm["turns"]
     _reads = sum(int((t.get("usage") or {}).get("read") or 0) for t in _turns)
-    _state = {"experiment_stop": None, "served": [], "served_urls": set(),
+    _state = {"before_timeline": _before,
+              "experiment_stop": None, "served": [], "served_urls": set(),
               "rewatch1_fired_by": "turn 1 placed" if len(_tm["rewatches"]) >= 1 else "NEVER FIRED",
               "rewatch2_fired_by": "turn 2 reviewed" if len(_tm["rewatches"]) >= 2 else "NEVER FIRED",
               "rewatch2_scan": ({"state": "MEASURED", "lines": _tm["rewatches"][1].get("scan")} if len(_tm["rewatches"]) >= 2 else None),
@@ -6057,6 +6290,10 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
                 "timelineRange.fromFrame/toFrame; read these before adding a "
                 "field to the add shape"),
     }
+    # BEFORE TURN 1, ALL OF IT — the re-edit judge's rule (b) input. Three states, never a
+    # bare list; ABSENT claims nothing rather than reading as "nothing was touched".
+    out["before_timeline"] = _state.get("before_timeline") or {
+        "state": "ABSENT", "items": None, "why": "no before-timeline was captured for this run"}
     out["rewatch2_scan"] = _state.get("rewatch2_scan") or {
         "state": "NEVER RAN", "why": "the second rewatch did not reach the scan"}
     out["turn_machine"] = {

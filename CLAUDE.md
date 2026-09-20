@@ -1583,3 +1583,58 @@ else's laptop. Same rot, one gets looked at.
   check that the verification can fail.** A `volumedetect` comparison run
   against a JPEG prints nothing in both arms and proves neither; two arms that
   agree because both are empty are not a control.
+
+## A constraint check reads the BRIEF, not the SENTENCE (2026-09-19)
+
+Builder-2 reported that `brief_constraints` missed a scope limit in pb-024
+("Zoom in / zoom out only, no cuts") and guessed the family word list lacked
+"zoom". It did not — `zooms?` had been in both named groups since the rule was
+written. The mechanical cause was a required verb (`add|make|do`) before the
+family, which four of the corpus's nine `only` forms do not have.
+
+**The widening was correct and the fix was wrong.** With the verb dropped, four
+more rows matched. Reading those four briefs IN FULL is what settled it: of the
+five `only` sentences in the corpus, FOUR limit a CATEGORY inside the brief and
+not the brief itself.
+
+  * pb-003 "Allowed visual edits: Only zoom in / zoom out effects" — items 1-4
+    of the same brief are all captions.
+  * pb-012 "Only do: hard cuts every 1.5 sec, slow zoom 100-110%, word-by-word
+    captions" — four families in one sentence, not one.
+  * pb-021 "Only trim and combine the strongest original soundbites" — and then
+    "Add simple, accurate captions in clean white text."
+  * pb-024 — and then captions, numbered badges and sound effects.
+
+Only pb-015 is brief-scoped, and it is the one reinforced by "Do not edit or
+alter my video in any other way."
+
+So the wider rule would have produced a **terminal fault on a correct run, four
+times out of five** — failing the agent for placing exactly what the brief
+asked for. **The separating property is not the sentence's shape.** It is
+whether the brief asks for anything outside the licensed family, which is why
+every attempt to fix this by editing the pattern makes it worse.
+
+**Three traps under it, all the same class:**
+
+  * **"only WHEN" is a condition, not a limit** ("use subtle zoom-ins only when
+    they add emphasis"). Any verb-free `only` pattern eats it and fails the
+    brief for the family the sentence permits.
+  * **A negative has the same failure.** The first `no_cuts` fired on pb-009's
+    "Do not cut every breath or micro-pause" — a density note in a brief whose
+    line above asks for "subtle, smooth cuts". Same guard, and deliberately NOT
+    extended to `no_music` or `no_text`: the canonical family word collapses
+    music and sfx into "sound" and titles and text into "title", so that guard
+    there would drop a TRUE constraint from a brief asking for the neighbour.
+  * **The two sides of the seam must say the same words.** The extractor could
+    emit a family the read-back classifier cannot produce — "music only" against
+    an audio item the checker calls "sound" is a 100% FAIL on a correct
+    timeline. A leg now proves the emitted set is a subset of the classified
+    set, and another proves no kind is extracted without a checker branch.
+
+This is [a check calibrated on one population has learned that population] one
+turn sharper: **a check calibrated on the FORM of a sentence has learned that
+form, not the constraint.** And it is the third time this session that a report
+of a blind spot came with a cause that was wrong — including my own first
+verification, whose regex returned empty and whose conclusion was then derived
+from that empty match. **A check that cannot say what it read makes the next
+run the debugger, and that is as true of the check you write to audit a check.**
