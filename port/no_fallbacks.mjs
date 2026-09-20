@@ -88,7 +88,11 @@ export function run(dir = BODIES) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const rows = run();
+  // A DIRECTORY ARGUMENT SO THE RED PROOF NEVER MUTATES THE REAL TREE. A
+  // mutating harness and the thing it verifies cannot share a worktree; a kill
+  // between mutate and restore leaves exactly the residue the check exists to
+  // detect, under the name of the check for it.
+  const rows = run(process.argv[2] || BODIES);
   // A GATE OVER AN EMPTY POPULATION ASSERTS NOTHING.
   if (rows.length === 0) {
     console.log("HARNESS FAILURE: no bodies found — this gate asserted nothing");
