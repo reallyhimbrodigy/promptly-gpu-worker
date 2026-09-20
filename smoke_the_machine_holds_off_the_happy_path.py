@@ -2124,6 +2124,12 @@ def main():
         "glyph_mask": (lambda: J.glyph_mask("a", "b", reader=lambda _p: _blank[:, :, 0]), "ABSENT"),
         # one candidate face is not a discrimination — there is nothing to choose between
         "face_verdict": (lambda: J.face_verdict({"Inter": 0.9}, "Inter"), "ABSENT"),
+        # no face found at this moment: there is no box to compare against
+        "face_box": (lambda: J.face_box({"found": False}), "ABSENT"),
+        # a placement box with no area: the fraction is undefined, not zero
+        "box_overlap_fraction": (lambda: J.box_overlap_fraction([0, 0, 0, 0], [1, 1, 2, 2]), "ABSENT"),
+        # one of the two boxes missing: nothing is claimed either way
+        "face_collision": (lambda: J.face_collision(None, [1, 1, 2, 2]), "ABSENT"),
         "frame_diff_profile": (lambda: J.frame_diff_profile([], ["b"], reader=_rdr), "ABSENT"),
         "channel_offset":    (lambda: J.channel_offset([], ["b"], reader=_rdr), "ABSENT"),
         "rest_verdict":      (lambda: J.rest_verdict({}, {0: "b"}, reader=_rdr), "ABSENT"),
@@ -2366,6 +2372,40 @@ def main():
           "_ps, _cols, _cw = rewatch_tiles(density_fps)" in open("chatcut_job_app.py", encoding="utf-8").read()
           and "cell_w=_cw" in open("chatcut_job_app.py", encoding="utf-8").read(),
           "wired into _preview_frames")
+
+    # ---- THE FACE CHECK IS A BOX, NOT A BAND (Zac's ruling, 2026-09-19) ----
+    # The old check gave the face a whole BAND — 640-1280px, a third of the frame —
+    # with NO horizontal term at all, so it forbade a region the references use 61% of
+    # the time to prevent a practice that happens 11% of the time. Seven placements
+    # were failed on band membership and the record could not say whether any was
+    # genuinely on the face, because it stored band NAMES and neither box.
+    _fbx = J.face_box({"found": True, "cx": 540, "cy": 900})
+    check("the face box comes from the detector's extent, or a named window round the centre",
+          _fbx["state"] == "MEASURED" and _fbx["box"] == [240.0, 600.0, 840.0, 1200.0]
+          and "600px window" in _fbx["why"]
+          and "detector's own extent" in J.face_box({"found": True, "box": [1, 2, 3, 4]})["why"]
+          and J.face_box({"found": False})["state"] == "ABSENT",
+          _fbx["why"])
+    # BOTH DIRECTIONS, which is what makes it a check rather than a prohibition.
+    check("a card centred on the face FAULTS and text clear of it does NOT",
+          J.face_collision([400, 800, 700, 1000], _fbx["box"])["fault"] is True
+          and J.face_collision([20, 800, 230, 1000], _fbx["box"])["fault"] is False
+          and J.face_collision([100, 400, 980, 560], _fbx["box"])["fault"] is False,
+          "on-face %.2f, beside %.2f, above %.2f" % (
+              J.face_collision([400, 800, 700, 1000], _fbx["box"])["fraction"],
+              J.face_collision([20, 800, 230, 1000], _fbx["box"])["fraction"],
+              J.face_collision([100, 400, 980, 560], _fbx["box"])["fraction"]))
+    check("missing geometry is ABSENT, never a pass",
+          J.face_collision(None, _fbx["box"])["state"] == "ABSENT"
+          and J.face_collision([0, 0, 0, 0], _fbx["box"])["state"] == "ABSENT"
+          and J.face_collision([1, 1, 2, 2], None)["state"] == "ABSENT",
+          "three absences")
+    # THE TOLERANCE CARRIES ITS SOURCE, and names the assumption inside it.
+    check("the face tolerance names its atlas source and the assumption it makes",
+          abs(J.FACE_OVERLAP_TOLERANCE - 0.15) < 1e-9
+          and "ATLAS" in J.FACE_OVERLAP_SOURCE and "11%" in J.FACE_OVERLAP_SOURCE
+          and "FREQUENCY" in J.FACE_OVERLAP_SOURCE and "assumption" in J.FACE_OVERLAP_SOURCE,
+          J.FACE_OVERLAP_SOURCE[:90])
 
     # THE WORKING TREE, NOT THE COMMIT. red_proof_no_undefined_names builds an ISOLATED
     # worktree from HEAD, so it judges what is COMMITTED — and a run is launched from what

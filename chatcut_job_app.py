@@ -2525,6 +2525,88 @@ def verify_hop5_composition(tok, stage, plan, items):
     return out
 
 
+# THE FACE TOLERANCE, AND WHAT IT IS MADE OF (Zac, 2026-09-19).
+# Builder-2's atlas measures text OVER_FACE at 11% of 124 text placements — so a
+# graze is reference practice, not a defect, and a check that forbids all contact
+# forbids something the references do.
+#
+# THE ASSUMPTION THIS CONSTANT CARRIES OPENLY: 11% is a FREQUENCY (how often a
+# placement sits over a face), NOT a COVERAGE (how much of the face it covers).
+# The atlas does not measure coverage. Using the frequency as a coverage bound is a
+# judgement, not a reading, and it is written here rather than buried so the next
+# person can replace it with a real coverage measurement when one exists.
+FACE_OVERLAP_TOLERANCE = 0.15          # 0.11 from the atlas + a 0.04 margin
+FACE_OVERLAP_SOURCE = ("reports/REFERENCE_PLACEMENT_ATLAS.md @3cbbf61 — text over_face "
+                       "11% of 124 placements; the 11% is a FREQUENCY used here as a "
+                       "COVERAGE bound, which is an assumption, not a measurement")
+FACE_BOX_PX = 600.0                    # handler.py's own face window, when the detector gives no extent
+
+
+def face_box(point, frame_w=1080.0, frame_h=1920.0, box_px=FACE_BOX_PX):
+    """The face's own box. PURE. -> {state, box:[x0,y0,x1,y1], why}
+
+    FROM THE DETECTOR'S EXTENT WHERE IT GIVES ONE. res10 returns a bounding box;
+    where only a centre is available the fallback is handler.py's 600px window,
+    and the return says WHICH was used so a verdict can be re-read.
+    """
+    if not isinstance(point, dict) or not point.get("found"):
+        return {"state": "ABSENT", "box": None, "why": "no face was detected at this moment"}
+    for k in ("box", "bbox", "rect"):
+        v = point.get(k)
+        if isinstance(v, (list, tuple)) and len(v) == 4:
+            x0, y0, x1, y1 = (float(z) for z in v)
+            return {"state": "MEASURED", "box": [x0, y0, x1, y1],
+                    "why": "the detector's own extent (%r)" % k}
+    cx = float(point.get("cx") if point.get("cx") is not None else frame_w / 2.0)
+    cy = float(point.get("cy") if point.get("cy") is not None else frame_h / 2.0)
+    h = box_px / 2.0
+    return {"state": "MEASURED", "box": [cx - h, cy - h, cx + h, cy + h],
+            "why": "no extent from the detector — a %.0fpx window around the centre" % box_px}
+
+
+def box_overlap_fraction(placement, face):
+    """How much of the PLACEMENT the face covers. PURE. -> {state, fraction, why}
+
+    OF THE PLACEMENT, not of the face: the question is whether this graphic sits on
+    the subject, and a small card fully on a face is the defect while a full-frame
+    wash overlapping the same face is not the same thing.
+    """
+    if not placement or not face or len(placement) != 4 or len(face) != 4:
+        return {"state": "ABSENT", "fraction": None,
+                "why": "one of the two boxes is missing — nothing is claimed"}
+    ax0, ay0, ax1, ay1 = (float(v) for v in placement)
+    bx0, by0, bx1, by1 = (float(v) for v in face)
+    aw, ah = max(0.0, ax1 - ax0), max(0.0, ay1 - ay0)
+    if aw <= 0 or ah <= 0:
+        return {"state": "ABSENT", "fraction": None,
+                "why": "the placement box has no area (%r)" % (placement,)}
+    iw = max(0.0, min(ax1, bx1) - max(ax0, bx0))
+    ih = max(0.0, min(ay1, by1) - max(ay0, by0))
+    return {"state": "MEASURED", "fraction": round((iw * ih) / (aw * ah), 4),
+            "why": "%.0fx%.0f of %.0fx%.0f" % (iw, ih, aw, ah)}
+
+
+def face_collision(placement_box_, face_box_, tol=FACE_OVERLAP_TOLERANCE):
+    """Does this placement sit ON the face? PURE. -> {state, fault, fraction, why}
+
+    A GRAZE IS REFERENCE PRACTICE. Below the tolerance there is NO FAULT — the
+    references place text in the middle 61% of the time and over a face 11%, so a
+    check that fires on contact condemns the common case to prevent the rare one.
+    """
+    ov = box_overlap_fraction(placement_box_, face_box_)
+    if ov["state"] != "MEASURED":
+        return {"state": "ABSENT", "fault": None, "fraction": None,
+                "why": "the overlap could not be measured: %s" % ov["why"]}
+    f = ov["fraction"]
+    if f > tol:
+        return {"state": "MEASURED", "fault": True, "fraction": f,
+                "why": "%.1f%% of the placement sits on the face, over the %.0f%% tolerance (%s)"
+                       % (100 * f, 100 * tol, ov["why"])}
+    return {"state": "MEASURED", "fault": False, "fraction": f,
+            "why": "%.1f%% of the placement touches the face, within the %.0f%% the references "
+                   "tolerate — a graze is not a defect" % (100 * f, 100 * tol)}
+
+
 def verify_hop6_clear(plan, source="/work/source.mp4", items=None,
                       caption_band=None):
     """HOP 6 — nothing sits on the speaker's face or on the source's own text.
@@ -3487,6 +3569,21 @@ def tool_schema(tool: str = "edit_item"):
     r = mcp_rpc(tok, "tools/list", {}, 2)
     tools = ((r or {}).get("result") or {}).get("tools") or []
     names = sorted(t.get("name") for t in tools if t.get("name"))
+    # COMMA-SEPARATED: asking three schemas costs one run instead of three.
+    wanted = [w.strip() for w in str(tool).split(",") if w.strip()]
+    if len(wanted) > 1:
+        many = {"state": "MEASURED", "tools_seen": len(names), "schemas": {}}
+        for w in wanted:
+            h = next((t for t in tools if t.get("name") == w), None)
+            many["schemas"][w] = ({"state": "ABSENT", "why": "not in tools/list"} if not h else
+                                  {"state": "MEASURED",
+                                   "description": str(h.get("description") or "")[:1200],
+                                   "schema": h.get("inputSchema") or h.get("input_schema") or {}})
+            print("  %-22s %s" % (w, many["schemas"][w]["state"]), flush=True)
+            if many["schemas"][w]["state"] == "MEASURED":
+                print("      %s" % many["schemas"][w]["description"][:600], flush=True)
+        RESULTS["tool-schema-many"] = many
+        return many
     hit = next((t for t in tools if t.get("name") == tool), None)
     out = {"tool": tool, "tools_seen": len(names), "names": names}
     if not hit:
@@ -4689,6 +4786,9 @@ def item_props_from_inspect(envelope):
 STATEFUL_READERS = (
     ("component_faults", "a timeline whose items expose no properties at all", "ABSENT"),
     ("item_props_from_inspect", "an inspect_item answer with no text", "ABSENT"),
+    ("face_box", "a detection point with nothing found", "ABSENT"),
+    ("box_overlap_fraction", "a placement box with no area", "ABSENT"),
+    ("face_collision", "one of the two boxes missing", "ABSENT"),
     ("glyph_mask", "two frames with nothing drawn between them", "ABSENT"),
     ("face_verdict", "fewer than two candidate faces rendered", "ABSENT"),
     ("frame_diff_profile", "one side with no frames", "ABSENT"),
