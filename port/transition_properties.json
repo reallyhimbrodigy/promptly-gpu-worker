@@ -327,5 +327,32 @@
    "type": "text",
    "defaultValue": ""
   }
- ]
+ ],
+ "ShutterFlashOverlay": [
+  {
+   "key": "seamRoom",
+   "label": "Frames before the cut this item covers",
+   "type": "number",
+   "defaultValue": 6
+  },
+  {
+   "key": "duration",
+   "label": "Flash duration (frames)",
+   "type": "number",
+   "defaultValue": 12
+  },
+  {
+   "key": "flashColor",
+   "label": "Flash colour",
+   "type": "text",
+   "defaultValue": "#ffffff"
+  },
+  {
+   "key": "peak",
+   "label": "Peak wash opacity (0.82 measured \u2014 do not raise)",
+   "type": "number",
+   "defaultValue": 0.82
+  }
+ ],
+ "_overlays": "A TIGHT-CUT OVERLAY carries NO clips and has no `correct`: it decorates a transparent root over whatever the timeline shows, and the cut underneath stays hard. That is why its table has no clip/srcFromA/srcFromB."
 }
