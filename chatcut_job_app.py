@@ -3343,6 +3343,110 @@ def _preview_frames(tok, pid, total_frames, fps=30, density_fps=2.0, mark=None, 
     return sheets, times
 
 
+_WRITE_OPS = ("adds", "updates", "deletes")
+# Keys an edit_item payload may carry that are NOT operations. Anything else that
+# looks like an op list is a key the server will ignore, which is how a delete can
+# come back 200 having done nothing.
+_WRITE_NON_OPS = ("projectId", "timelineId", "trackId", "validateOnly")
+
+
+def write_effect(sent, resp):
+    """WHAT THE WRITE ASKED FOR, AGAINST WHAT ITS RESPONSE SAYS IT DID. PURE.
+
+    ZAC'S RULE, 2026-09-19: every write's response names its effect, and the
+    harness compares that against what it asked for. A `removes` that returns 200
+    with empty `deletes` is a FAILED DELETE, not a success; an `adds` that returns
+    fewer ids than ops sent is a PARTIAL PLACEMENT.
+
+    MEASURED, WHICH IS WHY THIS EXISTS. Between the two arms of the zoom pair I
+    sent {"removes": [item_id]}. edit_item answered 200 with
+    {"adds": [], "deletes": [], "updates": []} — it had ignored the key entirely —
+    and the harness read the 200 as a deletion, so the second arm was measured with
+    the first still on the timeline. One comparison would have caught it, and it
+    catches the same class on every other write ChatCut accepts without doing.
+
+    -> {state, asked, echoed, unknown, why}
+       APPLIED      every op echoed at least as many entries as were sent
+       PARTIAL      some op echoed fewer than were sent
+       NONE         ops were sent and NOTHING was echoed
+       UNKNOWN_OP   the payload carries a key that is not an operation — the
+                    server will ignore it and still answer 200
+       UNREADABLE   the response carries none of the three op keys, so it cannot
+                    say what it did and nothing may be concluded
+    """
+    sent = sent if isinstance(sent, dict) else {}
+    unknown = sorted(k for k, v in sent.items()
+                     if k not in _WRITE_OPS and k not in _WRITE_NON_OPS and isinstance(v, list))
+    asked = {op: len(sent.get(op) or []) for op in _WRITE_OPS if isinstance(sent.get(op), list)}
+    if unknown:
+        return {"state": "UNKNOWN_OP", "asked": asked, "echoed": {}, "unknown": unknown,
+                "why": ("the payload carries %s, which edit_item does not accept as an operation — "
+                        "it will answer 200 and do nothing. The operations are %s."
+                        % (", ".join(repr(u) for u in unknown), ", ".join(_WRITE_OPS)))}
+    if not isinstance(resp, dict) or not any(k in resp for k in _WRITE_OPS):
+        return {"state": "UNREADABLE", "asked": asked, "echoed": {}, "unknown": [],
+                "why": "the response names none of %s, so it cannot say what it did" % (_WRITE_OPS,)}
+    echoed = {op: len(resp.get(op) or []) for op in _WRITE_OPS}
+    total_asked = sum(asked.values())
+    total_echoed = sum(echoed.get(op, 0) for op in asked)
+    if total_asked and not total_echoed:
+        return {"state": "NONE", "asked": asked, "echoed": echoed, "unknown": [],
+                "why": "asked for %s and the response echoed nothing" % asked}
+    short = {op: (n, echoed.get(op, 0)) for op, n in asked.items() if echoed.get(op, 0) < n}
+    if short:
+        return {"state": "PARTIAL", "asked": asked, "echoed": echoed, "unknown": [],
+                "why": "; ".join("%s: sent %d, echoed %d" % (op, a, b) for op, (a, b) in short.items())}
+    return {"state": "APPLIED", "asked": asked, "echoed": echoed, "unknown": [],
+            "why": "every operation echoed: %s" % echoed}
+
+
+def edit_item_checked(tok, args, why=""):
+    """edit_item, with its echo compared against what was asked. -> the response.
+
+    Raises on anything but APPLIED. A write that did not do what it was asked is a
+    FAULT at the call site, not a surprise three steps later when a read-back
+    disagrees with the plan.
+    """
+    resp = _mcp_call(tok, "edit_item", args, expect=None)
+    eff = write_effect(args, resp)
+    if eff["state"] != "APPLIED":
+        raise RuntimeError("edit_item %s%s: %s" % (eff["state"], (" (%s)" % why) if why else "", eff["why"]))
+    return resp
+
+
+@app.function(image=IMG, timeout=300, cpu=2, memory=2048,
+              secrets=[modal.Secret.from_name("chatcut-oauth")])
+def tool_schema(tool: str = "edit_item"):
+    """ChatCut's OWN schema for one tool, read from tools/list. No model calls.
+
+    WHY A RUN FOR THIS. The delete between the two arms of the zoom pair has now
+    been written three ways in this repo — {"removes": [id]} (ignored, 200, did
+    nothing), {"deletes": [{"itemId": id}]} and {"deletes": [{"id": id}]} — and at
+    least one of them is wrong because the server answered "Invalid arguments for
+    tool edit_item". Two guesses cost two runs; the schema is one call and ends it.
+    This repo's own rule: read the FACT from the world, never infer it from the act
+    meant to produce it.
+    """
+    tok = _access_token()
+    r = mcp_rpc(tok, "tools/list", {}, 2)
+    tools = ((r or {}).get("result") or {}).get("tools") or []
+    names = sorted(t.get("name") for t in tools if t.get("name"))
+    hit = next((t for t in tools if t.get("name") == tool), None)
+    out = {"tool": tool, "tools_seen": len(names), "names": names}
+    if not hit:
+        out["state"] = "ABSENT"
+        out["why"] = "%r is not in tools/list (%d tools)" % (tool, len(names))
+        print("  %s ABSENT — tools: %s" % (tool, names[:12]), flush=True)
+        RESULTS["tool-schema-" + tool] = out
+        return out
+    out["state"] = "MEASURED"
+    out["schema"] = hit.get("inputSchema") or hit.get("input_schema") or {}
+    out["description"] = str(hit.get("description") or "")[:2000]
+    print("  %s SCHEMA:\n%s" % (tool, json.dumps(out["schema"], indent=1)[:6000]), flush=True)
+    RESULTS["tool-schema-" + tool] = out
+    return out
+
+
 def frames_at(tok, pid, frame_list, out_dir, per_call=9, workers=4):
     """EXACTLY these frames, keyed BY FRAME NUMBER. -> ({frame: path}, missing:[frame])
 
@@ -6190,7 +6294,7 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
             try:
                 _mcp_call(tok, "edit_item",
                           {"projectId": _stage["projectId"],
-                           "deletes": [{"itemId": _r["item"]}]})
+                           "deletes": [{"id": _r["item"]}]})
             except Exception as _e:                               # noqa: BLE001
                 _remove_why.append("%s: the call failed (%s)"
                                    % (_r["item"], str(_e)[:100]))
@@ -7357,9 +7461,10 @@ def mg_runtime_probe(clip_url: str = ""):
                 row["refusal"] = registration_refusal(a or {})
                 row["state"] = "REFUSED"
             else:
-                r = _mcp_call(tok, "edit_item", {"projectId": pid, "adds": [
+                r = edit_item_checked(tok, {"projectId": pid, "adds": [
                     {"type": "motion-graphic", "assetId": mg, "fromFrame": 0, "durationInFrames": 60,
-                     "propertyOverrides": {"clip": src_asset, "text": name}}]}, expect="adds")
+                     "propertyOverrides": {"clip": src_asset, "text": name}}]},
+                    "placing the %s capability probe" % name)
                 row["placed"] = bool((r.get("adds") or [{}])[0].get("id"))
                 row["item"] = ((r.get("adds") or [{}])[0] or {}).get("id")
                 row["state"] = "MEASURED" if row["placed"] else "FAILED"
@@ -7373,7 +7478,8 @@ def mg_runtime_probe(clip_url: str = ""):
         # wrong component. Removed before the next is placed.
         if row.get("item"):
             try:
-                _mcp_call(tok, "edit_item", {"projectId": pid, "removes": [row["item"]]}, expect=None)
+                edit_item_checked(tok, {"projectId": pid, "deletes": [{"id": row["item"]}]},
+                                  "clearing the previous capability probe")
             except Exception:                                     # noqa: BLE001
                 pass
     out["wall_s"] = round(time.time() - _t0, 1)
@@ -7672,16 +7778,28 @@ def zoom_pair(clip_url: str = "", at_s: float = 12.0, span_s: float = 2.0,
         # timeline, so leaving one in place puts the second arm's zoom on top of the
         # first and the frames answer for neither.
         if item_id:
-            # THE KEY IS `deletes`, AND THE ELEMENT IS {"itemId": ...}. My first
+            # THE SHAPE, READ FROM ChatCut's OWN tools/list SCHEMA rather than guessed a
+            # third time: `deletes` takes objects and REQUIRES `id` — "Existing
+            # item/effect/transition id or prefix to delete". `itemId` fails the required
+            # check and the server answers "Invalid arguments for tool edit_item". My first
             # version sent {"removes": [id]}: edit_item answered 200 with
             # {"adds": [], "deletes": [], "updates": []} and NOTHING was deleted, so
             # the second arm WAS measured on top of the first. A response is not a
             # deletion — the read-back is. This shape is already used elsewhere in
             # this file; I guessed instead of looking, which is the whole failure.
             r = step("%s: delete" % label,
-                     lambda: _mcp_call(tok, "edit_item",
-                                       {"projectId": pid, "deletes": [{"itemId": item_id}]}, expect=None))
-            gone = item_id not in {str(i.get("id")) for i in (read_back(tok, stage).get("items") or [])}
+                     lambda: edit_item_checked(tok, {"projectId": pid, "deletes": [{"id": item_id}]},
+                                               "clearing the %s arm before the next" % label))
+            # A CHECK THAT CANNOT FAIL IS NOT A CHECK. This read
+            # `item_id not in {read-back ids}` — and echo ids come back as 10 hex
+            # characters UNHYPHENATED while read-back ids are hyphenated UUIDs, so the
+            # membership test was always False and "gone" was always True. It reported
+            # success on two runs whose delete had actually been REFUSED. Both sides are
+            # stripped and compared as prefixes now, the way every other id test here does.
+            _norm = lambda x: str(x or "").replace("-", "").lower()
+            _live = {_norm(i.get("id")) for i in (read_back(tok, stage).get("items") or [])}
+            _me = _norm(item_id)
+            gone = not any(x.startswith(_me) or _me.startswith(x) for x in _live if x)
             a["removed"] = bool(gone)
             print("  %-8s delete -> %s (read back: %s)"
                   % (label.upper(), "accepted" if r else "refused",
@@ -7694,11 +7812,11 @@ def zoom_pair(clip_url: str = "", at_s: float = 12.0, span_s: float = 2.0,
 
     # ── THEIRS: their preset, as an effect ON the base item ──────────────
     def place_theirs(pid, base, _src):
-        return _mcp_call(tok, "edit_item", {"projectId": pid, "adds": [
+        return edit_item_checked(tok, {"projectId": pid, "adds": [
             {"type": "effect", "assetId": "builtin:zoom", "targetItemId": base,
              "fromFrame": from_frame, "durationInFrames": dur_frames,
              "propertyOverrides": {"magnification": magnification, "shape": theirs}}]},
-            expect="adds")
+            "placing their %s preset" % theirs)
 
     # ── OURS: our ported component, as a layer OVER the base ─────────────
     def place_ours(pid, base, src_asset):
@@ -7717,12 +7835,12 @@ def zoom_pair(clip_url: str = "", at_s: float = 12.0, span_s: float = 2.0,
         if not mg:
             raise RuntimeError("SmoothPush did not register: %s" % registration_refusal(asset or {}))
         out["our_asset"] = mg
-        return _mcp_call(tok, "edit_item", {"projectId": pid, "adds": [
+        return edit_item_checked(tok, {"projectId": pid, "adds": [
             {"type": "motion-graphic", "assetId": mg,
              "fromFrame": from_frame, "durationInFrames": dur_frames,
              "propertyOverrides": {"clip": src_asset, "srcFrom": from_frame,
                                    "scale": magnification, "punch": bool(punch),
-                                   "capped": True}}]}, expect="adds")
+                                   "capped": True}}]}, "placing our SmoothPush layer")
 
     stage = prestage(tok, "", controls={}, source_path="/work/source.mp4",
                      want_components=set(), titles=[])

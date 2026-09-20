@@ -1813,10 +1813,10 @@ def main():
     _zp2 = _zp2[:_zp2.index("@app.function")]
     _zp2 = _re.sub(r"^\s*#.*$", "", _zp2, flags=_re.M)
     check("both arms share one project, one upload and one timeline, placed in sequence",
-          _zp2.count("prestage(") == 1 and '"deletes": [{"itemId": item_id}]' in _zp2
+          _zp2.count("prestage(") == 1 and '"deletes": [{"id": item_id}]' in _zp2
           and "control_a=" in _zp2 and "frames_by_number(" in _src_z,
           "prestage x%d, deletes=%s" % (_zp2.count("prestage("),
-                                        '"deletes": [{"itemId": item_id}]' in _zp2))
+                                        '"deletes": [{"id": item_id}]' in _zp2))
     # ---- ALIGNMENT BY FRAME NUMBER (measured 2026-09-19) ----
     # The grid sampler asked for 84 frames over 14s and returned 66 — and the 18 it lost
     # were the TAIL, which is exactly where a zoom at 12s lives, so the span under test
@@ -1850,9 +1850,9 @@ def main():
     # even the right key: edit_item answered 200 with empty adds/deletes/updates and the
     # first arm stayed on the timeline under the second.
     check("the arm is deleted with the key edit_item accepts, and the read-back proves it",
-          '"deletes": [{"itemId": item_id}]' in _zp and "STILL ON THE TIMELINE" in _zp
+          '"deletes": [{"id": item_id}]' in _zp and "STILL ON THE TIMELINE" in _zp
           and '"removes"' not in _zp,
-          "deletes/itemId + read-back verification")
+          "deletes/id + read-back verification")
 
     # THE WORKING TREE, NOT THE COMMIT. red_proof_no_undefined_names builds an ISOLATED
     # worktree from HEAD, so it judges what is COMMITTED — and a run is launched from what
