@@ -95,15 +95,16 @@ const Component = ({ item }) => {
   }
   const scale = 1 + (peakScale - 1) * barProgress;
   const barHeight = maxBarHeight * height * barProgress;
-  // FIT EXCEPTION, AND IT IS TEMPORARY (Zac, 2026-09-20). The nine transitions
-  // are `contain` so their plate matches the letterboxed base track. THE ZOOMS
-  // STAY `cover` FOR TWO REASONS, both of which expire together: a contained
-  // zoom drags the letterbox EDGE through frame, and the velocity-cap
-  // calibration was measured against a COVERING plate.
-  // WHEN CANVAS-FOLLOWS-SOURCE LANDS, BOTH FITS ARE THE IDENTITY — a 1920x1080
-  // source in a 1920x1080 canvas has no bars for either to place — and this
-  // exception ENDS. Delete it then; do not re-argue it.
-  const plate = { width: "100%", height: "100%", objectFit: "cover",
+  // CONTAIN, and the exception that kept this `cover` is GONE (2026-09-21).
+  // Its own terms: both fits become the identity once canvas-follows-source
+  // lands, because a source in a canvas of its own shape has no bars for
+  // either to place — delete it then, do not re-argue it. That landed.
+  // prestage derives the canvas per run, w/h/fps are keyword-only with no
+  // default (a caller that omits them is a TypeError, not a silent portrait),
+  // and kolkata-9 exported 1280x720 @ 28fps with probe_state MEASURED — read
+  // off the artefact rather than asserted. Both reasons expire together and
+  // both have.
+  const plate = { width: "100%", height: "100%", objectFit: "contain",
     filter: correct };
 
   if (!src) {
