@@ -1,7 +1,7 @@
 /* LightLeakOverlay — the second TIGHT-CUT OVERLAY, on ChatCut's timeline.
  *
  * CARRIES NO CLIPS, like ShutterFlashOverlay. Two blurred radial glows drift
- * across a transparent root in `screen`, with a soft-light wash under them, so
+ * across a transparent root, with a wash under them, so
  * whatever the timeline already shows plays through and the hard cut underneath
  * stays hard. No `clip`, no `srcFromA/B`, no `correct` — there is no <Video>
  * layer of ours for the rest calibration to apply to.
@@ -24,8 +24,18 @@
  * a CSS or bitmap implementation, which is a different component and a
  * decision, not a port.
  *
+ * CHATCUT STRIPS mixBlendMode AT REGISTRATION, AND THAT CHANGES THIS COMPONENT
+ * MORE THAN ANY NUMBER IN IT. Read back from the registered asset 2026-09-21:
+ * all three `mixBlendMode` declarations gone, while these comments still said
+ * "screen". It is a FIFTH auto-rewrite beside the props-fallback strip, the
+ * nested ({item}) injection, <img> -> <Img> and the trailing newline, and the
+ * only one that silently changes what the component LOOKS LIKE. The layers
+ * composite NORMALLY: flat colour over the picture, far heavier than a screen.
+ * The source keeps mixBlendMode so it renders correctly anywhere else; what
+ * ships here is measured against the stripped form, because that is what runs.
+ *
  * NO VELOCITY CAP: nothing moves that the cap can bound. The glows translate,
- * but they are BLURRED BY 28-40px and drawn in `screen` at partial opacity —
+ * but they are BLURRED BY 28-40px and drawn at partial opacity —
  * there is no edge whose per-frame displacement reads as judder, which is the
  * thing the 11px ceiling exists to bound. Exempt by nature, like DipToBlack and
  * ShutterFlashOverlay, and not in the peaks table.
@@ -103,7 +113,16 @@ const Component = ({ item }) => {
   // l1 and the wash alone retain 0.4730, so the defect really is l2 and not the
   // stack — which is what makes changing this one number the whole fix.
   //
-  // MEASURED AT intensity 1.0, its registered default, and at the WORST pixel:
+  // THE 0.71 ABOVE WAS MEASURED ON THE DESIGNED BLEND AND IS NOT THE BINDING
+  // CONSTRAINT. Against the REGISTERED (stripped) composite the whole stack is
+  // heavier and l2 stops being the term that matters: even at l2 = 0, l1 at
+  // 0.85 plus the wash retain only 0.1088 against a 0.1822 bar. The dial that
+  // fixes it is `intensity`, which scales all three, and its registered default
+  // is now 0.65 (ceiling 0.670, measured). The rendered still is what settled
+  // which model is real: it showed the picture all but gone, which the normal
+  // model predicts (0.033) and the screen model does not (0.069).
+  //
+  // MEASURED AT the WORST pixel:
   // full gradient alpha with both blooms coincident. The blur, the radial
   // falloff and the real overlap all make a rendered frame kinder than that
   // bound, so this is conservative by construction. Ladder in

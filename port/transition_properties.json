@@ -494,9 +494,9 @@
   },
   {
    "key": "intensity",
-   "label": "Leak intensity",
+   "label": "Leak intensity (0.65 measured on the REGISTERED blend \u2014 do not raise)",
    "type": "number",
-   "defaultValue": 1.0
+   "defaultValue": 0.65
   }
  ]
 }

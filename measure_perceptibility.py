@@ -85,20 +85,44 @@ def shutterflash(src, peak, color="#ffffff"):
     return over(src, np.broadcast_to(hexrgb(color), src.shape), peak)
 
 
-def lightleak(src, l2_peak, intensity=1.0, palette="warm"):
-    """Worst-case stack: wash (soft-light) + l1 screen + l2 screen, all at full
-    gradient alpha, which is the bound at the coincident bloom."""
+def lightleak(src, l2_peak, intensity=1.0, palette="warm", blend="registered"):
+    """Worst-case stack at full gradient alpha, the bound at the coincident bloom.
+
+    blend="registered" IS THE ONE THAT MATTERS, AND IT IS THE DEFAULT.
+
+    CHATCUT STRIPS mixBlendMode AT REGISTRATION. Read back from the registered
+    asset on 2026-09-21: all three declarations gone, with the source comments
+    still saying "drawn in `screen`". That is a FIFTH auto-rewrite alongside the
+    props-fallback strip, the nested ({item}) injection, <img> -> <Img>, and the
+    trailing newline — and it is the only one that silently changes what the
+    component LOOKS LIKE rather than how it is written.
+
+    My first measurement modelled the DESIGN (screen + soft-light) and solved
+    0.71. The registered runtime composites NORMALLY, which is far heavier, and
+    the rendered still is the tiebreaker: it showed the picture all but gone,
+    which is what the normal model predicts (0.033 retained) and not what the
+    screen model predicts (0.069 at the same value, on a bar of 0.18).
+    The frame is evidence FOR the normal model. `blend="designed"` is kept only
+    so the two can be compared and the gap stays visible.
+    """
     pal = {"warm": {"primary": "#FF8A30", "secondary": "#FFB870", "highlight": "#FFE2B0"},
            "gold": {"primary": "#FFC93C", "secondary": "#FFE070", "highlight": "#FFF7C8"},
            "cool": {"primary": "#5BC8FF", "secondary": "#A8DCFF", "highlight": "#E0F2FF"},
            "magenta": {"primary": "#E64FA1", "secondary": "#F593C5", "highlight": "#FFD6EB"}}[palette]
     out = src
     sec = np.broadcast_to(hexrgb(pal["secondary"]), src.shape)
-    out = over(out, soft_light(out, sec), 0.30 * intensity)
     pri = np.broadcast_to(hexrgb(pal["primary"]), src.shape)
-    out = over(out, screen(out, pri), 0.85 * intensity)
     hi = np.broadcast_to(hexrgb(pal["highlight"]), src.shape)
-    out = over(out, screen(out, hi), l2_peak * intensity)
+    if blend == "designed":
+        out = over(out, soft_light(out, sec), 0.30 * intensity)
+        out = over(out, screen(out, pri), 0.85 * intensity)
+        out = over(out, screen(out, hi), l2_peak * intensity)
+    else:
+        # mixBlendMode is gone by the time this renders: every layer is a plain
+        # alpha composite of a flat-ish colour over the picture.
+        out = over(out, sec, 0.30 * intensity)
+        out = over(out, pri, 0.85 * intensity)
+        out = over(out, hi, l2_peak * intensity)
     return np.clip(out, 0, 1)
 
 

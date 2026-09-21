@@ -67,13 +67,13 @@ def main():
 
     # Re-solve the ceiling for LightLeak's l2 on this run.
     lo, hi = 0.0, 1.0
-    if M.detail_rms(M.lightleak(src, 0.0)) / base < bar:
+    if M.detail_rms(M.lightleak(src, 0.0, blend="designed")) / base < bar:
         leg("L1 ceiling_is_solvable", False, "even l2 off is under the bar")
         solved = 0.0
     else:
         for _ in range(40):
             mid = (lo + hi) / 2
-            if M.detail_rms(M.lightleak(src, mid)) / base >= bar:
+            if M.detail_rms(M.lightleak(src, mid, blend="designed")) / base >= bar:
                 lo = mid
             else:
                 hi = mid
@@ -100,6 +100,45 @@ def main():
     leg("L2 shutterflash_peak_not_raised", bool(found) and max(found) <= 0.82,
         "registered peak(s) %s" % found)
 
+    # L3b THE BINDING CONSTRAINT IS `intensity`, MEASURED ON THE REGISTERED
+    # BLEND. ChatCut strips mixBlendMode, so the layers composite normally and
+    # the whole stack is far heavier than the source reads: even at l2 = 0, l1
+    # and the wash alone fall under the bar. Scaling all three via intensity is
+    # the only dial that clears it.
+    import json as _json
+    props2 = _json.load(open(os.path.join(HERE, "port", "transition_properties.json")))
+    ints = []
+
+    def walk2(o):
+        if isinstance(o, dict):
+            if o.get("key") == "intensity":
+                ints.append(float(o.get("defaultValue")))
+            for v in o.values():
+                walk2(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk2(v)
+    walk2(props2)
+    ilo, ihi = 0.0, 1.0
+    for _ in range(40):
+        imid = (ilo + ihi) / 2
+        if M.detail_rms(M.lightleak(src, 0.71, intensity=imid)) / base >= bar:
+            ilo = imid
+        else:
+            ihi = imid
+    leg("L3b intensity_under_registered_ceiling",
+        bool(ints) and max(ints) <= ilo + 1e-3,
+        "registered intensity %s vs ceiling %.3f" % (ints, ilo))
+
+    # L3c THE TWO BLEND MODELS MUST STILL DISAGREE. If they ever agree, either
+    # the strip stopped happening or the model lost the distinction — and the
+    # gate would be measuring the design while the runtime does something else,
+    # which is the whole defect this section exists for.
+    des = M.detail_rms(M.lightleak(src, 1.0, blend="designed")) / base
+    reg = M.detail_rms(M.lightleak(src, 1.0, blend="registered")) / base
+    leg("L3c blend_models_separate", des > reg * 1.5,
+        "designed %.4f vs registered %.4f" % (des, reg))
+
     # L3 LightLeak's shipped l2 constant is at or under the solved ceiling.
     body = open(os.path.join(BODIES, "LightLeakOverlay.jsx"), encoding="utf-8").read()
     m = re.search(r"l2Opacity\s*=\s*interpolate\([^)]*?\[\s*0\s*,\s*([\d.]+)\s*\*\s*intensity", body)
@@ -112,11 +151,11 @@ def main():
     # two numbers; this one asks the question directly on pixels, so a mistake
     # in the solve cannot pass both.
     if shipped is not None:
-        got = M.detail_rms(M.lightleak(src, shipped)) / base
+        got = M.detail_rms(M.lightleak(src, shipped, blend="designed")) / base
         leg("L4 shipped_value_clears_the_bar", got >= bar,
             "retained %.4f vs bar %.4f" % (got, bar))
 
-    print("%d/%d legs ok" % (5 - len(FAILS), 5))
+    print("%d/%d legs ok" % (7 - len(FAILS), 7))
     if FAILS:
         print("FAILED: %s" % ", ".join(FAILS))
     return 1 if FAILS else 0

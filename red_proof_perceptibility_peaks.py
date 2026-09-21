@@ -43,6 +43,21 @@ MUTATIONS = [
      '   "defaultValue": 0.95',
      "L2 shutterflash_peak_not_raised",
      lambda s: '"key": "peak"' in s),
+    # THE REGISTERED-BLEND CEILING. Restoring intensity 1.0 is what actually
+    # shipped, and under the stripped blend it retains 0.0442 against a 0.1822
+    # bar. This is the leg that would have caught the component being three
+    # times heavier than its own source comments claimed.
+    ("intensity_back_to_full", "port/transition_properties.json",
+     '"defaultValue": 0.65', '"defaultValue": 1.0',
+     "L3b intensity_under_registered_ceiling",
+     lambda s: '"defaultValue": 0.65' in s),
+    # THE TWO BLEND MODELS COLLAPSE INTO ONE. If `registered` silently starts
+    # modelling the design, every number above goes back to describing code
+    # that does not run — the exact failure the read-back exposed.
+    ("registered_blend_models_the_design", "measure_perceptibility.py",
+     '    if blend == "designed":', '    if blend != "__never__":',
+     "L3c blend_models_separate",
+     lambda s: 'if blend == "designed":' in s),
     # THE INSTRUMENT ITSELF GOES BLIND. If the detail metric stops measuring
     # detail, every composite scores the same and the whole gate is decorative.
     # L0 separates a known-good from a known-rejected value for exactly this.
