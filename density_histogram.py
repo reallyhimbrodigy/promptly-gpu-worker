@@ -18,6 +18,15 @@ names a model assigned — not mechanical counts. The RUN side is COUNTED from t
 items on the timeline. Comparing them is legitimate and the seam is real, so the
 seam is named in the output rather than in a footnote nobody reads.
 
+A RUN WHOSE ZEROS ARE A REFUSAL IS NOT A MEASUREMENT OF THE EDITOR (Builder 1,
+2026-09-21). Three of his last runs placed 7, 0 and 0 graphics, and BOTH zeros
+were his own instruments refusing correct work — a face check judging a 720-tall
+frame in 1920 space, then a geometry refusal phrased in coordinates the agent
+cannot write. A histogram over those reports the refusal rate and calls it the
+card rate. `refusal_suspect` flags a record whose families are empty while the
+run carries an unsatisfied refusal, so such a run is reported SEPARATELY or not
+at all — never averaged in.
+
 ONE DENOMINATOR CAVEAT, BECAUSE IT DECIDES EVERY NUMBER HERE. The reference
 side divides by the SUM OF BEAT DURATIONS (861.6s across 294 beats, 10 videos),
 not by the videos' wall time. Those are the same number only if the beats tile
@@ -104,10 +113,27 @@ def reference_rates(path="reference_index.json"):
     }
 
 
+# THE STATE THE WRITER ACTUALLY EMITS FOR A DELIVERED EXPORT.
+# It is MEASURED. The first version of this reader tested for "OK", which the
+# writer has never emitted — `grep '"state": "OK"' chatcut_job_app.py` returns
+# nothing — so a PERFECT export would have read ABSENT.
+#
+# THIS IS WORSE THAN THE end_s BUG ONE FIELD OVER, AND BUILDER 1 NAMED WHY:
+# `end_s` is absent on every record, so it fails the first time anyone looks.
+# `state` EXISTS and holds a plausible value, so the comparison simply never
+# matches and a withheld export and a delivered one both read ABSENT — which is
+# precisely the distinction this instrument exists to make. A wrong constant that
+# is never equal is silent; a missing field is loud.
+EXPORT_DELIVERED = "MEASURED"
+
+
 def _items_from_record(rec):
     """-> (items, why) — the placed items, or None with the reason there are none."""
     ex = rec.get("export") or {}
-    if str(ex.get("state") or "").upper() != "OK":
+    st = str(ex.get("state") or "")
+    if st.upper() != EXPORT_DELIVERED:
+        # NAME THE STATE SEEN. A state this reader does not know about must be
+        # visible in the output, not folded into the same ABSENT as a refusal.
         return None, "export state is %s (%s)" % (ex.get("state"), ex.get("why"))
     tl = rec.get("timeline_sample") or {}
     items = tl.get("items")
@@ -196,6 +222,34 @@ def run_rates(record_path):
             "unmapped_types": sorted(other.items(), key=lambda kv: -kv[1]),
             "record": os.path.basename(record_path),
             "provenance": "COUNTED from the items on the exported timeline"}
+
+
+def refusal_suspect(record_path):
+    """-> {state, suspect, why} — is this run's emptiness the editor's or an instrument's?
+
+    A zero that came from a gate refusing correct work is not a density
+    measurement, and it enters the histogram looking exactly like restraint.
+    """
+    if not os.path.isfile(record_path):
+        return {"state": "ABSENT", "suspect": None, "why": "no record"}
+    try:
+        rec = json.load(open(record_path, encoding="utf-8"))
+    except Exception as e:                                    # noqa: BLE001
+        return {"state": "FAILED", "suspect": None, "why": "unreadable: %s" % e}
+    marks = []
+    wh = rec.get("withheld") or {}
+    for k in ("unbuilt", "could_not_remove"):
+        if wh.get(k):
+            marks.append("%s=%d" % (k, len(wh[k])))
+    for f in (rec.get("gate_findings") or []):
+        if str(f.get("verdict") or "").upper() in ("FAIL", "REFUSED"):
+            marks.append("gate:%s" % f.get("check"))
+    ee = rec.get("empty_edit") or {}
+    if ee.get("state") and str(ee.get("state")).upper() not in ("ABSENT", "MEASURED"):
+        marks.append("empty_edit:%s" % ee.get("state"))
+    return {"state": "MEASURED", "suspect": bool(marks),
+            "why": ("; ".join(marks[:6]) if marks
+                    else "no unsatisfied refusal on the record")}
 
 
 def compare(record_path, reference="reference_index.json"):

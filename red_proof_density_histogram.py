@@ -36,7 +36,7 @@ def it(t, f0=0, f1=0, s0=0, s1=0):
         d["sourceRange"] = {"start": s0, "end": s1}
     return d
 # 50.0s at 30fps = 1500 frames, stated the way a real record states it
-p = rec("ok.json", {"export": {"state": "OK"}, "timeline_sample": {"items": [
+p = rec("ok.json", {"export": {"state": "MEASURED"}, "timeline_sample": {"items": [
     it("video", 0, 1500, 0, 50_000_000), it("video"),
     it("caption"), it("motion-graphic"), it("audio"), it("effect")]}})
 r = D.run_rates(p)
@@ -45,21 +45,21 @@ leg("  ...two cuts over 50s is 1.0 per 25s", r["per_25s"]["cut"], 1.0)
 leg("  ...and a motion-graphic counts as a card", r["counts"]["card"], 1)
 
 # 3. ZERO IS A MEASUREMENT WHEN THE TIMELINE WAS READ. This is the other half.
-p = rec("nozoom.json", {"export": {"state": "OK"}, "timeline_sample": {
+p = rec("nozoom.json", {"export": {"state": "MEASURED"}, "timeline_sample": {
         "items": [it("video", 0, 750, 0, 25_000_000)]}})
 r = D.run_rates(p)
 leg("a family with no items on a READ timeline is 0.0 and MEASURED",
     (r["state"], r["per_25s"]["zoom"]), ("MEASURED", 0.0))
 
 # 4. NO DURATION MEANS NO NORMALISATION. Not a divide, not a zero.
-p = rec("nodur.json", {"export": {"state": "OK"}, "timeline_sample": {
+p = rec("nodur.json", {"export": {"state": "MEASURED"}, "timeline_sample": {
         "items": [{"itemType": "video"}]}})
 leg("items with no frame/source ranges are ABSENT — fps is never defaulted",
     D.run_rates(p)["state"], "ABSENT")
 
 # 4b. TWO RATES IN ONE TIMELINE IS FAILED, not an average. A divisor that is two
 #     numbers is not a divisor, and averaging would publish a duration nothing has.
-p = rec("mixedfps.json", {"export": {"state": "OK"}, "timeline_sample": {"items": [
+p = rec("mixedfps.json", {"export": {"state": "MEASURED"}, "timeline_sample": {"items": [
         it("video", 0, 750, 0, 25_000_000), it("video", 750, 1500, 0, 12_500_000)]}})
 leg("items implying two frame rates are FAILED, never averaged",
     D.run_rates(p)["state"], "FAILED")
@@ -91,6 +91,25 @@ leg("  ...with coverage under 100, stated rather than implied", ref["coverage"] 
 # 8. A REFERENCE WITH NO BEATS IS ABSENT, not a table of zeros.
 p = rec("emptyref.json", {"beats": [], "distinct_videos": 0})
 leg("a reference with no beats is ABSENT", D.reference_rates(p)["state"], "ABSENT")
+
+# 9. THE ACCEPTED STATE MUST BE ONE THE WRITER CAN ACTUALLY EMIT.
+#    This is the leg that would have caught the "OK" bug on the day it was
+#    written. A reader comparing against a constant the producer never emits is
+#    silent, not loud — it just never matches.
+_writer = "/Users/zaclibman/promptly-gpu-worker/promptly-gpu-worker/.worktrees/lane-b2/chatcut_job_app.py"
+if os.path.isfile(_writer):
+    _src = open(_writer, encoding="utf-8").read()
+    leg("the export state this reader accepts is one the writer emits",
+        ('"state": "%s"' % D.EXPORT_DELIVERED) in _src or
+        ('"state": "%s"' % D.EXPORT_DELIVERED).replace(" ", "") in _src.replace(" ", ""), True)
+    leg("  ...and the state it previously accepted is NOT one the writer emits",
+        '"state": "OK"' in _src, False)
+
+# 10. AN UNKNOWN EXPORT STATE IS ABSENT AND NAMES ITSELF, never a silent skip.
+p = rec("weird.json", {"export": {"state": "SOMETHING_NEW", "why": "n/a"}})
+r = D.run_rates(p)
+leg("an unrecognised export state is ABSENT and names the state it saw",
+    (r["state"], "SOMETHING_NEW" in r["why"]), ("ABSENT", True))
 
 print("\n%s" % ("all legs green" if not fail else "%d LEG(S) FAILED" % fail))
 sys.exit(1 if fail else 0)
