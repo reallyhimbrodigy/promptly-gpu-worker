@@ -116,6 +116,54 @@ def _items_from_record(rec):
     return items, None
 
 
+def _duration_s(items):
+    """-> (seconds, None) or (None, (STATE, why)).
+
+    THE RECORD DOES NOT CARRY THE TIMELINE FPS, and the reader's first version
+    read a `timeline_sample.end_s` that does not exist — so it would have
+    returned ABSENT on every run, including a perfectly good export, and the
+    failure would have looked exactly like "the run placed nothing". Caught by
+    reading a real record before trusting the reader, not after.
+
+    FPS IS DERIVABLE AND IS NEVER DEFAULTED. An item carries `timelineRange` in
+    FRAMES and `sourceRange` in MICROSECONDS, so frames / seconds is the rate:
+    2032 / 72.571429 = 28.0 on the kolkata fixture, which is its real rate and
+    not the 30 that a default would have supplied. Defaulting it is precisely
+    the canvas-never-followed-the-source defect, and a rate is the one number
+    this instrument divides by.
+
+    ITEMS THAT DISAGREE ARE FAILED, NOT AVERAGED. Two rates in one timeline mean
+    a speed change or a mixed source, and either way the divisor is not a single
+    number — picking one would publish a duration nothing has.
+    """
+    rates, last = [], 0
+    for i in items:
+        tr, sr = i.get("timelineRange") or {}, i.get("sourceRange") or {}
+        f0, f1 = tr.get("fromFrame"), tr.get("toFrame")
+        s0, s1 = sr.get("start"), sr.get("end")
+        if f1 is not None:
+            last = max(last, int(f1))
+        if None in (f0, f1, s0, s1):
+            continue
+        secs = (int(s1) - int(s0)) / 1e6
+        frames = int(f1) - int(f0)
+        if secs > 0 and frames > 0:
+            rates.append(frames / secs)
+    if not rates:
+        return None, ("ABSENT", "no item carries both a frame range and a source range, "
+                                "so the timeline fps cannot be derived and nothing may be "
+                                "divided by a guess")
+    lo, hi = min(rates), max(rates)
+    if hi - lo > 0.5:
+        return None, ("FAILED", "items imply %d different frame rates (%.2f..%.2f) — a speed "
+                                "change or a mixed source, and there is no single divisor"
+                                % (len(set(round(r, 2) for r in rates)), lo, hi))
+    fps = sum(rates) / len(rates)
+    if last <= 0:
+        return None, ("ABSENT", "no item carries a timeline end frame")
+    return last / fps, None
+
+
 def run_rates(record_path):
     """-> {state, per_25s, counts, seconds, why} for one run record."""
     if not os.path.isfile(record_path):
@@ -129,9 +177,9 @@ def run_rates(record_path):
         # NOT ZEROS. A run that was withheld, or whose timeline was not read,
         # has NO rate — it does not have a rate of nothing.
         return {"state": "ABSENT", "why": why, "record": os.path.basename(record_path)}
-    end = rec.get("timeline_sample", {}).get("end_s")
-    if not end:
-        return {"state": "ABSENT", "why": "the record carries no timeline duration to normalise by"}
+    end, why = _duration_s(items)
+    if end is None:
+        return {"state": why[0], "why": why[1], "record": os.path.basename(record_path)}
     counts = {f: 0 for f in FAMILIES}
     other = {}
     for i in items:
