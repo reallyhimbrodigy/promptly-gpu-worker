@@ -80,5 +80,48 @@ leg("  ...and the CLI exits 0 on an injection-only difference", String(cliCode),
 leg("  ...and attributes it to the injection", `${parsed.explained && parsed.explained.injection}`, "1");
 try { execFileSync("rm", ["-f", fakeBuild]); } catch {}
 
-console.log(fail ? `\n${fail} LEG(S) FAILED` : "\nall 11 legs green");
+// ---- 10. THE TRAILING NEWLINE, AND THE EXPLICIT SOURCE PATH. ---------------
+// MEASURED 2026-09-21: ChatCut stores the registered code WITHOUT a terminal
+// newline. NamePlate's source ends `};\n` (366 lines), the read-back ends `};`
+// (365), and that one byte made an injection-only component read DIVERGED with
+// 1 unexplained. It would have done so for every component, forever, on a
+// difference nobody can fix from this side — the exact shape this file's header
+// warns about. classify() now drops ONE trailing newline per side.
+//
+// THESE LEGS EXIST BECAUSE THAT NORMALISATION CAN HIDE A REAL EDIT. A trim()
+// would have swallowed a truncated body; the blank-line leg is what pins it to
+// exactly one newline, and the truncation leg is what proves the end of a file
+// is still compared at all. The first three are RED by construction; the
+// green one is there so a harness that silently stopped classifying would not
+// read as three passes.
+const nlSrc = cliSrc + "\n";                 // a source file as it sits on disk
+const nlReg = cliReg;                        // ...and as ChatCut stores it back
+leg("a trailing newline alone does NOT diverge", classify(nlSrc, nlReg).verdict, "STRIPPED");
+leg("  ...and it is still attributed to the injection",
+    `${classify(nlSrc, nlReg).explained.injection}`, "1");
+leg("  ...with nothing left unexplained",
+    `${classify(nlSrc, nlReg).unexplained}`, "0");
+leg("a SECOND trailing newline DOES diverge (one is normalised, not trimmed)",
+    classify(nlSrc, nlReg + "\n\n").verdict, "DIVERGED");
+leg("a truncated tail still diverges (the normalisation is not a trim)",
+    classify(nlSrc, nlReg.slice(0, nlReg.lastIndexOf("return"))).verdict, "DIVERGED");
+
+// The CLI's optional third argument, which is how the ported_mg bodies are
+// diffed: their contract-shaped source lives in chatcut_registry.json, not in
+// port/build/. Driven end to end, because legs that call classify() directly
+// cannot see the CLI's own file reads — the lesson leg 9 exists for.
+const srcFile = pjoin(dir, "src.jsx");
+writeFileSync(srcFile, HEADER + cliSrc + "\n");
+let cli2 = "", cli2Code = 0;
+try {
+  cli2 = execFileSync("node", ["port/registered_diff.mjs", "__NoSuchBuildFile",
+                               pjoin(dir, "reg.jsx"), srcFile], { encoding: "utf8" });
+} catch (e) { cli2 = (e.stdout || "") + (e.stderr || ""); cli2Code = e.status; }
+const p2 = (() => { try { return JSON.parse(cli2); } catch { return {}; } })();
+leg("the CLI accepts an explicit source path", p2.verdict, "STRIPPED");
+leg("  ...exits 0 on it", String(cli2Code), "0");
+leg("  ...and did NOT fall back to port/build (that name has no file there)",
+    `${p2.unexplained}`, "0");
+
+console.log(fail ? `\n${fail} LEG(S) FAILED` : "\nall 19 legs green");
 process.exit(fail ? 1 : 0);

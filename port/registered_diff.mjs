@@ -173,6 +173,20 @@ export function componentOnly(text) {
 }
 
 export function classify(source, registered) {
+  // THE TERMINAL NEWLINE IS NOT CODE, AND CHATCUT STRIPS IT. Measured
+  // 2026-09-21 on NamePlate: source ends `};\n` (366 lines), the registered
+  // read-back ends `};` (365). That one byte made an otherwise
+  // injection-only component read DIVERGED with 1 unexplained — and it would
+  // have done so for EVERY component, forever, on a difference nobody can fix
+  // from this side. This file's own header says a gate that stays red on code
+  // nobody can fix is a gate that gets switched off, so the normalisation is
+  // here rather than in each caller.
+  //
+  // IT NORMALISES EXACTLY ONE TRAILING NEWLINE PER SIDE — not `trim()`, not a
+  // whitespace-insensitive compare. Anything wider would start absorbing real
+  // edits at the end of a file, which is where a truncated body would show up.
+  source = source.replace(/\n$/, "");
+  registered = registered.replace(/\n$/, "");
   if (source === registered) {
     return { verdict: "IDENTICAL", differences: 0, sha: sha(source), detail: [] };
   }
@@ -226,12 +240,20 @@ export function classify(source, registered) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const [name, regPath] = process.argv.slice(2);
+  const [name, regPath, srcPath] = process.argv.slice(2);
   if (!name || !regPath) {
-    console.error("usage: node port/registered_diff.mjs <Name> <registered-code-file>");
+    console.error("usage: node port/registered_diff.mjs <Name> <registered-code-file> [source-file]");
     process.exit(2);
   }
-  const source = componentOnly(readFileSync(join(ROOT, "port", "build", name + ".jsx"), "utf8"));
+  // THE SOURCE SIDE IS EXPLICIT FOR THE ported_mg SET. The emitter's output
+  // lives at port/build/<Name>.jsx and that stays the default, but the
+  // contract-shaped bodies for ported_mg live in chatcut_registry.json and are
+  // materialised to a path by the caller. An optional argument beats teaching
+  // this file where a second registry lives: the differ's job is to classify
+  // two strings, and every extra place it knows how to look is a place it can
+  // look at the WRONG one.
+  const srcFile = srcPath || join(ROOT, "port", "build", name + ".jsx");
+  const source = componentOnly(readFileSync(srcFile, "utf8"));
   const registered = readFileSync(regPath, "utf8");
   const r = classify(source, registered);
   console.log(JSON.stringify({ name, ...r }, null, 1));
