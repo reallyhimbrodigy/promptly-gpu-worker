@@ -1,0 +1,34 @@
+{
+  "_what": "LightLeakOverlay l2Opacity swept at Zac's four values, 2026-09-21, picked from a frame",
+  "_bar": "ShutterFlashOverlay at its accepted 0.82 = 0.1831 retained detail",
+  "_the_premise_changed": "Zac asked for the sweep on the AMBER SCREEN composite. ChatCut STRIPS mixBlendMode at registration — confirmed by reading the registered asset back — so screen is not what runs. Both are measured; the registered (normal) one is the one that ships.",
+  "_the_finding": "AT THE SHIPPED intensity 1.0 NOTHING IN THE SWEEP PASSES. 0.60 retains 0.056, 0.90 retains 0.041, and the contact sheet is a flat amber field with the speaker a ghost at every value. The sweep has no answer at that intensity: l2 was never the term holding the component up, l1 at 0.85 plus the wash were.",
+  "_picked": 0.7,
+  "_picked_because": "at intensity 0.65 the frames separate: the face keeps its modelling at 0.60 and 0.70, and by 0.82 it flattens into something that reads as a blown exposure rather than a leak. 0.70 is the largest value the PICTURE supports. The arithmetic ceiling of 0.711 agrees with the frame instead of being argued against it.",
+  "sweep": {
+    "registered_intensity_1.0_AS_SHIPPED": {
+      "0.60": 0.056,
+      "0.70": 0.0486,
+      "0.82": 0.0411,
+      "0.90": 0.041
+    },
+    "registered_intensity_0.65": {
+      "0.60": 0.2221,
+      "0.70": 0.1992,
+      "0.82": 0.1716,
+      "0.90": 0.1533
+    },
+    "designed_screen_intensity_1.0": {
+      "0.60": 0.2284,
+      "0.70": 0.1882,
+      "0.82": 0.1402,
+      "0.90": 0.1091
+    }
+  },
+  "contact_sheets": [
+    "measured/sweep_registered_i1.jpg",
+    "measured/sweep_registered_i065.jpg",
+    "measured/sweep_designed_i1.jpg"
+  ],
+  "_verdict": "ON THE MENU ONLY AFTER A RENDER. The body changed, so its sha invalidates every still it has."
+}

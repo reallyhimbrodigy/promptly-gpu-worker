@@ -122,7 +122,7 @@ def main():
     ilo, ihi = 0.0, 1.0
     for _ in range(40):
         imid = (ilo + ihi) / 2
-        if M.detail_rms(M.lightleak(src, 0.71, intensity=imid)) / base >= bar:
+        if M.detail_rms(M.lightleak(src, 0.70, intensity=imid)) / base >= bar:
             ilo = imid
         else:
             ihi = imid

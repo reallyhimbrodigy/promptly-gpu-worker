@@ -17,15 +17,15 @@ MUTATIONS = [
     # WHAT ACTUALLY SHIPPED: fully opaque at the bloom, retaining 0.0719 —
     # worse than the 0.95 that was rejected as a blown exposure in June.
     ("lightleak_back_to_fully_opaque", "port/bodies/LightLeakOverlay.jsx",
-     "[0, 0.71 * intensity, 0]", "[0, 1.0 * intensity, 0]",
+     "[0, 0.70 * intensity, 0]", "[0, 1.0 * intensity, 0]",
      "L3 lightleak_l2_under_ceiling",
-     lambda s: "0.71 * intensity" in s),
+     lambda s: "0.70 * intensity" in s),
     # THE BORROW. It looks conservative and is not: 0.1402 against a 0.1822 bar.
     # This is the leg that makes "carried from another component" insufficient.
     ("lightleak_back_to_the_borrow", "port/bodies/LightLeakOverlay.jsx",
-     "[0, 0.71 * intensity, 0]", "[0, 0.82 * intensity, 0]",
+     "[0, 0.70 * intensity, 0]", "[0, 0.82 * intensity, 0]",
      "L4 shipped_value_clears_the_bar",
-     lambda s: "0.71 * intensity" in s),
+     lambda s: "0.70 * intensity" in s),
     # The label on ShutterFlash's property says "do not raise". A label is not
     # a gate; this is.
     # ANCHORED ON THE WHOLE BLOCK, NOT ON THE VALUE. `"defaultValue": 0.82`

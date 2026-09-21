@@ -108,17 +108,32 @@ const Component = ({ item }) => {
   //                                        threshold from another code path is
   //                                        a guess wearing a measurement's
   //                                        clothes.
-  //     l2 peak 0.71  retained 0.1858   <- lands above the bar. Solved 0.712.
+  //     l2 peak 0.70  retained 0.1882   <- PICKED, and picked from a FRAME.
   //
   // l1 and the wash alone retain 0.4730, so the defect really is l2 and not the
   // stack — which is what makes changing this one number the whole fix.
   //
-  // THE 0.71 ABOVE WAS MEASURED ON THE DESIGNED BLEND AND IS NOT THE BINDING
+  // THE 0.70 ABOVE WAS MEASURED ON THE DESIGNED BLEND AND IS NOT THE BINDING
   // CONSTRAINT. Against the REGISTERED (stripped) composite the whole stack is
   // heavier and l2 stops being the term that matters: even at l2 = 0, l1 at
   // 0.85 plus the wash retain only 0.1088 against a 0.1822 bar. The dial that
   // fixes it is `intensity`, which scales all three, and its registered default
-  // is now 0.65 (ceiling 0.670, measured). The rendered still is what settled
+  // is now 0.65 (ceiling 0.670, measured). SWEPT AND LOOKED AT, 2026-09-21, at
+  // 0.60 / 0.70 / 0.82 / 0.90 on both composites:
+  //
+  //   AS SHIPPED (intensity 1.0, stripped blend) NOTHING IN THE SWEEP PASSES —
+  //   0.60 retains 0.056 and 0.90 retains 0.041, and the contact sheet shows a
+  //   flat amber field with the speaker reduced to a ghost at every one of the
+  //   four. l2 was never the term holding this component up.
+  //
+  //   AT intensity 0.65 the sweep separates: 0.60 -> 0.222 PASS, 0.70 -> 0.199
+  //   PASS, 0.82 -> 0.172 fail, 0.90 -> 0.153 fail. In the frames the face
+  //   keeps its modelling at 0.60 and 0.70; by 0.82 it flattens and starts
+  //   reading as a blown exposure rather than a leak. 0.70 is the largest value
+  //   the picture supports, and the arithmetic ceiling (0.711) agrees with the
+  //   frame rather than being argued against it.
+  //
+  // The rendered still is what settled
   // which model is real: it showed the picture all but gone, which the normal
   // model predicts (0.033) and the screen model does not (0.069).
   //
@@ -128,7 +143,7 @@ const Component = ({ item }) => {
   // bound, so this is conservative by construction. Ladder in
   // measured/PERCEPTIBILITY_2026-09-21.json; gated by
   // smoke_perceptibility_peaks.py so it cannot drift back up.
-  const l2Opacity = interpolate(progress, [0.1, 0.55, 0.9], [0, 0.71 * intensity, 0], clamp);
+  const l2Opacity = interpolate(progress, [0.1, 0.55, 0.9], [0, 0.70 * intensity, 0], clamp);
   const washOpacity = interpolate(progress, [0.2, 0.5, 0.8], [0, 0.3 * intensity, 0], clamp);
 
   return (
