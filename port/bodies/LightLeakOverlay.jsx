@@ -75,7 +75,26 @@ const Component = ({ item }) => {
   const l1Opacity = interpolate(progress, [0, 0.5, 1], [0, 0.85 * intensity, 0], clamp);
   const l2X = interpolate(progress, [0, 1], [path.l2[0], path.l2[2]], clamp);
   const l2Y = interpolate(progress, [0, 1], [path.l2[1], path.l2[3]], clamp);
-  const l2Opacity = interpolate(progress, [0.1, 0.55, 0.9], [0, 1.0 * intensity, 0], clamp);
+  // THE PICTURE MUST STAY PERCEPTIBLE THROUGH THE LEAK. This peaked at
+  // 1.0 * intensity with intensity registering defaultValue 1.0, i.e. FULLY
+  // OPAQUE at the midpoint, and the frame at f1320 shows exactly that: an amber
+  // wash with a central bloom, and the picture underneath all but gone. That
+  // reads as a blown exposure rather than an intentional leak.
+  //
+  // It is the same defect ShutterFlashOverlay measured and fixed on 2026-06-15,
+  // where 0.95 made the speaker a near-invisible silhouette and 0.82 kept them
+  // perceptible THROUGH the flash — and this sat ABOVE the value already judged
+  // too strong.
+  //
+  // 0.82 HERE IS BORROWED, NOT MEASURED, AND IS LABELLED AS A GUESS. It was
+  // measured on a WHITE wash composited normally; this is an AMBER glow in
+  // `screen`, which is a different code path, and a threshold carried across
+  // one is a guess wearing a measurement's clothes. What makes the borrow safe
+  // to land is that it cannot be believed: editing this body changes its sha,
+  // which invalidates its still, which drops it off the menu until somebody
+  // looks at a new frame. The re-render decides the number; this only stops it
+  // shipping at fully opaque in the meantime.
+  const l2Opacity = interpolate(progress, [0.1, 0.55, 0.9], [0, 0.82 * intensity, 0], clamp);
   const washOpacity = interpolate(progress, [0.2, 0.5, 0.8], [0, 0.3 * intensity, 0], clamp);
 
   return (

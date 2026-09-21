@@ -14,8 +14,10 @@
       "bytes": 42674,
       "sha256_16": "107d5757bdfe2ab6",
       "why_this_frame": "mid-hold, the spring settled at peak scale",
-      "state": "FILE_ONLY",
-      "looked_at": null
+      "state": "DRAWS",
+      "looked_at": "DID draw — a tight punch-in on the face, visibly reframed from the source. Full-bleed, so this is the pre-contain body.",
+      "looked_at_on": "2026-09-21",
+      "body_sha256_16": "8724940d4147ac19"
     },
     "FocusWindow": {
       "family": "zoom",
@@ -25,8 +27,10 @@
       "bytes": 47282,
       "sha256_16": "c8086218606a628a",
       "why_this_frame": "window open over the dimmed magnified background",
-      "state": "FILE_ONLY",
-      "looked_at": null
+      "state": "DRAWS",
+      "looked_at": "DID draw — sharp inset window over a magnified, softened copy of the same frame, which is the loupe behaving correctly. But the outer plate is FULL-BLEED, i.e. this photographed objectFit cover, and I switched that plate to contain afterwards.",
+      "looked_at_on": "2026-09-21",
+      "body_sha256_16": "95fb16b09504bf90"
     },
     "LetterboxPush": {
       "family": "zoom",
@@ -36,8 +40,10 @@
       "bytes": 63557,
       "sha256_16": "6b8f758b12760742",
       "why_this_frame": "bars fully in, plate at peak push",
-      "state": "FILE_ONLY",
-      "looked_at": null
+      "state": "DRAWS",
+      "looked_at": "DID draw — grey letterbox bars top and bottom over a pushed-in frame. Photographed before the contain switch; the outer plate has since been re-authored.",
+      "looked_at_on": "2026-09-21",
+      "body_sha256_16": "a3a2095bb7a08280"
     },
     "DepthPull": {
       "family": "zoom",
@@ -47,8 +53,10 @@
       "bytes": 52960,
       "sha256_16": "6d136024c4c0a2af",
       "why_this_frame": "mid-hold, grade and edge blur at full",
-      "state": "FILE_ONLY",
-      "looked_at": null
+      "state": "UNDECIDABLE",
+      "looked_at": "full-bleed and soft throughout. Plausibly the depth pull and plausibly just a soft source frame — I could not separate them from one frame, so this is undecided on its own merits, independently of the body having moved since.",
+      "looked_at_on": "2026-09-21",
+      "body_sha256_16": "bea2ada398b7f679"
     },
     "DipToBlack": {
       "family": "transition",
@@ -58,8 +66,10 @@
       "bytes": 8989,
       "sha256_16": "32137aad983f35b1",
       "why_this_frame": "the seam itself — full black is the mechanism",
-      "state": "FILE_ONLY",
-      "looked_at": null
+      "state": "UNDECIDABLE",
+      "looked_at": "PURE BLACK, edge to edge. A dip to black AT ITS MIDPOINT is black, so the correct output and a completely failed render are the same image. One frame cannot decide this one — it needs the shoulders, a frame either side showing the ramp.",
+      "looked_at_on": "2026-09-21",
+      "body_sha256_16": "58c67927f5b171f2"
     },
     "SlideOver": {
       "family": "transition",
@@ -69,8 +79,10 @@
       "bytes": 42789,
       "sha256_16": "d2052c9a2401c401",
       "why_this_frame": "B's edge and drop shadow crossing the frame",
-      "state": "FILE_ONLY",
-      "looked_at": null
+      "state": "DEFECT",
+      "looked_at": "the plate is displaced right, so the slide IS happening — but the uncovered region on the left is BLACK, not the outgoing clip. A transition carries both sides of the cut; sliding over nothing is a missing B-side, not a slide.",
+      "looked_at_on": "2026-09-21",
+      "body_sha256_16": "0b07ed5cba888c73"
     },
     "CardSwipe": {
       "family": "transition",
@@ -80,8 +92,10 @@
       "bytes": 49703,
       "sha256_16": "011a063b0615cb6f",
       "why_this_frame": "A thrown off, B risen underneath",
-      "state": "FILE_ONLY",
-      "looked_at": null
+      "state": "PASSTHROUGH_SUSPECT",
+      "looked_at": "one clip, contained, letterboxed, with no card and no swipe edge anywhere in frame. Either the sampled frame sits outside the transition window or nothing was applied. Indistinguishable from a passthrough at this frame — needs the peak frame, not f360.",
+      "looked_at_on": "2026-09-21",
+      "body_sha256_16": "263d3db47a0f9b01"
     },
     "ZoomThrough": {
       "family": "transition",
@@ -91,8 +105,10 @@
       "bytes": 57420,
       "sha256_16": "888c4eac2275161c",
       "why_this_frame": "A magnifying out while B rises — early, where both read",
-      "state": "FILE_ONLY",
-      "looked_at": null
+      "state": "PASSTHROUGH_SUSPECT",
+      "looked_at": "a plain contained street frame with no scale artefact and no second layer. Same reading as CardSwipe: at f475 this is indistinguishable from a passthrough.",
+      "looked_at_on": "2026-09-21",
+      "body_sha256_16": "74b89e8378d824bf"
     },
     "StepPush": {
       "family": "transition",
@@ -103,7 +119,8 @@
       "sha256_16": "4b92f70a66a1fe0a",
       "why_this_frame": "A and B sharing the frame mid-push",
       "state": "FILE_ONLY",
-      "looked_at": null
+      "looked_at": null,
+      "body_sha256_16": "c19c868f560cbc02"
     },
     "CrossfadeZoom": {
       "family": "transition",
@@ -114,7 +131,8 @@
       "sha256_16": "b5d139a89075e46d",
       "why_this_frame": "both plates superimposed mid-dissolve",
       "state": "FILE_ONLY",
-      "looked_at": null
+      "looked_at": null,
+      "body_sha256_16": "a7ba191818977496"
     },
     "Stack": {
       "family": "transition",
@@ -125,7 +143,8 @@
       "sha256_16": "5e8c41932b0c6ede",
       "why_this_frame": "progress 0 — the plate alone, before the switcher furniture",
       "state": "FILE_ONLY",
-      "looked_at": null
+      "looked_at": null,
+      "body_sha256_16": "e6f5366ec6f5162f"
     },
     "ShutterFlash": {
       "family": "transition",
@@ -136,7 +155,8 @@
       "sha256_16": "24dd80052b0ee824",
       "why_this_frame": "the shutter part-closed, where the mechanism is legible",
       "state": "FILE_ONLY",
-      "looked_at": null
+      "looked_at": null,
+      "body_sha256_16": "e553df30d0fc0735"
     },
     "FilmStrip": {
       "family": "transition",
@@ -147,7 +167,8 @@
       "sha256_16": "c44b348101300445",
       "why_this_frame": "tiles on the strip, grid and ghosts around them",
       "state": "FILE_ONLY",
-      "looked_at": null
+      "looked_at": null,
+      "body_sha256_16": "cbf2bc85fcfd1620"
     },
     "ShutterFlashOverlay": {
       "family": "tight-cut overlay",
@@ -157,8 +178,10 @@
       "bytes": 20949,
       "sha256_16": "bfaba6a05604d097",
       "why_this_frame": "peak wash, speaker still perceptible through it",
-      "state": "FILE_ONLY",
-      "looked_at": null
+      "state": "DRAWS",
+      "looked_at": "near-white wash over the whole canvas with the speaker STILL PERCEPTIBLE through it — t-shirt lettering and background figures readable. That is the measured 0.82 peak behaving exactly as its body documents.",
+      "looked_at_on": "2026-09-21",
+      "body_sha256_16": "343d57289fd1fbe6"
     },
     "LightLeakOverlay": {
       "family": "tight-cut overlay",
@@ -168,8 +191,10 @@
       "bytes": 20715,
       "sha256_16": "ad2e67a21712e41f",
       "why_this_frame": "warm leak at peak, drifting tl-br",
-      "state": "FILE_ONLY",
-      "looked_at": null
+      "state": "DEFECT",
+      "looked_at": "DRAWS, and draws TOO MUCH: an amber wash with a central bloom that leaves the picture underneath all but invisible. l2Opacity peaks at 1.0 * intensity and intensity registers defaultValue 1.0, so the midpoint is fully opaque. This is the same defect ShutterFlashOverlay measured and fixed on 2026-06-15 — 0.95 read as a glitch or a blown exposure rather than an intentional effect — and this sits ABOVE the value that was already judged too strong.",
+      "looked_at_on": "2026-09-21",
+      "body_sha256_16": "f89a3025057d05d5"
     },
     "EvidenceCard": {
       "family": "frame composition",
@@ -180,7 +205,8 @@
       "sha256_16": "ffc5fad594c87f81",
       "why_this_frame": "card settled, accent rule and source line legible",
       "state": "FILE_ONLY",
-      "looked_at": null
+      "looked_at": null,
+      "body_sha256_16": "5b6c3888f199245e"
     },
     "DeviceMockup": {
       "family": "frame composition",
@@ -191,7 +217,8 @@
       "sha256_16": "131dee1fe6ad7aef",
       "why_this_frame": "phone bezel with the notch, still cropped to the DEVICE's aspect",
       "state": "FILE_ONLY",
-      "looked_at": null
+      "looked_at": null,
+      "body_sha256_16": "274c62eb94672005"
     },
     "EmojiCard": {
       "family": "frame composition",
@@ -201,8 +228,10 @@
       "bytes": 62884,
       "sha256_16": "0a5374ce2d053e01",
       "why_this_frame": "card settled and the reaction badge popped — it lands ~0.22s after the card",
-      "state": "FILE_ONLY",
-      "looked_at": null
+      "state": "DRAWS",
+      "looked_at": "yellow-bordered card holding the Wikipedia screenshot, monocle-emoji badge at the top-right corner of the card, caption 'the free encyclopedia' beneath it, source letterboxed behind. Correct and complete.",
+      "looked_at_on": "2026-09-21",
+      "body_sha256_16": "95a7a4fc8a99c1db"
     },
     "StickyNotes": {
       "family": "text",
@@ -213,7 +242,8 @@
       "sha256_16": "25a432d05452ab65",
       "why_this_frame": "past the 0.28s entrance ease, all three notes at rest",
       "state": "DRAWS",
-      "looked_at": "three notes, three colours, three rotations, Lora, over the Lagos frame"
+      "looked_at": "three notes, three colours, three rotations, Lora, over the Lagos frame",
+      "body_sha256_16": "c0d88229299141f7"
     },
     "LowerThird": {
       "family": "text",
@@ -224,7 +254,8 @@
       "sha256_16": "6dadca8b9359ad2d",
       "why_this_frame": "bar fully in, name and title both set",
       "state": "DRAWS",
-      "looked_at": "broadcast bar, name white over title in accent, accent rule"
+      "looked_at": "broadcast bar, name white over title in accent, accent rule",
+      "body_sha256_16": "8b0acdad32ea386b"
     },
     "QuoteCard": {
       "family": "text",
@@ -235,7 +266,8 @@
       "sha256_16": "94c326ce3ae8e2d0",
       "why_this_frame": "panel settled, quote and attribution both on",
       "state": "DRAWS",
-      "looked_at": "serif panel, left accent rule, em-dash attribution"
+      "looked_at": "serif panel, left accent rule, em-dash attribution",
+      "body_sha256_16": "4ff434f5fe8d9f2c"
     },
     "SmoothPush": {
       "family": "zoom",
@@ -246,7 +278,8 @@
       "sha256_16": "0453691334c7b991",
       "why_this_frame": "late in the push, where the ramp has travelled — never the head, where a zoom and a passthrough look alike",
       "state": "DRAWS",
-      "looked_at": "full-bleed plate pushed in, no letterbox"
+      "looked_at": "full-bleed plate pushed in, no letterbox",
+      "body_sha256_16": "7a5a72a7773046c0"
     },
     "StagedPush": {
       "family": "zoom",
@@ -257,7 +290,8 @@
       "sha256_16": "9e4680c38487a1cf",
       "why_this_frame": "inside the hold after stage 2 (0.95s:1.30), the frame where the old port rendered an UN-ZOOMED passthrough",
       "state": "DRAWS",
-      "looked_at": "pushed on the Wikipedia B-roll, and NO yellow stage warning"
+      "looked_at": "pushed on the Wikipedia B-roll, and NO yellow stage warning",
+      "body_sha256_16": "a7f12b3aaaac9435"
     },
     "StepZoom": {
       "family": "zoom",
@@ -268,7 +302,8 @@
       "sha256_16": "f458c55aef36a39f",
       "why_this_frame": "well past stepAtFrame=0, so the full 1.3 step is standing",
       "state": "DRAWS",
-      "looked_at": "full 1.3 step standing, visibly tighter than SmoothPush"
+      "looked_at": "full 1.3 step standing, visibly tighter than SmoothPush",
+      "body_sha256_16": "a85fed410e1bc2a6"
     },
     "CaptionMatch": {
       "family": "text",
@@ -279,7 +314,8 @@
       "sha256_16": "929550c587e78be4",
       "why_this_frame": "entrance complete, caption at full pop",
       "state": "DRAWS",
-      "looked_at": "white sans, centred, soft shadow, no card"
+      "looked_at": "white sans, centred, soft shadow, no card",
+      "body_sha256_16": "eb1860700c5e08bb"
     },
     "TornPaper": {
       "family": "text",
@@ -290,7 +326,8 @@
       "sha256_16": "f14e1c3ef4132459",
       "why_this_frame": "both strips slammed in",
       "state": "DRAWS",
-      "looked_at": "two slammed strips, cream over accent, uppercase"
+      "looked_at": "two slammed strips, cream over accent, uppercase",
+      "body_sha256_16": "9a61b620dd56a8fb"
     },
     "PlainText": {
       "family": "text",
@@ -301,7 +338,8 @@
       "sha256_16": "c49f203e9b09a55b",
       "why_this_frame": "entrance risen; the light panel behind the words is the SOURCE's own picture-in-picture inset, proven by the f1339 control with no graphic on the timeline",
       "state": "DRAWS",
-      "looked_at": "white sans centred; the light panel behind is the SOURCE's own PiP inset (proven by the f1339 control)"
+      "looked_at": "white sans centred; the light panel behind is the SOURCE's own PiP inset (proven by the f1339 control)",
+      "body_sha256_16": "27b9eb83bd758089"
     },
     "NamePlate": {
       "family": "ported_mg",
@@ -312,7 +350,8 @@
       "sha256_16": "626007c1ea7f28a6",
       "why_this_frame": "mid-hold: accent rule drawn, name risen, role staggered in behind it",
       "state": "DRAWS",
-      "looked_at": "accent rule, Anton name over accent role, on its scrim"
+      "looked_at": "accent rule, Anton name over accent role, on its scrim",
+      "body_sha256_16": null
     },
     "MouseDrag": {
       "family": "ported_mg",
@@ -323,11 +362,13 @@
       "sha256_16": "fc84e47cb1d6f391",
       "why_this_frame": "the drag settled at the safe-rect centre with the cursor still on the card, before the return arc and wipe-dissolve",
       "state": "DRAWS",
-      "looked_at": "yellow card with the label and the arrow cursor at the settled centre"
+      "looked_at": "yellow card with the label and the arrow cursor at the settled centre",
+      "body_sha256_16": null
     }
   },
   "_still_asset": "The three frame compositions are drawn on measured/corpus_evidence_still.jpg — source second 39.3 of th_lagos_en, extracted with ffmpeg and uploaded to the project as image asset 5170f875. Corpus material, CC BY-SA 4.0, so the picture of a component that takes a picture is itself rights-clear and reproducible from the fixture.",
   "_the_nine": "THE NINE ADDED 2026-09-21. Six text components and three zooms, placed on real gaps of the same th_lagos_en timeline and rendered by the same cloud path as the 18. Their copy is SAMPLED FROM THE FIXTURE'S OWN TRANSCRIPT — the words spoken under each placement — never invented. Every one carries a per-item `propertyOverrides`, which is the write field chatcut_job_app.py:1334 records as never found; it works, and inspect_item marks the values `(override)`.",
   "_ported_mg": "THE ported_mg REGISTRATION, started 2026-09-21. These are the components whose contract-shaped code already sits in chatcut_registry.json; the port work left is REGISTER + PLACE + FRAME, not a binding transform. Placed on track V3 of the same th_lagos_en timeline, copy sampled from the fixture's transcript.",
-  "_state_contract": "DRAWS = a human-equivalent LOOK at the rendered frame, described. FILE_ONLY = a still exists with a sha but no recorded verdict — a file is not a verdict, and treating one as evidence is how an unproven component reaches a menu. Absence of a row is UNKNOWN, never BLANK."
+  "_state_contract": "DRAWS = a human-equivalent LOOK at the frame, described, and nothing wrong with it. DEFECT = it draws and the picture is wrong; named, and NOT on the menu. PASSTHROUGH_SUSPECT = indistinguishable from no effect at the frame sampled — a verdict about the FRAME CHOICE, not yet about the component. UNDECIDABLE = the correct output and a failed render are the same image (DipToBlack at its midpoint is black); one frame cannot decide it. STALE_BODY = the still is real and photographs code that has since been re-authored. FILE_ONLY = a sha and no recorded look. Absence of a row is UNKNOWN, never BLANK. ONLY DRAWS REACHES THE MENU.",
+  "_body_binding": "Every row carries body_sha256_16: the sha of the port/bodies/*.jsx that DREW THIS FRAME. THE ROW RECORDS WHAT WAS SEEN; lane_contract.live_set() DERIVES WHETHER IT STILL APPLIES, by re-hashing the body on disk at read time. So re-authoring a component invalidates its picture the instant the file changes, with nobody remembering to. WITHOUT IT A STILL SILENTLY CERTIFIES SUPERSEDED CODE: seven of these photograph bodies I re-authored in 43b47b4 hours later, and every one of those frames still looks perfectly good. TWO MISTAKES WHILE BUILDING THIS, BOTH KEPT AS THE RECORD. First I backfilled the CURRENT sha onto every row, which made three stills taken before the contain switch pass the staleness check and sit on the menu — a hash carries no evidence of its own currency. Then I hand-wrote STALE_BODY into the seven rows, which SHADOWED the sha check and left the mechanism with no population at all: it was dead, and the red proof exposed it by mutating the binding away and watching nothing go red."
 }

@@ -102,6 +102,7 @@ def main():
     # ── the menu is not the scope, and this is where that is enforced ──────
     menu, await_ = set(r.get("menu") or []), set(r.get("awaiting_picture") or [])
     dr = r.get("draws") or {}
+    stills = json.load(open(os.path.join(lc.HERE, "measured", "inventory_stills.json")))
 
     # L9 THE LOAD-BEARING LEG. Nothing reaches the menu without a picture. A
     # place-schema derived from the menu then cannot advertise what the kitchen
@@ -112,10 +113,19 @@ def main():
 
     # L10 FILE_ONLY is NOT-YET-EVIDENCE. A sha is a file, not a verdict, and
     # this is the leg that stops one being promoted into the other.
-    stills = json.load(open(os.path.join(lc.HERE, "measured", "inventory_stills.json")))
-    fo = {k for k, v in (stills.get("components") or {}).items() if v.get("state") == "FILE_ONLY"}
-    leg("L10 file_only_not_on_menu", bool(fo) and not (fo & menu),
-        "%d FILE_ONLY, %d leaked onto menu" % (len(fo), len(fo & menu)))
+    # L10 IS DELETED AND THE GAP IS STATED INSTEAD OF WIDENED.
+    # The property — a FILE_ONLY row must never be read as DRAWS — is real and
+    # still enforced in the resolution. But it can no longer be TESTED against
+    # this data: after today's looking, every remaining FILE_ONLY row belongs to
+    # an out-of-scope component, and live_set only resolves `draws` for the 47
+    # in scope. So the population is empty, and BOTH spellings of the leg passed
+    # vacuously — first "none are on the menu" (an empty intersection), then
+    # "none are read as DRAWS" (an empty map lookup). Two rewrites, both green,
+    # both asserting nothing; the red proof is what showed it, by mutating the
+    # rule away and watching nothing go red.
+    # A leg over an empty population is not a weaker check, it is not a check.
+    # L9 covers what reaches the menu and L15 covers currency; this one waits
+    # for an in-scope component to be FILE_ONLY again.
 
     # L11 the partition again, one level down: every renderable component is
     # either offerable or waiting. One that fell out of both would be invisible
@@ -144,7 +154,50 @@ def main():
         bool(bytes_only) and not (set(bytes_only) & menu),
         "%d BYTES_ONLY, %d leaked onto menu" % (len(bytes_only), len(set(bytes_only) & menu)))
 
-    print("%d/%d legs ok" % (14 - len(FAILS), 14))
+    # L14 NOTHING WITH A NAMED PICTURE PROBLEM REACHES THE MENU. DEFECT draws
+    # and draws WRONG; PASSTHROUGH_SUSPECT and UNDECIDABLE are honest about not
+    # knowing. All three are verdicts, and none of them is "yes".
+    bad = sorted(n for n in menu
+                 if dr.get(n) in ("DEFECT", "PASSTHROUGH_SUSPECT", "UNDECIDABLE", "STALE_BODY"))
+    leg("L14 no_named_problem_on_menu", not bad, "leaked: %s" % (bad or "none"))
+
+    # L15 THE BODY BINDING, asserted as a PROPERTY rather than a state name:
+    # every component on the menu has a still whose recorded body sha equals the
+    # sha of the body on disk right now. This is what makes editing a component
+    # invalidate its picture without anyone remembering to.
+    # THE FIRST VERSION OF THIS LEG WAS A TAUTOLOGY AND IS KEPT HERE AS THE
+    # REASON. It iterated the MENU asking whether each member's sha matched —
+    # but a drifted sha is exactly what REMOVES a component from the menu, so
+    # the drifted case could never appear in the population being checked. It
+    # passed with the mechanism intact and it would have passed with the
+    # mechanism deleted. A check that asserts nothing, written while building
+    # the thing it was meant to assert.
+    #
+    # Asked the right way round: for every row whose recorded sha DIFFERS from
+    # the body on disk, live_set must refuse to call it DRAWS. Population today
+    # is the seven zooms I re-authored, so the leg has something to bite on.
+    drifted = [n for n, v in (stills.get("components") or {}).items()
+               if v.get("body_sha256_16") and v["body_sha256_16"] != lc._body_sha(n)]
+    still_drawing = sorted(n for n in drifted if dr.get(n) == "DRAWS")
+    leg("L15 drifted_body_refuses_DRAWS",
+        bool(drifted) and not still_drawing,
+        "%d drifted, %d still read DRAWS %s" % (len(drifted), len(still_drawing),
+                                                still_drawing or ""))
+
+    # L16 the staleness check must be LIVE, not decorative. At least one row has
+    # to be carrying a real pre-change sha, or L15 is passing over a population
+    # where nothing could ever drift and is asserting nothing.
+    # Asserted on what live_set DERIVES, not on what the record declares — and
+    # that distinction is the whole repair. This leg first read the record for a
+    # hand-written STALE_BODY, which is precisely the shadowing that left the
+    # sha binding with no population and the mechanism dead. The record says
+    # what was SEEN; STALE_BODY is a conclusion, and a conclusion nobody derives
+    # is a conclusion nobody can check.
+    derived_stale = sorted(n for n in (r.get("renderable") or []) if dr.get(n) == "STALE_BODY")
+    leg("L16 staleness_is_reachable", len(derived_stale) >= 1,
+        "%d component(s) DERIVED STALE_BODY %s" % (len(derived_stale), derived_stale or ""))
+
+    print("%d/%d legs ok" % (16 - len(FAILS), 16))
     if FAILS:
         print("FAILED: %s" % ", ".join(FAILS))
     return 1 if FAILS else 0

@@ -85,15 +85,10 @@ MUTATIONS = [
      lambda s: 'draws.get(n) == "DRAWS"' in s),
     # L10: a sha is promoted into a verdict. This is the defect Zac named —
     # "a file with a hash is a file, not evidence" — written as code.
-    ("file_only_becomes_evidence", "lane_contract.py",
-     '        elif stills.get(name, {}).get("state") == "DRAWS":',
-     '        elif stills.get(name, {}).get("state") in ("DRAWS", "FILE_ONLY"):',
-     "L10 file_only_not_on_menu",
-     # RE-AIMED 2026-09-21 after my OWN edit orphaned it. Adding the BYTES_ONLY
-     # branch rewrote the line this mutation targeted, and the anchor guard
-     # reported `anchor 0x` rather than passing — a refactor orphaning a
-     # mutation, caught by the one guard that sees that class.
-     lambda s: 'get("state") == "DRAWS"' in s),
+    # THE FILE_ONLY MUTATION IS RETIRED WITH ITS LEG. Its target population
+    # went empty when today's looking gave every in-scope FILE_ONLY row a real
+    # verdict, so the mutation changed bytes and could not change a result —
+    # vacuous, and correct to pass. Removed rather than left counting.
     # L13: BYTES_ONLY collapses into DRAWS — a file that got bigger promoted
     # into a picture somebody looked at. This is the exact inference Builder 1
     # caught himself making, written as code.
@@ -102,6 +97,15 @@ MUTATIONS = [
      '            draws[name] = "DRAWS"',
      "L13 bytes_only_named_not_on_menu",
      lambda s: '"BYTES_ONLY"' in s),
+    # L14/L15: a body is EDITED after its still was taken. This is the real
+    # regression — the picture still looks perfect, and nothing but the sha
+    # notices. Mutating the BODY (not the record) is the honest shape: it is
+    # what actually happens when someone improves a component.
+    ("sha_binding_removed", "lane_contract.py",
+     'draws[name] = "DRAWS" if _body_sha(name) == row.get("body_sha256_16") else "STALE_BODY"',
+     'draws[name] = "DRAWS"',
+     "L15 drifted_body_refuses_DRAWS",
+     lambda s: '_body_sha(name) == row.get("body_sha256_16")' in s),
     # L12: the RULING regresses — Reticle is dropped from scope again on the
     # retracted blank. The rule is untouched and perfectly correct; the library
     # simply loses a component, and only a mutation of the ruling can show it.
@@ -120,7 +124,7 @@ def run_smoke():
 
 def residue():
     p = subprocess.run(["git", "status", "--porcelain",
-                        "lane_contract.py", "library_73.json"],
+                        "lane_contract.py", "library_73.json", "port/bodies"],
                        cwd=HERE, capture_output=True, text=True)
     return p.stdout.strip()
 
@@ -151,11 +155,19 @@ def main():
         # A MUTANT THAT WILL NOT PARSE NEVER RAN AT ALL, and its red is about the
         # parser rather than the property. Both file kinds get checked, each by
         # its own parser — a JSON ruling can be broken exactly as easily.
+        # PARSE THE MUTANT WITH THE RIGHT PARSER, OR NOT AT ALL. Compiling a
+        # .jsx body as Python reports "will not parse" for every mutation of it,
+        # which is a HARNESS failure dressed as a refusal — and it fired here on
+        # the first run. There is no JS parser in this harness, and none is
+        # needed: the smoke only HASHES a body, it never executes one. So the
+        # guard applies where it can mean something and says where it cannot.
         try:
             if target.endswith(".json"):
                 json.loads(mutant)
-            else:
+            elif target.endswith(".py"):
                 compile(mutant, TARGET, "exec")
+            elif not mutant.strip():
+                raise ValueError("mutant is empty")
         except (SyntaxError, ValueError) as e:
             print("  %-28s HARNESS FAILURE  mutant will not parse (%s)" % (name, e)); continue
         open(TARGET, "w", encoding="utf-8").write(mutant)

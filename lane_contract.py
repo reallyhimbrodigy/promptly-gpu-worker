@@ -22,6 +22,7 @@ STATES ARE THE REPO'S THREE-STATE RULE, NAMED ONCE. A measurement has three
 outcomes and a delivery has four; writing them as bare strings in each reader is
 how "OK" happened.
 """
+import hashlib
 import json
 import os
 
@@ -112,6 +113,20 @@ _NO_PICTURE_FAMILIES = {
 }
 
 
+def _body_sha(name):
+    """sha256[:16] of the component's authored body, or None if it has none.
+
+    Read from disk EVERY TIME rather than trusted from a record: the whole point
+    is to notice when the file has moved out from under a still.
+    """
+    f = os.path.join(HERE, "port", "bodies", "%s.jsx" % name)
+    try:
+        with open(f, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()[:16]
+    except OSError:
+        return None
+
+
 def live_set(library="library_73.json"):
     """-> {state, components, renderable, menu, awaiting_picture, draws, ...}
 
@@ -190,10 +205,20 @@ def live_set(library="library_73.json"):
     draws = {}
     for name in comps:
         declared = (comps[name] or {}).get("draws")
+        row = stills.get(name) or {}
         if declared in ("BLANK", "DISPUTED", "UNKNOWN"):
             draws[name] = declared
-        elif stills.get(name, {}).get("state") == "DRAWS":
-            draws[name] = "DRAWS"
+        elif row.get("state") == "DRAWS":
+            # A PICTURE IS EVIDENCE ABOUT THE CODE THAT DREW IT AND NO OTHER CODE.
+            # The body sha is recomputed HERE, at read time, against the file on
+            # disk — so re-authoring a component invalidates its still the
+            # instant the body changes, with nobody needing to remember. Four
+            # stills went stale this way in one afternoon and every one of them
+            # still looked perfectly good, which is why this cannot be a
+            # convention.
+            draws[name] = "DRAWS" if _body_sha(name) == row.get("body_sha256_16") else "STALE_BODY"
+        elif row.get("state") in ("DEFECT", "PASSTHROUGH_SUSPECT", "UNDECIDABLE", "STALE_BODY"):
+            draws[name] = row["state"]
         elif (catalogue.get(name) or {}).get("state") == "MEASURED":
             draws[name] = "BYTES_ONLY"
         else:
