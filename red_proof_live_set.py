@@ -101,11 +101,17 @@ MUTATIONS = [
     # regression — the picture still looks perfect, and nothing but the sha
     # notices. Mutating the BODY (not the record) is the honest shape: it is
     # what actually happens when someone improves a component.
+    # RE-AIMED 2026-09-21, second time, and by the same cause both times: my own
+    # edit rewrote the line it targeted. Generalising the sha check from DRAWS
+    # to EVERY looked-at state moved the binding into its own branch, and the
+    # anchor guard said `anchor 0x` instead of passing. A mutation is aimed at a
+    # line; a line is the most movable thing in a file.
     ("sha_binding_removed", "lane_contract.py",
-     'draws[name] = "DRAWS" if _body_sha(name) == row.get("body_sha256_16") else "STALE_BODY"',
-     'draws[name] = "DRAWS"',
+     '        elif (row.get("body_sha256_16")\n'
+     '              and row["body_sha256_16"] != _body_sha(name)):',
+     '        elif False:',
      "L15 drifted_body_refuses_DRAWS",
-     lambda s: '_body_sha(name) == row.get("body_sha256_16")' in s),
+     lambda s: 'row["body_sha256_16"] != _body_sha(name)' in s),
     # L12: the RULING regresses — Reticle is dropped from scope again on the
     # retracted blank. The rule is untouched and perfectly correct; the library
     # simply loses a component, and only a mutation of the ruling can show it.

@@ -1,0 +1,59 @@
+{
+  "_what": "perceptibility of the source through the effect, at the peak of each overlay",
+  "_metric": "RMS of high-pass luma (radius-4 gaussian), composite / clean. Brightness removed; texture counted.",
+  "_why_a_ratio": "taken against the same frame so the source's own detail divides out \u2014 no absolute threshold fitted to one draw",
+  "_bound": "evaluated at FULL gradient alpha with l1 and l2 coincident: the worst pixel the component can produce, not the frame mean",
+  "_model_limits": "does not model the 28-40px blur, the radial falloff, or the real overlap of the two blooms \u2014 all of which make the rendered frame KINDER than this bound, so the result is conservative",
+  "_reference_frame": "clean_frame.png",
+  "_clean_detail_rms": 0.057692,
+  "shutterflash_0.82_retained": 0.1831,
+  "shutterflash_0.95_retained": 0.0625,
+  "lightleak_ladder": [
+    {
+      "l2_peak": 1.0,
+      "retained": 0.0719
+    },
+    {
+      "l2_peak": 0.82,
+      "retained": 0.1402
+    },
+    {
+      "l2_peak": 0.7,
+      "retained": 0.1882
+    },
+    {
+      "l2_peak": 0.6,
+      "retained": 0.2284
+    },
+    {
+      "l2_peak": 0.5,
+      "retained": 0.2689
+    },
+    {
+      "l2_peak": 0.4,
+      "retained": 0.3096
+    },
+    {
+      "l2_peak": 0.3,
+      "retained": 0.3505
+    },
+    {
+      "l2_peak": 0.2,
+      "retained": 0.3912
+    },
+    {
+      "l2_peak": 0.1,
+      "retained": 0.4321
+    },
+    {
+      "l2_peak": 0.05,
+      "retained": 0.4525
+    },
+    {
+      "l2_peak": 0.0,
+      "retained": 0.473
+    }
+  ],
+  "solved_l2_peak": 0.712,
+  "l1_and_wash_alone_retained": 0.473
+}

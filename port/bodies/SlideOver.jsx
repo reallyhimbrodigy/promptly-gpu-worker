@@ -68,8 +68,22 @@ const Component = ({ item }) => {
   }
   const sign = props.direction === "right" ? 1 : -1;
   const e = ease(progress, 0.25, 0.46, 0.45, 0.94);
-  const translateA = lerp(e, 0, sign * -25);
-  const scaleA = lerp(e, 1, 0.92);
+  // A DRIFTS THE WAY B IS TRAVELLING, NOT AWAY FROM IT. This read `sign * -25`,
+  // which sent A off in the direction B ARRIVES FROM — so the strip A vacated
+  // was the one strip B had not reached yet, and the root (#000000) showed
+  // through it. Measured off the shipped numbers: WORST 22.33% OF THE CANVAS
+  // WIDTH was black, peaking around e=0.7, which is exactly what the still at
+  // f240 shows. A transition carries BOTH SIDES of the cut; the uncovered
+  // region shows the outgoing clip or the component is not a transition.
+  const translateA = lerp(e, 0, sign * 25);
+  // AND THE SCALE HAD THE SAME DEFECT VERTICALLY. Shrinking A to 0.92 about its
+  // centre exposed a 4% band of root along the top and bottom edges for the
+  // whole middle of the move — smaller than the horizontal gap and the same
+  // bug. A now SETTLES from 1.09 to 1.0 instead of shrinking past full: the
+  // depth cue survives (A eases back as B arrives) and A never covers less than
+  // the canvas. Coverage is asserted over the whole ramp by
+  // smoke_transition_covers_canvas.py rather than argued here.
+  const scaleA = lerp(e, 1.09, 1.0);
   const translateB = lerp(e, -sign * 100, 0);
   const shadowOpacity = progress < 0.5
     ? lerp(progress / 0.5, 0, 0.5)

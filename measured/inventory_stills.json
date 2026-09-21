@@ -69,7 +69,24 @@
       "state": "UNDECIDABLE",
       "looked_at": "PURE BLACK, edge to edge. A dip to black AT ITS MIDPOINT is black, so the correct output and a completely failed render are the same image. One frame cannot decide this one — it needs the shoulders, a frame either side showing the ramp.",
       "looked_at_on": "2026-09-21",
-      "body_sha256_16": "58c67927f5b171f2"
+      "body_sha256_16": "58c67927f5b171f2",
+      "proof_frame": {
+        "why_this_family": "its CORRECT output at the dip is a black frame, which is byte-for-byte what a completely failed render produces. No single frame at the dip can separate them, and no noise floor can either: the correct output has no signal in it to measure.",
+        "dip_progress": 0.5,
+        "ruled": {
+          "progress": 0.25,
+          "expected_plate_opacity": 0.9043,
+          "separation_from_control": "9.6% darker than a passthrough",
+          "why": "Zac 2026-09-21 — the plate dimming, against the control. PRESENT, so separable from a failed render; CHANGED, so separable from a passthrough."
+        },
+        "corroborating": {
+          "progress": 0.4,
+          "expected_plate_opacity": 0.6085,
+          "separation_from_control": "39.2% darker than a passthrough",
+          "why": "MEASURED, not substituted for the ruling: the ease is cubic-bezier (0.55, 0, 0.85, 0.2), which is back-loaded, so 25% carries only 9.6% of the fade. That clears any noise floor and is the weak end of the ramp. 0.40 is offered as the stronger second frame, not in place of the ruled one."
+        },
+        "against": "the same frame with the transition absent — a passthrough at full plate opacity"
+      }
     },
     "SlideOver": {
       "family": "transition",
@@ -156,7 +173,19 @@
       "why_this_frame": "the shutter part-closed, where the mechanism is legible",
       "state": "FILE_ONLY",
       "looked_at": null,
-      "body_sha256_16": "e553df30d0fc0735"
+      "body_sha256_16": "e553df30d0fc0735",
+      "proof_frame": {
+        "why_this_family": "same shape as DipToBlack: a black root with complementary A/B fades, so the midpoint shows the root and carries no signal. Out of scope on usage, recorded so the family is complete rather than the one member anybody noticed.",
+        "dip_progress": null,
+        "ruled": {
+          "progress": 0.25,
+          "expected_plate_opacity": null,
+          "separation_from_control": null,
+          "why": "same rule; the exact value needs its own read of hCollapseEnd/dotMid, which are props rather than the local 0.5 DipToBlack hardcodes. NOT computed here rather than guessed."
+        },
+        "corroborating": null,
+        "against": "the same frame with the transition absent"
+      }
     },
     "FilmStrip": {
       "family": "transition",
@@ -370,5 +399,6 @@
   "_the_nine": "THE NINE ADDED 2026-09-21. Six text components and three zooms, placed on real gaps of the same th_lagos_en timeline and rendered by the same cloud path as the 18. Their copy is SAMPLED FROM THE FIXTURE'S OWN TRANSCRIPT — the words spoken under each placement — never invented. Every one carries a per-item `propertyOverrides`, which is the write field chatcut_job_app.py:1334 records as never found; it works, and inspect_item marks the values `(override)`.",
   "_ported_mg": "THE ported_mg REGISTRATION, started 2026-09-21. These are the components whose contract-shaped code already sits in chatcut_registry.json; the port work left is REGISTER + PLACE + FRAME, not a binding transform. Placed on track V3 of the same th_lagos_en timeline, copy sampled from the fixture's transcript.",
   "_state_contract": "DRAWS = a human-equivalent LOOK at the frame, described, and nothing wrong with it. DEFECT = it draws and the picture is wrong; named, and NOT on the menu. PASSTHROUGH_SUSPECT = indistinguishable from no effect at the frame sampled — a verdict about the FRAME CHOICE, not yet about the component. UNDECIDABLE = the correct output and a failed render are the same image (DipToBlack at its midpoint is black); one frame cannot decide it. STALE_BODY = the still is real and photographs code that has since been re-authored. FILE_ONLY = a sha and no recorded look. Absence of a row is UNKNOWN, never BLANK. ONLY DRAWS REACHES THE MENU.",
-  "_body_binding": "Every row carries body_sha256_16: the sha of the port/bodies/*.jsx that DREW THIS FRAME. THE ROW RECORDS WHAT WAS SEEN; lane_contract.live_set() DERIVES WHETHER IT STILL APPLIES, by re-hashing the body on disk at read time. So re-authoring a component invalidates its picture the instant the file changes, with nobody remembering to. WITHOUT IT A STILL SILENTLY CERTIFIES SUPERSEDED CODE: seven of these photograph bodies I re-authored in 43b47b4 hours later, and every one of those frames still looks perfectly good. TWO MISTAKES WHILE BUILDING THIS, BOTH KEPT AS THE RECORD. First I backfilled the CURRENT sha onto every row, which made three stills taken before the contain switch pass the staleness check and sit on the menu — a hash carries no evidence of its own currency. Then I hand-wrote STALE_BODY into the seven rows, which SHADOWED the sha check and left the mechanism with no population at all: it was dead, and the red proof exposed it by mutating the binding away and watching nothing go red."
+  "_body_binding": "Every row carries body_sha256_16: the sha of the port/bodies/*.jsx that DREW THIS FRAME. THE ROW RECORDS WHAT WAS SEEN; lane_contract.live_set() DERIVES WHETHER IT STILL APPLIES, by re-hashing the body on disk at read time. So re-authoring a component invalidates its picture the instant the file changes, with nobody remembering to. WITHOUT IT A STILL SILENTLY CERTIFIES SUPERSEDED CODE: seven of these photograph bodies I re-authored in 43b47b4 hours later, and every one of those frames still looks perfectly good. TWO MISTAKES WHILE BUILDING THIS, BOTH KEPT AS THE RECORD. First I backfilled the CURRENT sha onto every row, which made three stills taken before the contain switch pass the staleness check and sit on the menu — a hash carries no evidence of its own currency. Then I hand-wrote STALE_BODY into the seven rows, which SHADOWED the sha check and left the mechanism with no population at all: it was dead, and the red proof exposed it by mutating the binding away and watching nothing go red.",
+  "_proof_frame_contract": "A COMPONENT WHOSE CORRECT OUTPUT AT ITS MIDPOINT CARRIES NO SIGNAL IS PROVEN SOMEWHERE ELSE ON ITS RAMP (Zac, 2026-09-21). DipToBlack at its dip is black, which is exactly what a failed render looks like, so the frame everybody naturally samples is the one frame that can never decide it. `proof_frame` records WHERE on the ramp the signal exists, what the plate should read there, and what it is compared AGAINST — the same frame with the transition absent. Two comparisons are needed and one frame serves both: PRESENT separates it from a failed render, CHANGED separates it from a passthrough. The family is derived from the bodies — a black root plus complementary A/B opacity fades — not hand-listed, so a component that acquires the shape is covered the day it does."
 }

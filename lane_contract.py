@@ -208,6 +208,16 @@ def live_set(library="library_73.json"):
         row = stills.get(name) or {}
         if declared in ("BLANK", "DISPUTED", "UNKNOWN"):
             draws[name] = declared
+        elif (row.get("body_sha256_16")
+              and row["body_sha256_16"] != _body_sha(name)):
+            # EVERY VERDICT FROM LOOKING IS ABOUT THE BODY THAT DREW THE FRAME,
+            # NOT ONLY THE GOOD ONES. This first guarded DRAWS alone, which was
+            # exactly half a rule: I fixed SlideOver and LightLeakOverlay the
+            # same afternoon, and both went on reporting DEFECT — a verdict
+            # about code that no longer exists, keeping a repaired component
+            # condemned on the strength of a frame of the broken one. A stale
+            # acquittal and a stale conviction are the same error.
+            draws[name] = "STALE_BODY"
         elif row.get("state") == "DRAWS":
             # A PICTURE IS EVIDENCE ABOUT THE CODE THAT DREW IT AND NO OTHER CODE.
             # The body sha is recomputed HERE, at read time, against the file on
@@ -216,7 +226,9 @@ def live_set(library="library_73.json"):
             # stills went stale this way in one afternoon and every one of them
             # still looked perfectly good, which is why this cannot be a
             # convention.
-            draws[name] = "DRAWS" if _body_sha(name) == row.get("body_sha256_16") else "STALE_BODY"
+            # currency is settled above, for every state; this branch is only
+            # reached when the sha still matches.
+            draws[name] = "DRAWS"
         elif row.get("state") in ("DEFECT", "PASSTHROUGH_SUSPECT", "UNDECIDABLE", "STALE_BODY"):
             draws[name] = row["state"]
         elif (catalogue.get(name) or {}).get("state") == "MEASURED":
