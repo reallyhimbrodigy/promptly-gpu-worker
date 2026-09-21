@@ -26,6 +26,25 @@
  * opacity ramp has no per-frame pixel displacement to bound. Exempt by nature
  * rather than by margin, the same way DipToBlack is.
  *
+ * THE BEAM AND DOT DECLARE NO BLEND MODE, DELIBERATELY. They asked for
+ * `screen`; ChatCut strips mixBlendMode at registration — measured 2026-09-21
+ * by reading a registered asset back — so the declaration never survived and
+ * was dead code that looked live. Removed rather than annotated: the source
+ * now says what runs, and registered_diff can hold the two byte-identical.
+ *
+ * THE 0.82 IS UNAFFECTED AND THAT IS NOT LUCK. The wash is the term the
+ * perceptibility measurement is about, and the wash was always a normal
+ * composite — no blend mode to lose. What changes is the beam and the dot:
+ * additive highlights become opaque ones. Over a wash already at 0.82 of a
+ * white flash they land in nearly the same place, which is why the frame still
+ * reads correctly.
+ *
+ * AND THE VERDICT ALREADY COVERS THE STRIPPED FORM. The still this component
+ * was passed on was rendered FROM THE REGISTERED CODE, so it photographed the
+ * normal-blend composite. Every frame in this repo is evidence about the
+ * runtime, never about the source — which is exactly the confusion that made me
+ * solve LightLeakOverlay's peak against a blend that does not happen.
+ *
  * CONTRACT (from ChatCut's validator): exactly one top-level component and NO
  * top-level constants; a plain div root, never AbsoluteFill; editable values
  * read through an identifier literally named `props`; every declared property
@@ -66,7 +85,7 @@ const Component = ({ item }) => {
       ) : null}
       {beamOpacity > 0.001 ? (
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none",
-          opacity: beamOpacity, mixBlendMode: "screen" }}>
+          opacity: beamOpacity }}>
           <div style={{
             position: "absolute", left: 0, right: 0, top: "50%", height: 4,
             transform: "translateY(-50%)",
@@ -78,7 +97,7 @@ const Component = ({ item }) => {
       ) : null}
       {dotOpacity > 0.001 ? (
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none",
-          opacity: dotOpacity, mixBlendMode: "screen" }}>
+          opacity: dotOpacity }}>
           <div style={{
             position: "absolute", left: "50%", top: "50%", width: 28, height: 28,
             transform: "translate(-50%, -50%)", borderRadius: "50%",

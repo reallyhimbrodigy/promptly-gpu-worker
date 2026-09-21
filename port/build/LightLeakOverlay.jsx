@@ -1,7 +1,7 @@
 /* LightLeakOverlay — the second TIGHT-CUT OVERLAY, on ChatCut's timeline.
  *
  * CARRIES NO CLIPS, like ShutterFlashOverlay. Two blurred radial glows drift
- * across a transparent root in `screen`, with a soft-light wash under them, so
+ * across a transparent root, with a wash under them, so
  * whatever the timeline already shows plays through and the hard cut underneath
  * stays hard. No `clip`, no `srcFromA/B`, no `correct` — there is no <Video>
  * layer of ours for the rest calibration to apply to.
@@ -24,8 +24,21 @@
  * a CSS or bitmap implementation, which is a different component and a
  * decision, not a port.
  *
+ * CHATCUT STRIPS mixBlendMode AT REGISTRATION, AND THAT CHANGES THIS COMPONENT
+ * MORE THAN ANY NUMBER IN IT. Read back from the registered asset 2026-09-21:
+ * all three `mixBlendMode` declarations gone, while these comments still said
+ * "screen". It is a FIFTH auto-rewrite beside the props-fallback strip, the
+ * nested ({item}) injection, <img> -> <Img> and the trailing newline, and the
+ * only one that silently changes what the component LOOKS LIKE. The layers
+ * composite NORMALLY: flat colour over the picture, far heavier than a screen.
+ * THE DECLARATIONS ARE NOW REMOVED rather than kept and annotated. Keeping
+ * them was argued as "so it renders correctly anywhere else"; that is a
+ * fallback in source, which this lane has a standing rule against, and the
+ * measured peak (l2 0.70, intensity 0.65) is derived from the NORMAL composite
+ * anyway. The source now says what runs.
+ *
  * NO VELOCITY CAP: nothing moves that the cap can bound. The glows translate,
- * but they are BLURRED BY 28-40px and drawn in `screen` at partial opacity —
+ * but they are BLURRED BY 28-40px and drawn at partial opacity —
  * there is no edge whose per-frame displacement reads as judder, which is the
  * thing the 11px ceiling exists to bound. Exempt by nature, like DipToBlack and
  * ShutterFlashOverlay, and not in the peaks table.
@@ -75,17 +88,75 @@ const Component = ({ item }) => {
   const l1Opacity = interpolate(progress, [0, 0.5, 1], [0, 0.85 * intensity, 0], clamp);
   const l2X = interpolate(progress, [0, 1], [path.l2[0], path.l2[2]], clamp);
   const l2Y = interpolate(progress, [0, 1], [path.l2[1], path.l2[3]], clamp);
-  const l2Opacity = interpolate(progress, [0.1, 0.55, 0.9], [0, 1.0 * intensity, 0], clamp);
+  // THE PICTURE MUST STAY PERCEPTIBLE THROUGH THE LEAK, AND 0.71 IS MEASURED.
+  // Ruled by Zac 2026-09-21: the borrowed 0.82 had to become a number.
+  //
+  // THE TEST IS THE ONE SHUTTERFLASH GOT IN JUNE, run on THIS composite —
+  // retained detail, the RMS of high-pass luma of the composite over the same
+  // quantity for the clean frame, on a real frame of zac_blueshirt. Brightness
+  // is the effect and divides out; texture is the picture and is what is
+  // counted. A ratio against the same frame, so the source's own detail cancels
+  // and there is no absolute threshold fitted to one draw.
+  //
+  // THE BAR IS SHUTTERFLASH AT ITS ACCEPTED 0.82 = 0.1831 retained. The same
+  // instrument scores ShutterFlash at 0.95 — the value judged a blown exposure
+  // — at 0.0625, so the bar sits between a shipped value and a rejected one.
+  //
+  //     l2 peak 1.00  retained 0.0719   <- WHAT SHIPPED. Worse than the 0.95
+  //                                        that was rejected in June.
+  //     l2 peak 0.82  retained 0.1402   <- MY BORROW. Still below the bar:
+  //                                        borrowing it was not conservative,
+  //                                        it was simply wrong in the same
+  //                                        direction, which is exactly why a
+  //                                        threshold from another code path is
+  //                                        a guess wearing a measurement's
+  //                                        clothes.
+  //     l2 peak 0.70  retained 0.1882   <- PICKED, and picked from a FRAME.
+  //
+  // l1 and the wash alone retain 0.4730, so the defect really is l2 and not the
+  // stack — which is what makes changing this one number the whole fix.
+  //
+  // THE 0.70 ABOVE WAS MEASURED ON THE DESIGNED BLEND AND IS NOT THE BINDING
+  // CONSTRAINT. Against the REGISTERED (stripped) composite the whole stack is
+  // heavier and l2 stops being the term that matters: even at l2 = 0, l1 at
+  // 0.85 plus the wash retain only 0.1088 against a 0.1822 bar. The dial that
+  // fixes it is `intensity`, which scales all three, and its registered default
+  // is now 0.65 (ceiling 0.670, measured). SWEPT AND LOOKED AT, 2026-09-21, at
+  // 0.60 / 0.70 / 0.82 / 0.90 on both composites:
+  //
+  //   AS SHIPPED (intensity 1.0, stripped blend) NOTHING IN THE SWEEP PASSES —
+  //   0.60 retains 0.056 and 0.90 retains 0.041, and the contact sheet shows a
+  //   flat amber field with the speaker reduced to a ghost at every one of the
+  //   four. l2 was never the term holding this component up.
+  //
+  //   AT intensity 0.65 the sweep separates: 0.60 -> 0.222 PASS, 0.70 -> 0.199
+  //   PASS, 0.82 -> 0.172 fail, 0.90 -> 0.153 fail. In the frames the face
+  //   keeps its modelling at 0.60 and 0.70; by 0.82 it flattens and starts
+  //   reading as a blown exposure rather than a leak. 0.70 is the largest value
+  //   the picture supports, and the arithmetic ceiling (0.711) agrees with the
+  //   frame rather than being argued against it.
+  //
+  // The rendered still is what settled
+  // which model is real: it showed the picture all but gone, which the normal
+  // model predicts (0.033) and the screen model does not (0.069).
+  //
+  // MEASURED AT the WORST pixel:
+  // full gradient alpha with both blooms coincident. The blur, the radial
+  // falloff and the real overlap all make a rendered frame kinder than that
+  // bound, so this is conservative by construction. Ladder in
+  // measured/PERCEPTIBILITY_2026-09-21.json; gated by
+  // smoke_perceptibility_peaks.py so it cannot drift back up.
+  const l2Opacity = interpolate(progress, [0.1, 0.55, 0.9], [0, 0.70 * intensity, 0], clamp);
   const washOpacity = interpolate(progress, [0.2, 0.5, 0.8], [0, 0.3 * intensity, 0], clamp);
 
   return (
     <div style={rootStyle}>
       {washOpacity > 0.001 ? (
         <div style={{ position: "absolute", inset: 0, background: pal.secondary,
-          mixBlendMode: "soft-light", opacity: washOpacity, pointerEvents: "none" }} />
+          opacity: washOpacity, pointerEvents: "none" }} />
       ) : null}
       {l1Opacity > 0.001 ? (
-        <div style={{ position: "absolute", inset: 0, mixBlendMode: "screen",
+        <div style={{ position: "absolute", inset: 0,
           opacity: l1Opacity, pointerEvents: "none" }}>
           <div style={{ position: "absolute", left: "-20%", top: "-20%",
             width: "140%", height: "140%",
@@ -95,7 +166,7 @@ const Component = ({ item }) => {
         </div>
       ) : null}
       {l2Opacity > 0.001 ? (
-        <div style={{ position: "absolute", inset: 0, mixBlendMode: "screen",
+        <div style={{ position: "absolute", inset: 0,
           opacity: l2Opacity, pointerEvents: "none" }}>
           <div style={{ position: "absolute", left: "20%", top: "20%",
             width: "60%", height: "60%",

@@ -21,6 +21,44 @@
  * DepthPull is one of the four the cap was MEASURED against: 1.25/2200ms read
  * 33.8 px/frame before it, against an 11px ceiling.
  *
+ * RE-AUTHORED FOR NORMAL COMPOSITING (Zac, 2026-09-21). ChatCut strips
+ * mixBlendMode, so this component now declares NONE and says what it does.
+ *
+ * I OVERSTATED THE DEFECT BEFORE MEASURING IT, AND THE CORRECTION IS THE
+ * USEFUL PART. I reported the stripped multiply as "a flat opaque overlay
+ * rather than a darkening one". It is not: the layer ran at alpha 0.06, so
+ * stripped it still DARKENS, by -0.0152 mean luma against an intended -0.0215
+ * — about 70% of the depth — while lifting true blacks off zero. A tint at 6%
+ * cannot cover anything, and I said it could before reading the alpha.
+ *
+ * WHAT CHANGED, EACH WITH ITS MEASUREMENT:
+ *   the cool tint    DELETED as a layer, folded into the video's brightness()
+ *                    filter, which is multiplicative and survives registration
+ *                    — so it darkens by the intended amount and keeps the
+ *                    black point that a normal composite would lift.
+ *   the warm haze    alphas x2.5. Designed +0.0124 mean luma, stripped +0.0047.
+ *   the orbs         0.35 -> 0.40. Designed +0.0205, stripped +0.0182 — nearly
+ *                    at parity already.
+ *
+ * The criterion is matching MEAN LUMA on one real frame, stated rather than
+ * implied, and it wants a picture before anyone believes it.
+ * Measured 2026-09-21 by reading a registered asset back. Two layers below
+ * declare a blend and neither gets it:
+ *
+ *   multiply (the vignette)  a layer that DARKENED what was under it becomes a
+ *                            flat COVERING layer. Not a weaker vignette — a
+ *                            different thing in front of the picture.
+ *   screen (the glow)        an additive bloom becomes an opaque patch.
+ *
+ * The multiply one is the reason this is called out separately in
+ * smoke_blend_mode_stripped.py: a stripped `screen` overstates a highlight,
+ * while a stripped `multiply` replaces the image instead of shading it.
+ *
+ * NOT YET JUDGED. This component is STALE_BODY — its still photographs a body
+ * re-authored since — and the frame it needs must be read with this in mind: if
+ * it comes back heavier or flatter than the definition, the blend strip is the
+ * first thing to suspect and not the registration.
+ *
  * CONTRACT (from ChatCut's validator): exactly one top-level component and NO
  * top-level constants; the root is a plain div, never AbsoluteFill; every
  * editable value is read through an identifier literally named `props`; and
@@ -408,26 +446,38 @@ const Component = ({ item }) => {
           style={{
             width: "100%",
             height: "100%",
-  // FIT EXCEPTION, AND IT IS TEMPORARY (Zac, 2026-09-20). The nine transitions
-  // are `contain` so their plate matches the letterboxed base track. THE ZOOMS
-  // STAY `cover` FOR TWO REASONS, both of which expire together: a contained
-  // zoom drags the letterbox EDGE through frame, and the velocity-cap
-  // calibration was measured against a COVERING plate.
-  // WHEN CANVAS-FOLLOWS-SOURCE LANDS, BOTH FITS ARE THE IDENTITY — a 1920x1080
-  // source in a 1920x1080 canvas has no bars for either to place — and this
-  // exception ENDS. Delete it then; do not re-argue it.
-            objectFit: "cover",
+  // CONTAIN, and the exception that kept this `cover` is GONE (2026-09-21).
+  // Its own terms: both fits become the identity once canvas-follows-source
+  // lands, because a source in a canvas of its own shape has no bars for
+  // either to place — delete it then, do not re-argue it. That landed.
+  // prestage derives the canvas per run, w/h/fps are keyword-only with no
+  // default (a caller that omits them is a TypeError, not a silent portrait),
+  // and kolkata-9 exported 1280x720 @ 28fps with probe_state MEASURED — read
+  // off the artefact rather than asserted. Both reasons expire together and
+  // both have.
+            objectFit: "contain",
             transform: `scale(${bgScale})`,
             transformOrigin: `${originX * 100}% ${originY * 100}%`,
-            filter: `${correct} saturate(${bgSaturation}) brightness(0.95)`,
+            // THE COOL TINT LIVES HERE NOW, NOT IN AN OVERLAY. It was a
+            // rgba(30,50,80) layer at alpha 0.06 in `multiply`, and ChatCut
+            // strips mixBlendMode — so it composited normally, which still
+            // darkens but only to about 70% of the intended depth (-0.0152
+            // against -0.0215 mean luma, measured) AND lifts true blacks off
+            // zero instead of preserving them. brightness() is multiplicative
+            // and survives registration, so it does exactly what the multiply
+            // layer was for, with the black point intact.
+            filter: `${correct} saturate(${bgSaturation}) brightness(${0.95 * (1 - 0.048 * zoomProgress)})`,
           }}
         />
         <div style={{ position: "absolute", inset: 0,
-          background: `rgba(30, 50, 80, ${0.06 * zoomProgress})`,
-          mixBlendMode: "multiply", pointerEvents: "none" }} />
-        <div style={{ position: "absolute", inset: 0,
-          background: `linear-gradient(180deg, rgba(180, 160, 130, ${0.025 * zoomProgress}) 0%, rgba(160, 140, 110, ${0.04 * zoomProgress}) 50%, rgba(140, 120, 100, ${0.025 * zoomProgress}) 100%)`,
-          mixBlendMode: "screen", filter: "blur(20px)",
+          // ALPHAS RAISED 2.5x BECAUSE THE BLEND IS GONE, NOT BECAUSE THE LOOK
+          // CHANGED. In `screen` this lifted mean luma by +0.0124; composited
+          // normally at the old alphas it lifts only +0.0047, so the haze was
+          // rendering at a bit over a third of its intended strength. 2.5x
+          // restores the measured lift. Matching mean luma on one frame is the
+          // stated criterion, not a claim about every frame.
+          background: `linear-gradient(180deg, rgba(180, 160, 130, ${0.0625 * zoomProgress}) 0%, rgba(160, 140, 110, ${0.10 * zoomProgress}) 50%, rgba(140, 120, 100, ${0.0625 * zoomProgress}) 100%)`,
+          filter: "blur(20px)",
           transform: `scale(${midScale})`, pointerEvents: "none" }} />
         {orbs.map((orb, i) => {
           const orbProgress = clamp01((frame - orb.delay) / Math.max(1, span - orb.delay));
@@ -444,9 +494,11 @@ const Component = ({ item }) => {
                 width: orb.size,
                 height: orb.size,
                 borderRadius: "50%",
-                background: "radial-gradient(circle, rgba(255,220,160,0.35) 0%, rgba(255,200,120,0.08) 40%, transparent 70%)",
+                // 0.35 -> 0.40: nearest to parity of the three layers. In
+                // `screen` an orb lifted mean luma +0.0205, normally +0.0182,
+                // so it was already close and needs only a nudge.
+                background: "radial-gradient(circle, rgba(255,220,160,0.40) 0%, rgba(255,200,120,0.09) 40%, transparent 70%)",
                 filter: "blur(15px)",
-                mixBlendMode: "screen",
                 opacity: orbOpacity,
                 transform: `scale(${midScale})`,
                 pointerEvents: "none",

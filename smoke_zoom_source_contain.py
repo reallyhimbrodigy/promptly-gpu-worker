@@ -116,7 +116,36 @@ def main():
                 everywhere.append("%s:%d" % (fn, i))
     leg("L5 no_unpinned_cover_anywhere", not everywhere, "unpinned: %s" % (everywhere or "none"))
 
-    print("%d/%d legs ok" % (6 - len(FAILS), 6))
+    # L6 THE BUILT BLOB IS WHAT REGISTERS, AND IT MUST NOT BE STALE.
+    # port/bodies/*.jsx is a TEMPLATE — six of the seven zooms carry a
+    # `// @@VELOCITY_CAP@@` marker that port/emit_zoom_component.mjs replaces —
+    # so the file this smoke reads is NOT the file that ships. When the contain
+    # switch landed I edited the bodies and never rebuilt: every legs above went
+    # green while port/build/ still said `cover`, and I was one tool call from
+    # registering a body with the marker still in it, which would have shipped
+    # components calling three undefined symbols.
+    #
+    # The build already had a --check mode for exactly this and nothing ran it.
+    # A generator with a drift check that no gate invokes is a check that does
+    # not exist.
+    import subprocess
+    r = subprocess.run(["node", os.path.join(HERE, "port", "emit_zoom_component.mjs"), "--check"],
+                       cwd=HERE, capture_output=True, text=True)
+    drift = [l for l in (r.stdout or "").splitlines() if l.startswith("DRIFT")]
+    leg("L6 built_blobs_in_sync", r.returncode == 0,
+        "emit --check rc=%d, %d drifted %s" % (r.returncode, len(drift),
+                                               [d.split()[1].rstrip(":") for d in drift] or ""))
+
+    # L7 and no built blob still carries the marker — the failure that would
+    # actually reach a user, rather than the one that is merely out of date.
+    left = []
+    for fn in sorted(os.listdir(os.path.join(HERE, "port", "build"))):
+        if fn.endswith(".jsx") and "@@VELOCITY_CAP@@" in open(
+                os.path.join(HERE, "port", "build", fn), encoding="utf-8").read():
+            left.append(fn[:-4])
+    leg("L7 no_unsubstituted_marker", not left, "still templated: %s" % (left or "none"))
+
+    print("%d/%d legs ok" % (8 - len(FAILS), 8))
     if FAILS:
         print("FAILED: %s" % ", ".join(FAILS))
     return 1 if FAILS else 0

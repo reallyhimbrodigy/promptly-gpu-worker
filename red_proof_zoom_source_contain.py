@@ -40,6 +40,19 @@ MUTATIONS = [
      'objectFit: "cover", filter: correct }} />',
      "L5 no_unpinned_cover_anywhere",
      lambda s: 'objectFit: "contain", filter: correct }} />' in s),
+    # THE BUILT BLOB GOES STALE — the exact failure that happened: a body edited
+    # and never rebuilt, every source-reading leg green, and port/build/ still
+    # carrying the old code that is what actually registers.
+    ("built_blob_goes_stale", "build/StepZoom.jsx",
+     'objectFit: "contain"', 'objectFit: "cover"',
+     "L6 built_blobs_in_sync",
+     lambda s: 'objectFit: "contain"' in s),
+    # AND THE MARKER SURVIVES INTO A BUILT BLOB — a component registered with
+    # `// @@VELOCITY_CAP@@` still in it calls three undefined symbols.
+    ("marker_survives_the_build", "build/SmoothPush.jsx",
+     "  const rootStyle = {", "  // @@VELOCITY_CAP@@\n  const rootStyle = {",
+     "L7 no_unsubstituted_marker",
+     lambda s: "const rootStyle = {" in s),
     # A pin that no longer points at a cover is a stale argument.
     ("pin_goes_stale", "EmojiCard.jsx",
      '            objectFit: "cover", aspectRatio: "4 / 5" }} />',
@@ -55,7 +68,7 @@ def run_smoke():
 
 
 def residue():
-    p = subprocess.run(["git", "status", "--porcelain", "port/bodies"],
+    p = subprocess.run(["git", "status", "--porcelain", "port/bodies", "port/build"],
                        cwd=HERE, capture_output=True, text=True)
     return p.stdout.strip()
 
@@ -70,7 +83,7 @@ def main():
 
     red = 0
     for name, fn, old, new, phrase, pre in MUTATIONS:
-        path = os.path.join(BODIES, fn)
+        path = os.path.join(HERE, "port", fn) if fn.startswith("build/") else os.path.join(BODIES, fn)
         if not os.path.exists(path):
             print("  %-28s HARNESS FAILURE  no such body %s" % (name, fn)); continue
         src = open(path, encoding="utf-8").read()
