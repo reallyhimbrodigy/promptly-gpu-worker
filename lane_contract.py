@@ -172,13 +172,35 @@ def live_set(library="library_73.json"):
     # reach the menu. Absence of a row is UNKNOWN, never BLANK.
     stills = (_read(os.path.join("measured", "inventory_stills.json")) or {})
     stills = stills.get("components") or {}
+    # BYTES_ONLY IS A REAL STATE AND FOLDING IT INTO UNKNOWN LOSES INFORMATION
+    # (Builder 1's correction, 2026-09-21, and he was right). The asymmetry is
+    # the argument: a false BLANK is cheap — content supplied only as a
+    # propertyOverride never arrives and the frame is legitimately empty — while
+    # a false DRAWS is dear, because something must have rendered to change the
+    # output at all. So "a comparison cleared and nobody read the frame" is
+    # WEAKER evidence, not absent evidence, and it earns its own name.
+    #
+    # BUT THE NAME IS BYTES_ONLY, NOT PIXELS_ONLY, AND THE DIFFERENCE IS THE
+    # POINT. catalogue_stills.json compares `bytes` against
+    # `empty_control_bytes` — PNG FILE LENGTH. No pixel is read anywhere in that
+    # record. It cannot say WHERE something drew, and it cannot tell a component
+    # that drew the RIGHT thing from one that drew the wrong thing at the right
+    # size. Calling it a pixel diff is how it got trusted as a verdict.
+    catalogue = _read("catalogue_stills.json") or {}
     draws = {}
     for name in comps:
         declared = (comps[name] or {}).get("draws")
         if declared in ("BLANK", "DISPUTED", "UNKNOWN"):
             draws[name] = declared
+        elif stills.get(name, {}).get("state") == "DRAWS":
+            draws[name] = "DRAWS"
+        elif (catalogue.get(name) or {}).get("state") == "MEASURED":
+            draws[name] = "BYTES_ONLY"
         else:
-            draws[name] = "DRAWS" if stills.get(name, {}).get("state") == "DRAWS" else "UNKNOWN"
+            draws[name] = "UNKNOWN"
+    # THE MENU TAKES ONLY "DRAWS". BYTES_ONLY does not reach it — a file that
+    # got bigger is not a picture somebody looked at, and the whole reason the
+    # menu exists is that the two were being treated as one.
     menu = sorted(n for n in renderable if draws.get(n) == "DRAWS")
     awaiting = sorted(n for n in renderable if draws.get(n) != "DRAWS")
     return {"state": MEASURED,

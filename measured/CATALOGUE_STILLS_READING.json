@@ -1,0 +1,253 @@
+{
+  "_what_this_is": "A reading of catalogue_stills.json — the record whose BLANK verdicts Builder 1 retracted and whose MEASURED verdicts I was asked to treat as evidence. Read from the artefact on lane/agentic-builder2, not from either lane's description of it.",
+  "_the_first_correction": "IT IS NOT A PIXEL DIFF. Every row compares `bytes` against `empty_control_bytes` — PNG FILE LENGTH. No pixel is read anywhere in the record. Both lanes called it a pixel diff, which is how it came to be trusted as a verdict: a length cannot say WHERE something drew, and cannot tell a component that drew the RIGHT thing from one that drew the wrong thing at the same size.",
+  "_the_second_correction": "THE CONTROL IS NOT ONE CONTROL. 11 rows share control 37837; six have none at all (-1, honestly reported CONTROL_ABSENT); the remaining 12 each carry a control unique to themselves. A per-component control is defensible — it may be the component's own canvas — but it means the 7 BLANKs are not one finding.",
+  "_the_blank_split": "Of the 7 BLANK rows, ALL have still == control byte for byte. Three (EndCard, MouseDrag, SpeechBubble) compare against the SHARED empty control, which is what a component drawing nothing actually looks like. Four (RecordingFrame, Reticle, Timeline, TimelineRoadmap) compare against a control unique to themselves AND equal to themselves — undecidable between 'drew nothing on its own canvas' and 'the comparison read one file twice'. Comparing a thing with itself is a HARNESS FAULT, never a zero, and nothing in this record separates the two.",
+  "_why_it_still_supports_BYTES_ONLY": "The five MEASURED rows this lane carries run 3.0x-4.7x the shared control's length (+74k to +140k bytes). A PNG that encodes to four times the length of the empty frame contains a great deal more than the empty frame, so SOMETHING rendered. That is real evidence and weaker evidence at once — which is exactly why it is named BYTES_ONLY and does not reach the menu.",
+  "shared_control_bytes": 37837,
+  "blank_supported_by_shared_control": [
+    "EndCard",
+    "MouseDrag",
+    "SpeechBubble"
+  ],
+  "blank_undecidable_self_control": [
+    "RecordingFrame",
+    "Reticle",
+    "Timeline",
+    "TimelineRoadmap"
+  ],
+  "rows": {
+    "AnnotationArrow": {
+      "state": "CONTROL_ABSENT",
+      "bytes": 44019,
+      "control_bytes": -1,
+      "control_is_shared": false,
+      "still_equals_control": false,
+      "ratio": null
+    },
+    "BarRace": {
+      "state": "MEASURED",
+      "bytes": 90491,
+      "control_bytes": 37837,
+      "control_is_shared": true,
+      "still_equals_control": false,
+      "ratio": 2.39
+    },
+    "ChatThread": {
+      "state": "CONTROL_ABSENT",
+      "bytes": 82951,
+      "control_bytes": -1,
+      "control_is_shared": false,
+      "still_equals_control": false,
+      "ratio": null
+    },
+    "DropBanner": {
+      "state": "MEASURED",
+      "bytes": 68035,
+      "control_bytes": 55666,
+      "control_is_shared": false,
+      "still_equals_control": false,
+      "ratio": 1.22
+    },
+    "DropCard": {
+      "state": "MEASURED",
+      "bytes": 96881,
+      "control_bytes": 54644,
+      "control_is_shared": false,
+      "still_equals_control": false,
+      "ratio": 1.77
+    },
+    "EditorialQuote": {
+      "state": "MEASURED",
+      "bytes": 161475,
+      "control_bytes": 37837,
+      "control_is_shared": true,
+      "still_equals_control": false,
+      "ratio": 4.27
+    },
+    "EndCard": {
+      "state": "BLANK",
+      "bytes": 37837,
+      "control_bytes": 37837,
+      "control_is_shared": true,
+      "still_equals_control": true,
+      "ratio": 1.0
+    },
+    "IMessageBubble": {
+      "state": "MEASURED",
+      "bytes": 48456,
+      "control_bytes": 41381,
+      "control_is_shared": false,
+      "still_equals_control": false,
+      "ratio": 1.17
+    },
+    "InstagramComment": {
+      "state": "MEASURED",
+      "bytes": 74311,
+      "control_bytes": 67851,
+      "control_is_shared": false,
+      "still_equals_control": false,
+      "ratio": 1.1
+    },
+    "MouseDrag": {
+      "state": "BLANK",
+      "bytes": 37837,
+      "control_bytes": 37837,
+      "control_is_shared": true,
+      "still_equals_control": true,
+      "ratio": 1.0
+    },
+    "NamePlate": {
+      "state": "MEASURED",
+      "bytes": 43814,
+      "control_bytes": 37837,
+      "control_is_shared": true,
+      "still_equals_control": false,
+      "ratio": 1.16
+    },
+    "Notification": {
+      "state": "MEASURED",
+      "bytes": 62941,
+      "control_bytes": 37837,
+      "control_is_shared": true,
+      "still_equals_control": false,
+      "ratio": 1.66
+    },
+    "PillCluster": {
+      "state": "MEASURED",
+      "bytes": 177793,
+      "control_bytes": 37837,
+      "control_is_shared": true,
+      "still_equals_control": false,
+      "ratio": 4.7
+    },
+    "PillMarquee": {
+      "state": "CONTROL_ABSENT",
+      "bytes": 311212,
+      "control_bytes": -1,
+      "control_is_shared": false,
+      "still_equals_control": false,
+      "ratio": null
+    },
+    "ProgressBar": {
+      "state": "MEASURED",
+      "bytes": 93837,
+      "control_bytes": 60225,
+      "control_is_shared": false,
+      "still_equals_control": false,
+      "ratio": 1.56
+    },
+    "PullQuote": {
+      "state": "MEASURED",
+      "bytes": 123745,
+      "control_bytes": 37837,
+      "control_is_shared": true,
+      "still_equals_control": false,
+      "ratio": 3.27
+    },
+    "RankedList": {
+      "state": "MEASURED",
+      "bytes": 112211,
+      "control_bytes": 37837,
+      "control_is_shared": true,
+      "still_equals_control": false,
+      "ratio": 2.97
+    },
+    "RecordingFrame": {
+      "state": "BLANK",
+      "bytes": 48018,
+      "control_bytes": 48018,
+      "control_is_shared": false,
+      "still_equals_control": true,
+      "ratio": 1.0
+    },
+    "Reticle": {
+      "state": "BLANK",
+      "bytes": 77179,
+      "control_bytes": 77179,
+      "control_is_shared": false,
+      "still_equals_control": true,
+      "ratio": 1.0
+    },
+    "SectionDivider": {
+      "state": "MEASURED",
+      "bytes": 626906,
+      "control_bytes": 592160,
+      "control_is_shared": false,
+      "still_equals_control": false,
+      "ratio": 1.06
+    },
+    "SpeechBubble": {
+      "state": "BLANK",
+      "bytes": 37837,
+      "control_bytes": 37837,
+      "control_is_shared": true,
+      "still_equals_control": true,
+      "ratio": 1.0
+    },
+    "Stamp": {
+      "state": "CONTROL_ABSENT",
+      "bytes": 485081,
+      "control_bytes": -1,
+      "control_is_shared": false,
+      "still_equals_control": false,
+      "ratio": null
+    },
+    "StatCard": {
+      "state": "MEASURED",
+      "bytes": 116988,
+      "control_bytes": 37837,
+      "control_is_shared": true,
+      "still_equals_control": false,
+      "ratio": 3.09
+    },
+    "StepDivider": {
+      "state": "MEASURED",
+      "bytes": 100844,
+      "control_bytes": 58632,
+      "control_is_shared": false,
+      "still_equals_control": false,
+      "ratio": 1.72
+    },
+    "StickyNotes": {
+      "state": "CONTROL_ABSENT",
+      "bytes": 118733,
+      "control_bytes": -1,
+      "control_is_shared": false,
+      "still_equals_control": false,
+      "ratio": null
+    },
+    "TikTokComment": {
+      "state": "MEASURED",
+      "bytes": 49946,
+      "control_bytes": 43950,
+      "control_is_shared": false,
+      "still_equals_control": false,
+      "ratio": 1.14
+    },
+    "Timeline": {
+      "state": "BLANK",
+      "bytes": 128323,
+      "control_bytes": 128323,
+      "control_is_shared": false,
+      "still_equals_control": true,
+      "ratio": 1.0
+    },
+    "TimelineRoadmap": {
+      "state": "BLANK",
+      "bytes": 147056,
+      "control_bytes": 147056,
+      "control_is_shared": false,
+      "still_equals_control": true,
+      "ratio": 1.0
+    },
+    "TweetBubble": {
+      "state": "CONTROL_ABSENT",
+      "bytes": 60271,
+      "control_bytes": -1,
+      "control_is_shared": false,
+      "still_equals_control": false,
+      "ratio": null
+    }
+  }
+}

@@ -86,10 +86,22 @@ MUTATIONS = [
     # L10: a sha is promoted into a verdict. This is the defect Zac named —
     # "a file with a hash is a file, not evidence" — written as code.
     ("file_only_becomes_evidence", "lane_contract.py",
-     'draws[name] = "DRAWS" if stills.get(name, {}).get("state") == "DRAWS" else "UNKNOWN"',
-     'draws[name] = "DRAWS" if stills.get(name, {}).get("state") in ("DRAWS", "FILE_ONLY") else "UNKNOWN"',
+     '        elif stills.get(name, {}).get("state") == "DRAWS":',
+     '        elif stills.get(name, {}).get("state") in ("DRAWS", "FILE_ONLY"):',
      "L10 file_only_not_on_menu",
+     # RE-AIMED 2026-09-21 after my OWN edit orphaned it. Adding the BYTES_ONLY
+     # branch rewrote the line this mutation targeted, and the anchor guard
+     # reported `anchor 0x` rather than passing — a refactor orphaning a
+     # mutation, caught by the one guard that sees that class.
      lambda s: 'get("state") == "DRAWS"' in s),
+    # L13: BYTES_ONLY collapses into DRAWS — a file that got bigger promoted
+    # into a picture somebody looked at. This is the exact inference Builder 1
+    # caught himself making, written as code.
+    ("bytes_only_becomes_draws", "lane_contract.py",
+     '            draws[name] = "BYTES_ONLY"',
+     '            draws[name] = "DRAWS"',
+     "L13 bytes_only_named_not_on_menu",
+     lambda s: '"BYTES_ONLY"' in s),
     # L12: the RULING regresses — Reticle is dropped from scope again on the
     # retracted blank. The rule is untouched and perfectly correct; the library
     # simply loses a component, and only a mutation of the ruling can show it.

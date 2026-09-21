@@ -134,7 +134,17 @@ def main():
         "renderable=%s menu=%s draws=%s" % ("Reticle" in (r.get("renderable") or []),
                                             "Reticle" in menu, dr.get("Reticle")))
 
-    print("%d/%d legs ok" % (13 - len(FAILS), 13))
+    # L13 BYTES_ONLY IS EVIDENCE AND IS NOT A PICTURE. A PNG that encoded four
+    # times longer than the empty control proves SOMETHING rendered; it cannot
+    # say what, or where, or whether it was right. It is named so it is not lost
+    # into UNKNOWN, and it is kept off the menu so it is not promoted into a
+    # look. Both halves matter — the state exists to hold that distinction.
+    bytes_only = sorted(n for n in (r.get("renderable") or []) if dr.get(n) == "BYTES_ONLY")
+    leg("L13 bytes_only_named_not_on_menu",
+        bool(bytes_only) and not (set(bytes_only) & menu),
+        "%d BYTES_ONLY, %d leaked onto menu" % (len(bytes_only), len(set(bytes_only) & menu)))
+
+    print("%d/%d legs ok" % (14 - len(FAILS), 14))
     if FAILS:
         print("FAILED: %s" % ", ".join(FAILS))
     return 1 if FAILS else 0
