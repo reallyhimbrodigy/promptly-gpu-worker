@@ -67,12 +67,26 @@ read back identical to source except at a single site:
 That is the nested-`({item})` injection `registered_diff` classifies as
 STRIPPED/injection and exits 0 on.
 
-**Stated as a gap rather than claimed as a pass:** I read that difference off
-`inspect_asset`'s output, I did not pipe it through `registered_diff`. This MCP
-surface returns the code inside a tool result, not to a file, and the differ
-takes a path. Eyeballing a diff is how a second difference goes unnoticed, so
-proof 2 is **INSPECTED, not DIFFED**, for NamePlate and **ABSENT** for MouseDrag
-until a small persist-and-diff step exists.
+**That claim was wrong, and the differ is what found it.** Once the pair went
+through `registered_diff` rather than my eye, NamePlate read **DIVERGED, 3
+differences, 1 unexplained** — not "identical but for one site". The extra
+difference: ChatCut stores the code WITHOUT a terminal newline (source `};\n`,
+366 lines; registered `};`, 365). One byte, invisible at a glance, and it would
+have made every component read DIVERGED forever.
+
+`classify()` now drops exactly one trailing newline per side — not `trim()`,
+which would swallow a truncated body. Both bodies now pass by measurement:
+
+    NamePlate  STRIPPED  injection 1  unexplained 0  exit 0
+    MouseDrag  STRIPPED  injection 1  unexplained 0  exit 0
+
+The step is `port/proof2.sh <Name>`: persist from the session transcript
+(`tool_result` only — the same transcript holds the registration CALLS, whose
+`code` is the source we sent, and reading one would compare the source against
+itself), materialise the contract source from the registry, run the differ.
+Nothing is retyped: retyping the registered code with the source on screen
+biases every keystroke toward the source, and the differ then reads IDENTICAL
+because both files came from one original.
 
 ## One divergence the frame exposed
 
@@ -88,3 +102,42 @@ porter wrote because the real default could not be resolved. The frame is
 right and the registered default is wrong. Worth noting against
 [registered default is the value]: a placeholder default is not a default, and
 here the component's own logic silently rescued it.
+
+
+## The ten that stay PENDING PORT
+
+Recorded in `library_73.json` `_pending_port`, each reason COPIED from
+`chatcut_registry.json` `refused` rather than restated, with a leg asserting the
+two still agree. The library keeps every entry; the platter derives from the
+registry instead.
+
+| component | reason | detail |
+|---|---|---|
+| AnnotationArrow | structured props ChatCut cannot express | `end: { x: number, start: { x: number` |
+| ChatThread | structured props ChatCut cannot express | `header: ChatThreadHeader, messages: ChatMessage[]` |
+| EndCard | structured props ChatCut cannot express | `palette: { bg: string` |
+| InstagramComment | the blob reads an identifier ChatCut does not have | `cancelRender`, `setTimeout`, `Image` |
+| Notification | structured props ChatCut cannot express | `notifications: NotificationItem[]` |
+| PillMarquee | structured props ChatCut cannot express | `pills: string[]` |
+| ProgressBar | structured props ChatCut cannot express | `formatValue: (current: number) => string` |
+| SpeechBubble | not a single component | a DISPATCHER — it switches on `platform` to TweetBubble / InstagramComment / TikTokComment |
+| TikTokComment | the blob reads an identifier ChatCut does not have | `cancelRender`, `setTimeout`, `Image` |
+| TweetBubble | structured props ChatCut cannot express | `stats: { replies: number` |
+
+**Seven of the ten share one reason, and that reason already has a proven
+escape.** StickyNotes sat in this exact bucket — "structured props ChatCut
+cannot express" — and is now registered, placed and frame-proven, because its
+array became a FLATTENED SEMICOLON STRING (`text|colour|rotation; ...`) parsed
+inside the component. `pills: string[]` and `notifications: NotificationItem[]`
+are the same shape.
+
+It is recorded as an available pattern with precedent, **not** as something this
+lane will apply unasked. The StickyNotes split was ruled wrong at the root once
+already — I ported it with a one-note default I chose and then read that default
+back as evidence the component was singular — so the shape of each flattening is
+a taste call, and seven of them is a body of taste calls. What is measured here
+is only that the blocker is the same one that has been solved once.
+
+The remaining three do not have that escape: two read identifiers the runtime
+does not have (`cancelRender`, `setTimeout`, `Image`), and SpeechBubble is a
+dispatcher whose three destinations are themselves on this list.
