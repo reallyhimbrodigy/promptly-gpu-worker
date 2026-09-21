@@ -113,11 +113,20 @@ _NO_PICTURE_FAMILIES = {
 
 
 def live_set(library="library_73.json"):
-    """-> {state, components, n, renderable, n_renderable, no_picture, by_family, why}
+    """-> {state, components, renderable, menu, awaiting_picture, draws, ...}
 
     THE LIVE SET, derived from production over 30d and cut at 10 users reached.
-    `renderable` is the subset that can be registered, placed and photographed;
-    it is what a stills or frame-proof run should iterate.
+
+    THREE SETS, AND THEY ARE NOT INTERCHANGEABLE:
+      components       what production uses. SCOPE.
+      renderable       the subset with a picture at all — the STILLS WORKLIST.
+                       Sounds and caption styles are excluded; they cannot be
+                       registered, placed and photographed.
+      menu             renderable AND frame-proven — the OFFERABLE set, the one
+                       a place-schema may advertise.
+    `awaiting_picture` is renderable minus menu: in scope, needs a photograph,
+    must not be offered yet. Iterate `renderable` to take pictures; derive a
+    schema from `menu`.
     """
     lib = _read(library)
     if not isinstance(lib, dict) or not lib:
@@ -149,15 +158,43 @@ def live_set(library="library_73.json"):
         else:
             renderable.append(name)
     placements = sum(len(v) for v in by_family.values())
+
+    # ── the picture verdict, and why it is SEPARATE from scope ──────────────
+    # SCOPE says production uses it. THE MENU says we can offer it. They are
+    # different questions and collapsing them breaks in both directions:
+    # dropping an unproven component from scope means it never gets
+    # photographed, and offering one means the menu advertises what the kitchen
+    # may refuse. Reticle is the worked example — removed from scope on a BLANK
+    # its own author later retracted, which cost it its place in the worklist.
+    #
+    # A STILL IS NOT A VERDICT. inventory_stills carries FILE_ONLY for a row
+    # with a sha and no recorded look; that is NOT-YET-EVIDENCE and must not
+    # reach the menu. Absence of a row is UNKNOWN, never BLANK.
+    stills = (_read(os.path.join("measured", "inventory_stills.json")) or {})
+    stills = stills.get("components") or {}
+    draws = {}
+    for name in comps:
+        declared = (comps[name] or {}).get("draws")
+        if declared in ("BLANK", "DISPUTED", "UNKNOWN"):
+            draws[name] = declared
+        else:
+            draws[name] = "DRAWS" if stills.get(name, {}).get("state") == "DRAWS" else "UNKNOWN"
+    menu = sorted(n for n in renderable if draws.get(n) == "DRAWS")
+    awaiting = sorted(n for n in renderable if draws.get(n) != "DRAWS")
     return {"state": MEASURED,
             "components": sorted(comps), "n": len(comps),
             "renderable": sorted(renderable), "n_renderable": len(renderable),
             "no_picture": no_picture, "n_no_picture": len(no_picture),
+            "draws": draws,
+            "menu": menu, "n_menu": len(menu),
+            "awaiting_picture": awaiting, "n_awaiting_picture": len(awaiting),
             "by_family": {k: sorted(v) for k, v in sorted(by_family.items())},
             "cut_users_30d": scope.get("_cut_users_30d"),
             "source": scope.get("_source"),
-            "why": "%d component(s) in %d famil(ies), %d placement(s); %d renderable, "
+            "why": "%d component(s) in %d famil(ies), %d placement(s); %d renderable "
+                   "(%d frame-proven ON THE MENU, %d awaiting a picture), "
                    "%d with no picture (%d sound, %d caption style)"
                    % (len(comps), len(by_family), placements, len(renderable),
-                      len(no_picture), len(by_family.get("sfx") or []),
+                      len(menu), len(awaiting), len(no_picture),
+                      len(by_family.get("sfx") or []),
                       len(by_family.get("caption style") or []))}

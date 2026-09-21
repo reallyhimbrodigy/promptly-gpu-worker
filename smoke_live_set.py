@@ -36,8 +36,8 @@ def main():
     leg("L1 state_measured", r["state"] == lc.MEASURED, r["state"])
     # The counts are pinned because a SILENT DRIFT is the failure here — a merge
     # that drops rows leaves a smaller, perfectly well-formed library.
-    leg("L2 n_is_46", r.get("n") == 46, "n=%s" % r.get("n"))
-    leg("L3 renderable_is_26", r.get("n_renderable") == 26, "n=%s" % r.get("n_renderable"))
+    leg("L2 n_is_47", r.get("n") == 47, "n=%s" % r.get("n"))
+    leg("L3 renderable_is_27", r.get("n_renderable") == 27, "n=%s" % r.get("n_renderable"))
 
     fams = r.get("by_family") or {}
     rend = set(r.get("renderable") or [])
@@ -99,7 +99,42 @@ def main():
         (rend | nop) == set(r.get("components") or []) and not (rend & nop),
         "%d + %d = %d of %d" % (len(rend), len(nop), len(rend | nop), r.get("n") or -1))
 
-    print("%d/%d legs ok" % (9 - len(FAILS), 9))
+    # ── the menu is not the scope, and this is where that is enforced ──────
+    menu, await_ = set(r.get("menu") or []), set(r.get("awaiting_picture") or [])
+    dr = r.get("draws") or {}
+
+    # L9 THE LOAD-BEARING LEG. Nothing reaches the menu without a picture. A
+    # place-schema derived from the menu then cannot advertise what the kitchen
+    # refuses — which is the defect one level up from the one it already fixed.
+    unproven_on_menu = sorted(n for n in menu if dr.get(n) != "DRAWS")
+    leg("L9 menu_is_frame_proven_only", not unproven_on_menu,
+        "%d on menu, %d unproven %s" % (len(menu), len(unproven_on_menu), unproven_on_menu or ""))
+
+    # L10 FILE_ONLY is NOT-YET-EVIDENCE. A sha is a file, not a verdict, and
+    # this is the leg that stops one being promoted into the other.
+    stills = json.load(open(os.path.join(lc.HERE, "measured", "inventory_stills.json")))
+    fo = {k for k, v in (stills.get("components") or {}).items() if v.get("state") == "FILE_ONLY"}
+    leg("L10 file_only_not_on_menu", bool(fo) and not (fo & menu),
+        "%d FILE_ONLY, %d leaked onto menu" % (len(fo), len(fo & menu)))
+
+    # L11 the partition again, one level down: every renderable component is
+    # either offerable or waiting. One that fell out of both would be invisible
+    # — never offered and never photographed.
+    leg("L11 menu_partitions_renderable",
+        (menu | await_) == set(r.get("renderable") or []) and not (menu & await_),
+        "%d + %d = %d of %d" % (len(menu), len(await_), len(menu | await_), r.get("n_renderable") or -1))
+
+    # L12 RETICLE IS THE WORKED EXAMPLE, pinned deliberately. It was dropped
+    # from scope on a BLANK its own author retracted; a retracted verdict must
+    # return a component to the WORKLIST without putting it on the MENU. If this
+    # leg ever fails, the two questions have been collapsed back into one.
+    leg("L12 reticle_in_scope_not_on_menu",
+        "Reticle" in (r.get("renderable") or []) and "Reticle" not in menu
+        and dr.get("Reticle") == "UNKNOWN",
+        "renderable=%s menu=%s draws=%s" % ("Reticle" in (r.get("renderable") or []),
+                                            "Reticle" in menu, dr.get("Reticle")))
+
+    print("%d/%d legs ok" % (13 - len(FAILS), 13))
     if FAILS:
         print("FAILED: %s" % ", ".join(FAILS))
     return 1 if FAILS else 0

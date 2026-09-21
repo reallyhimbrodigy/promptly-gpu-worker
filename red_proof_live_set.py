@@ -9,6 +9,7 @@ proof. `rc=1 phrase=False` is that signature and it is reported NOT RED.
 Backups are IN MEMORY (a backup must not survive the run that made it) and the
 tree is checked for residue after every mutation.
 """
+import json
 import os
 import re
 import subprocess
@@ -17,7 +18,6 @@ import tokenize
 import io
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TARGET = os.path.join(HERE, "lane_contract.py")
 SMOKE = os.path.join(HERE, "smoke_live_set.py")
 
 
@@ -42,28 +42,62 @@ def _prose_spans(src):
     return out
 
 
-# (name, old, new, leg-phrase, precondition-over-unmutated-source or None)
+# (name, TARGET-FILE, old, new, leg-phrase, precondition over unmutated source)
+#
+# The target file is per-mutation because the defects live in two places: the
+# RULE lives in lane_contract.py, and the RULING — which components are in scope
+# — lives in library_73.json. A proof that could only mutate the rule would be
+# blind to the ruling silently losing a component, which is exactly what
+# happened to Reticle.
 MUTATIONS = [
-    ("floor_empty_map",
+    ("floor_empty_map", "lane_contract.py",
      "if not isinstance(comps, dict) or not comps:",
      "if not isinstance(comps, dict):",
      "L6 empty_is_FAILED",
      lambda s: "or not comps" in s),
-    ("two_home_rule",
+    ("two_home_rule", "lane_contract.py",
      "if fams and len(blocking) == len(fams):",
      "if fams and len(blocking) > 0:",
      "L5b two_home_kept",
      lambda s: "len(blocking) == len(fams)" in s),
-    ("absent_becomes_failed",
+    ("absent_becomes_failed", "lane_contract.py",
      '        return {"state": ABSENT, "why": "%s carries no _library',
      '        return {"state": FAILED, "why": "%s carries no _library',
      "L7 no_ruling_is_ABSENT",
      lambda s: '"state": ABSENT' in s),
-    ("renderable_loses_a_family",
+    ("renderable_loses_a_family", "lane_contract.py",
      '    "caption style": "a style is a property of a caption item, not a registered component",',
      '',
-     "L3 renderable_is_26",
+     "L3 renderable_is_27",
+     # THE PHRASE WAS STALE ONCE, ON PURPOSE KEPT AS THE RECORD: this mutation
+     # named "L3 renderable_is_26" after the leg was renamed to _is_27, and the
+     # proof reported NOT RED with rc=1 — a red that was not about the property.
+     # A bare exit code would have counted it. That is the whole argument for
+     # asserting the leg's own words.
      lambda s: '"caption style"' in s),
+    # L9: the menu stops asking for a picture. Every renderable component is
+    # offered, 18 of them never photographed — the menu advertising what the
+    # kitchen may refuse.
+    ("menu_ignores_the_picture", "lane_contract.py",
+     'menu = sorted(n for n in renderable if draws.get(n) == "DRAWS")',
+     'menu = sorted(n for n in renderable if draws.get(n) != "__never__")',
+     "L9 menu_is_frame_proven_only",
+     lambda s: 'draws.get(n) == "DRAWS"' in s),
+    # L10: a sha is promoted into a verdict. This is the defect Zac named —
+    # "a file with a hash is a file, not evidence" — written as code.
+    ("file_only_becomes_evidence", "lane_contract.py",
+     'draws[name] = "DRAWS" if stills.get(name, {}).get("state") == "DRAWS" else "UNKNOWN"',
+     'draws[name] = "DRAWS" if stills.get(name, {}).get("state") in ("DRAWS", "FILE_ONLY") else "UNKNOWN"',
+     "L10 file_only_not_on_menu",
+     lambda s: 'get("state") == "DRAWS"' in s),
+    # L12: the RULING regresses — Reticle is dropped from scope again on the
+    # retracted blank. The rule is untouched and perfectly correct; the library
+    # simply loses a component, and only a mutation of the ruling can show it.
+    ("reticle_dropped_from_scope", "library_73.json",
+     '    "Reticle": {',
+     '    "ReticleXX_REMOVED": {',
+     "L12 reticle_in_scope_not_on_menu",
+     lambda s: '"Reticle": {' in s),
 ]
 
 
@@ -73,14 +107,14 @@ def run_smoke():
 
 
 def residue():
-    p = subprocess.run(["git", "status", "--porcelain", "lane_contract.py"],
+    p = subprocess.run(["git", "status", "--porcelain",
+                        "lane_contract.py", "library_73.json"],
                        cwd=HERE, capture_output=True, text=True)
     return p.stdout.strip()
 
 
 def main():
     base_residue = residue()
-    src = open(TARGET, encoding="utf-8").read()
 
     rc, out = run_smoke()
     if rc != 0:
@@ -90,7 +124,9 @@ def main():
     print("baseline green.\n")
 
     red = 0
-    for name, old, new, phrase, pre in MUTATIONS:
+    for name, target, old, new, phrase, pre in MUTATIONS:
+        TARGET = os.path.join(HERE, target)
+        src = open(TARGET, encoding="utf-8").read()
         n = src.count(old)
         if n != 1:
             print("  %-28s HARNESS FAILURE  anchor %dx" % (name, n)); continue
@@ -99,11 +135,18 @@ def main():
         at = src.index(old)
         if any(a <= at and at + len(old) <= b for a, b in _prose_spans(src)):
             print("  %-28s HARNESS FAILURE  match lands in prose" % name); continue
+        mutant = src.replace(old, new, 1)
+        # A MUTANT THAT WILL NOT PARSE NEVER RAN AT ALL, and its red is about the
+        # parser rather than the property. Both file kinds get checked, each by
+        # its own parser — a JSON ruling can be broken exactly as easily.
         try:
-            compile(src.replace(old, new, 1), TARGET, "exec")
-        except SyntaxError as e:
+            if target.endswith(".json"):
+                json.loads(mutant)
+            else:
+                compile(mutant, TARGET, "exec")
+        except (SyntaxError, ValueError) as e:
             print("  %-28s HARNESS FAILURE  mutant will not parse (%s)" % (name, e)); continue
-        open(TARGET, "w", encoding="utf-8").write(src.replace(old, new, 1))
+        open(TARGET, "w", encoding="utf-8").write(mutant)
         try:
             mrc, mout = run_smoke()
         finally:

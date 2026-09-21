@@ -160,7 +160,7 @@
     "_ruling": "Zac 2026-09-21: cut at 10 users reached in 30d. Zooms and text overlays kept regardless — their usage is UNMEASURABLE from recipes rather than zero, and a cut applied to a missing FIELD deletes a family for the reader's blind spot.",
     "_cut_users_30d": 10,
     "_source": "measured/LIVE_SET_USAGE.json",
-    "_count": 46,
+    "_count": 47,
     "components": {
       "CaptionMatch": {
         "families": [
@@ -484,12 +484,20 @@
         ],
         "users_30d": 591,
         "why": "591 users in 30d"
+      },
+      "Reticle": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": 14,
+        "draws": "UNKNOWN",
+        "why": "motion graphic — 14 users reached in 30d, ABOVE the 10-user cut. RESTORED 2026-09-21: it was removed on a BLANK verdict Builder 1 has since retracted. That render registered label=\"\" and supplied content only as propertyOverrides, and whether ChatCut honours propertyOverrides at render is UNPROVEN — so the blank frame is as consistent with content never arriving as with the component not drawing. An unsafe verdict is not evidence, and a component does not lose its place in the library on one. IN SCOPE, and NOT on the menu until a picture says so."
       }
     },
-    "_blank_note": "Six components draw BLANK. Five were already out on usage; only Reticle was in the library, so the picture gate and the 10-user cut removed almost the same set by different evidence — which is worth noting rather than treating as one finding."
+    "_blank_note": "THE BLANK LIST WAS RETRACTED BY THE LANE THAT PRODUCED IT (Builder 1, 2026-09-21). All six blanks came from one harness under one registration that supplied content only via propertyOverrides — an unproven write field — so a blank frame cannot be told apart from content that never arrived. Five were already below the 10-user cut and stay out on USAGE, which needs no picture. Reticle was removed by the picture gate alone and is therefore back in scope with draws UNKNOWN. Keeping both readings of MouseDrag is what located the cause; a single overwritten verdict would have left five components wrongly out and no way to know."
   },
   "_out_of_scope": {
-    "_count": 33,
+    "_count": 32,
     "components": {
       "AnnotationArrow": {
         "families": [
@@ -724,15 +732,6 @@
         ],
         "users_30d": 5,
         "why": "below 10 users in 30d (5)"
-      },
-      "Reticle": {
-        "families": [
-          "motion graphic"
-        ],
-        "users_30d": 14,
-        "why": "DRAWS BLANK on the build render (Builder 1, 2026-09-21) — off the menu until it draws. Was in-scope at 14 users in 30d.",
-        "blank": true,
-        "draws": "BLANK"
       }
     },
     "_draws_note": "`draws` records the PICTURE verdict, which is independent of the usage cut. BLANK = observed not drawing on Builder 1's build render 2026-09-21. DISPUTED = the two lanes' renders disagree and neither has been shown wrong. A component absent from this field has no picture verdict at all — that is UNKNOWN, never BLANK."
