@@ -1,9 +1,9 @@
-# The 33-row parity table — sent / answered / read-back / frame
+# The 39-row parity table — sent / answered / read-back / frame
 
-**Builder 2, 2026-09-20.** One row per ported item: **7 zooms + 11 transitions
-and overlays + 15 sound effects = 33.** (My own contribution is 30 of those; the
-three zooms Builder 1 ported are included because the table is the PORT's
-parity, not mine.)
+**Builder 2, 2026-09-20; text section and the two closed zoom rows 2026-09-21.**
+One row per ported item: **7 zooms + 11 transitions and overlays + 6 text + 15
+sound effects = 39.** (The three zooms Builder 1 ported are included because the
+table is the PORT's parity, not mine.)
 
 ## The four columns, and why there are four
 
@@ -28,15 +28,18 @@ columns 2 and 3 is where this lane has been burned repeatedly:
 | component | sent | answered | read-back | frame | evidence |
 |---|:--:|:--:|:--:|:--:|---|
 | SmoothPush | ✅ | ✅ | ✅ | ✅ | Builder 1's zoom_pair, project `b1e4f009`; control 9 frames at 0.0 diff, span 13 frames |
-| StagedPush | ❓ | ❓ | ❓ | ❓ | **UNKNOWN — I have no run evidence.** Ported by Builder 1; I did not find a registration or placement for it and will not claim one |
-| StepZoom | ❓ | ❓ | ❓ | ❓ | **UNKNOWN — same.** Declares `NO VELOCITY CAP:` and is gated, but gated is not placed |
+| StagedPush | ✅ | ✅ | ✅ | ✅ | asset `d3cc335e02`, item `b320a4543f`, placed 620–679, frame 652 — pushed in on the Wikipedia B-roll and **no yellow stage warning**, so both stages parsed. That warning is the tell for `stages.length < 2`, the refusal that made the 2026-09-07 port render an UN-ZOOMED passthrough at psnr 24.59 for both arms |
+| StepZoom | ✅ | ✅ | ✅ | ✅ | asset `e7755cbd6c`, item `dfdc736179`, placed 740–799, frame 770 — the full 1.3 step standing (stepAtFrame=0), visibly tighter than SmoothPush's own frame |
 | SnapReframe | ✅ | ✅ | ✅ | ✅ | asset `1b0bc3ce`, item `929ebe00c7`, frames 128/140/175/205 — the spring rising, holding, released |
 | FocusWindow | ✅ | ✅ | ✅ | ✅ | asset `d5dbf436`, item `a8d4552f78`, frames 275/320 — the inset window with its white border |
 | LetterboxPush | ✅ | ✅ | ✅ | ✅ | asset `84fe9887`, item `6bec264dce`, frames 400/440 — bars top and bottom, receding |
 | DepthPull | ✅ | ✅ | ✅ | ✅ | asset `55639088`, item `b558c317c4`, frames 525/560 — vignette and edge blur, then clean |
 
-**5 of 7 frame-proven. 2 UNKNOWN**, and unknown is recorded as unknown rather
-than inferred from the fact that they are built and gated.
+**7 of 7 frame-proven.** The two UNKNOWN rows closed 2026-09-21: StagedPush and
+StepZoom were registered, placed on real gaps of the th_lagos_en timeline in
+project `3b9df622`, read back, and inspected by frame. They are recorded here
+from MY OWN run — the earlier UNKNOWN was correct at the time and is kept above
+as the reason the rows existed, not overwritten as if they had always been green.
 
 ## Transitions and overlays (11)
 
@@ -188,6 +191,31 @@ Checked against `src/remotion/src/transitions/*` rather than judged from a
 * **ShutterFlash f960** — YAVG 1.31 with YMAX 255. The shutter is closed to a
   centre dot. That is the mechanism, not a black frame.
 
+## Text (6)
+
+Added 2026-09-21, same path as the 18: registered, placed on a real gap of the
+th_lagos_en timeline in project `3b9df622`, read back, and inspected by frame.
+**Every line of copy is sampled from the fixture's own transcript — the words
+spoken under that placement — never invented.** Each carries a per-item
+`propertyOverrides`, and `inspect_item` marks the values `(override)`.
+
+| component | sent | answered | read-back | frame | asset · item | placed | frame · what it shows |
+|---|:--:|:--:|:--:|:--:|---|---|---|
+| StickyNotes | ✅ | ✅ | ✅ | ✅ | `53bb0e86fe` · `d2b1566baf` | 80–109 | f100 · three notes, three colours, three rotations, Lora — "Madichi / Street of Lagos / Nigeria" |
+| LowerThird | ✅ | ✅ | ✅ | ✅ | `d6a8994a56` · `878e576289` | 200–229 | f220 · broadcast bar, name white over title in accent, accent rule under |
+| QuoteCard | ✅ | ✅ | ✅ | ✅ | `f5171edeed` · `1a25ae8e6c` | 320–349 | f340 · serif panel, left accent rule, em-dash attribution |
+| CaptionMatch | ✅ | ✅ | ✅ | ✅ | `0f465cc0ef` · `0dfa1351f6` | 860–919 | f900 · white sans, centred, soft shadow, no card — the CleanCut shape |
+| TornPaper | ✅ | ✅ | ✅ | ✅ | `0919373610` · `d1b256c785` | 969–998 | f990 · two slammed strips, cream over accent, uppercase |
+| PlainText | ✅ | ✅ | ✅ | ✅ | `339dc09b9d` · `208e8f2748` | 1340–1399 | f1380 · white sans, centred, no background of its own |
+
+**One near-miss worth keeping.** PlainText's frame shows a hard-edged light
+panel behind the words, which reads exactly like a legibility scrim the
+component drew. It is not: PlainText sets no background, and a control render at
+**f1339 — one frame before the item starts, nothing on V2** — shows the same
+rectangle in the same place. It is a picture-in-picture inset in the ORIGINAL
+Wikimedia clip. A source artifact was one step from being filed as a component
+defect, and only the control separated them.
+
 ## Sound effects (15)
 
 All fifteen: **sent ✅ answered ✅ read-back ✅** — verified by `browse_assets`
@@ -216,11 +244,16 @@ against a 2.000s beat, `inspect_item` reading `from=51 durationInFrames=35`,
 
 | | sent | answered | read-back | frame |
 |---|--:|--:|--:|--:|
-| **33 rows** | **20** | **20** | **20** | **5** |
+| **39 rows** | **39** | **39** | **39** | **24** |
 
-20 sent (5 zooms + 15 sfx), 5 frame-proven, 11 never sent, 2 unknown.
+39 sent, 24 frame-proven. The 15 sound effects are sent/answered/read-back and
+carry **frame: N/A** by nature — a viewer frame on an audio item is black and
+proves nothing about a sound — so the frame column's denominator is the 24
+visual rows, and it is 24 of 24.
 
-**The number to act on is 11.** Everything else in this table is either proven
-or honestly marked; the eleven transitions are a body of work whose entire
-evidence is that it compiles and satisfies a contract, and the first one placed
-may well find something none of the gates could.
+**This block was STALE and is kept corrected rather than quietly rewritten.** It
+read `20 / 20 / 20 / 5` and "the number to act on is 11" long after the eleven
+transitions had been placed and frame-proven in the table directly above it — a
+summary contradicting its own body, which is the one line a reader trusts
+without scrolling. The counts here are now DERIVED by parsing the tables, not
+transcribed.

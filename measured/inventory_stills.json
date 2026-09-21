@@ -1,173 +1,255 @@
 {
- "_why": "ITEM 5 WANTS A PICTURE PER COMPONENT, 'rendered on a real frame at reference scale'. These fifteen are the ones Builder 2 ported. Every one is a frame of the SAME timeline at the SAME canvas on the SAME corpus fixture, so they are comparable to each other rather than each being its own demo — that is what reference scale buys. The frame was chosen per component from its OWN curves, at the moment its mechanism is legible, and is recorded here with the reason; a frame picked from the middle by habit showed Stack's furniture instead of its plate and is the reason that field exists.",
- "_project": "3b9df622-769e-421a-afa4-e171ad68bbf6",
- "_fixture": "th_lagos_en (135a65c7-06dd-43c8-a9c6-2de71e53146b), 1920x1080 @ 23.976, 55.943s",
- "_canvas": "1080x1920 @ 30fps; stills rendered by ChatCut cloud at 882x1568",
- "_rendered_at": "2026-09-21T04:52Z",
- "_fit_note": "The nine transitions render `contain` and letterbox like the base track; the four zooms render `cover` under the temporary exception, so a zoom still is full-bleed and a transition still carries bars. That difference is REAL and is visible in these pictures.",
- "components": {
-  "SnapReframe": {
-   "family": "zoom",
-   "file": "measured/inventory_stills/SnapReframe.jpg",
-   "timeline_frame": 50,
-   "item": "ab815183fe",
-   "bytes": 42674,
-   "sha256_16": "107d5757bdfe2ab6",
-   "why_this_frame": "mid-hold, the spring settled at peak scale"
+  "_why": "ITEM 5 WANTS A PICTURE PER COMPONENT, 'rendered on a real frame at reference scale'. These twenty-seven are the ones Builder 2 ported. Every one is a frame of the SAME timeline at the SAME canvas on the SAME corpus fixture, so they are comparable to each other rather than each being its own demo — that is what reference scale buys. The frame was chosen per component from its OWN curves, at the moment its mechanism is legible, and is recorded here with the reason; a frame picked from the middle by habit showed Stack's furniture instead of its plate and is the reason that field exists.",
+  "_project": "3b9df622-769e-421a-afa4-e171ad68bbf6",
+  "_fixture": "th_lagos_en (135a65c7-06dd-43c8-a9c6-2de71e53146b), 1920x1080 @ 23.976, 55.943s",
+  "_canvas": "1080x1920 @ 30fps; stills rendered by ChatCut cloud at 882x1568",
+  "_rendered_at": "2026-09-21T04:52Z (18) + 2026-09-21T07:05Z (the nine)",
+  "_fit_note": "The nine transitions render `contain` and letterbox like the base track; the four zooms render `cover` under the temporary exception, so a zoom still is full-bleed and a transition still carries bars. That difference is REAL and is visible in these pictures.",
+  "components": {
+    "SnapReframe": {
+      "family": "zoom",
+      "file": "measured/inventory_stills/SnapReframe.jpg",
+      "timeline_frame": 50,
+      "item": "ab815183fe",
+      "bytes": 42674,
+      "sha256_16": "107d5757bdfe2ab6",
+      "why_this_frame": "mid-hold, the spring settled at peak scale"
+    },
+    "FocusWindow": {
+      "family": "zoom",
+      "file": "measured/inventory_stills/FocusWindow.jpg",
+      "timeline_frame": 175,
+      "item": "98cc0db177",
+      "bytes": 47282,
+      "sha256_16": "c8086218606a628a",
+      "why_this_frame": "window open over the dimmed magnified background"
+    },
+    "LetterboxPush": {
+      "family": "zoom",
+      "file": "measured/inventory_stills/LetterboxPush.jpg",
+      "timeline_frame": 288,
+      "item": "503f31b9a8",
+      "bytes": 63557,
+      "sha256_16": "6b8f758b12760742",
+      "why_this_frame": "bars fully in, plate at peak push"
+    },
+    "DepthPull": {
+      "family": "zoom",
+      "file": "measured/inventory_stills/DepthPull.jpg",
+      "timeline_frame": 420,
+      "item": "ff5e451801",
+      "bytes": 52960,
+      "sha256_16": "6d136024c4c0a2af",
+      "why_this_frame": "mid-hold, grade and edge blur at full"
+    },
+    "DipToBlack": {
+      "family": "transition",
+      "file": "measured/inventory_stills/DipToBlack.jpg",
+      "timeline_frame": 120,
+      "item": "c9d25681f3",
+      "bytes": 8989,
+      "sha256_16": "32137aad983f35b1",
+      "why_this_frame": "the seam itself — full black is the mechanism"
+    },
+    "SlideOver": {
+      "family": "transition",
+      "file": "measured/inventory_stills/SlideOver.jpg",
+      "timeline_frame": 240,
+      "item": "85b1e6c1f2",
+      "bytes": 42789,
+      "sha256_16": "d2052c9a2401c401",
+      "why_this_frame": "B's edge and drop shadow crossing the frame"
+    },
+    "CardSwipe": {
+      "family": "transition",
+      "file": "measured/inventory_stills/CardSwipe.jpg",
+      "timeline_frame": 360,
+      "item": "4b5a751f14",
+      "bytes": 49703,
+      "sha256_16": "011a063b0615cb6f",
+      "why_this_frame": "A thrown off, B risen underneath"
+    },
+    "ZoomThrough": {
+      "family": "transition",
+      "file": "measured/inventory_stills/ZoomThrough.jpg",
+      "timeline_frame": 475,
+      "item": "212376c501",
+      "bytes": 57420,
+      "sha256_16": "888c4eac2275161c",
+      "why_this_frame": "A magnifying out while B rises — early, where both read"
+    },
+    "StepPush": {
+      "family": "transition",
+      "file": "measured/inventory_stills/StepPush.jpg",
+      "timeline_frame": 600,
+      "item": "2185feb737",
+      "bytes": 47540,
+      "sha256_16": "4b92f70a66a1fe0a",
+      "why_this_frame": "A and B sharing the frame mid-push"
+    },
+    "CrossfadeZoom": {
+      "family": "transition",
+      "file": "measured/inventory_stills/CrossfadeZoom.jpg",
+      "timeline_frame": 720,
+      "item": "c2ce577a20",
+      "bytes": 42979,
+      "sha256_16": "b5d139a89075e46d",
+      "why_this_frame": "both plates superimposed mid-dissolve"
+    },
+    "Stack": {
+      "family": "transition",
+      "file": "measured/inventory_stills/Stack.jpg",
+      "timeline_frame": 828,
+      "item": "d2782baedc",
+      "bytes": 39025,
+      "sha256_16": "5e8c41932b0c6ede",
+      "why_this_frame": "progress 0 — the plate alone, before the switcher furniture"
+    },
+    "ShutterFlash": {
+      "family": "transition",
+      "file": "measured/inventory_stills/ShutterFlash.jpg",
+      "timeline_frame": 953,
+      "item": "e60567719f",
+      "bytes": 52079,
+      "sha256_16": "24dd80052b0ee824",
+      "why_this_frame": "the shutter part-closed, where the mechanism is legible"
+    },
+    "FilmStrip": {
+      "family": "transition",
+      "file": "measured/inventory_stills/FilmStrip.jpg",
+      "timeline_frame": 1080,
+      "item": "f7c6fdd991",
+      "bytes": 75539,
+      "sha256_16": "c44b348101300445",
+      "why_this_frame": "tiles on the strip, grid and ghosts around them"
+    },
+    "ShutterFlashOverlay": {
+      "family": "tight-cut overlay",
+      "file": "measured/inventory_stills/ShutterFlashOverlay.jpg",
+      "timeline_frame": 1200,
+      "item": "b30c61e8e1",
+      "bytes": 20949,
+      "sha256_16": "bfaba6a05604d097",
+      "why_this_frame": "peak wash, speaker still perceptible through it"
+    },
+    "LightLeakOverlay": {
+      "family": "tight-cut overlay",
+      "file": "measured/inventory_stills/LightLeakOverlay.jpg",
+      "timeline_frame": 1320,
+      "item": "d0be6950ea",
+      "bytes": 20715,
+      "sha256_16": "ad2e67a21712e41f",
+      "why_this_frame": "warm leak at peak, drifting tl-br"
+    },
+    "EvidenceCard": {
+      "family": "frame composition",
+      "file": "measured/inventory_stills/EvidenceCard.jpg",
+      "timeline_frame": 1040,
+      "item": "68581f22c1",
+      "bytes": 48796,
+      "sha256_16": "ffc5fad594c87f81",
+      "why_this_frame": "card settled, accent rule and source line legible"
+    },
+    "DeviceMockup": {
+      "family": "frame composition",
+      "file": "measured/inventory_stills/DeviceMockup.jpg",
+      "timeline_frame": 1150,
+      "item": "a5e825902e",
+      "bytes": 68285,
+      "sha256_16": "131dee1fe6ad7aef",
+      "why_this_frame": "phone bezel with the notch, still cropped to the DEVICE's aspect"
+    },
+    "EmojiCard": {
+      "family": "frame composition",
+      "file": "measured/inventory_stills/EmojiCard.jpg",
+      "timeline_frame": 1270,
+      "item": "6e5dff58fb",
+      "bytes": 62884,
+      "sha256_16": "0a5374ce2d053e01",
+      "why_this_frame": "card settled and the reaction badge popped — it lands ~0.22s after the card"
+    },
+    "StickyNotes": {
+      "family": "text",
+      "file": "measured/inventory_stills/StickyNotes.jpg",
+      "timeline_frame": 100,
+      "item": "d2b1566baf",
+      "bytes": 50812,
+      "sha256_16": "25a432d05452ab65",
+      "why_this_frame": "past the 0.28s entrance ease, all three notes at rest"
+    },
+    "LowerThird": {
+      "family": "text",
+      "file": "measured/inventory_stills/LowerThird.jpg",
+      "timeline_frame": 220,
+      "item": "878e576289",
+      "bytes": 49383,
+      "sha256_16": "6dadca8b9359ad2d",
+      "why_this_frame": "bar fully in, name and title both set"
+    },
+    "QuoteCard": {
+      "family": "text",
+      "file": "measured/inventory_stills/QuoteCard.jpg",
+      "timeline_frame": 340,
+      "item": "1a25ae8e6c",
+      "bytes": 48764,
+      "sha256_16": "94c326ce3ae8e2d0",
+      "why_this_frame": "panel settled, quote and attribution both on"
+    },
+    "SmoothPush": {
+      "family": "zoom",
+      "file": "measured/inventory_stills/SmoothPush.jpg",
+      "timeline_frame": 540,
+      "item": "eb95470e74",
+      "bytes": 49431,
+      "sha256_16": "0453691334c7b991",
+      "why_this_frame": "late in the push, where the ramp has travelled — never the head, where a zoom and a passthrough look alike"
+    },
+    "StagedPush": {
+      "family": "zoom",
+      "file": "measured/inventory_stills/StagedPush.jpg",
+      "timeline_frame": 652,
+      "item": "b320a4543f",
+      "bytes": 92939,
+      "sha256_16": "9e4680c38487a1cf",
+      "why_this_frame": "inside the hold after stage 2 (0.95s:1.30), the frame where the old port rendered an UN-ZOOMED passthrough"
+    },
+    "StepZoom": {
+      "family": "zoom",
+      "file": "measured/inventory_stills/StepZoom.jpg",
+      "timeline_frame": 770,
+      "item": "dfdc736179",
+      "bytes": 43410,
+      "sha256_16": "f458c55aef36a39f",
+      "why_this_frame": "well past stepAtFrame=0, so the full 1.3 step is standing"
+    },
+    "CaptionMatch": {
+      "family": "text",
+      "file": "measured/inventory_stills/CaptionMatch.jpg",
+      "timeline_frame": 900,
+      "item": "0dfa1351f6",
+      "bytes": 56815,
+      "sha256_16": "929550c587e78be4",
+      "why_this_frame": "entrance complete, caption at full pop"
+    },
+    "TornPaper": {
+      "family": "text",
+      "file": "measured/inventory_stills/TornPaper.jpg",
+      "timeline_frame": 990,
+      "item": "d1b256c785",
+      "bytes": 52400,
+      "sha256_16": "f14e1c3ef4132459",
+      "why_this_frame": "both strips slammed in"
+    },
+    "PlainText": {
+      "family": "text",
+      "file": "measured/inventory_stills/PlainText.jpg",
+      "timeline_frame": 1380,
+      "item": "208e8f2748",
+      "bytes": 39551,
+      "sha256_16": "c49f203e9b09a55b",
+      "why_this_frame": "entrance risen; the light panel behind the words is the SOURCE's own picture-in-picture inset, proven by the f1339 control with no graphic on the timeline"
+    }
   },
-  "FocusWindow": {
-   "family": "zoom",
-   "file": "measured/inventory_stills/FocusWindow.jpg",
-   "timeline_frame": 175,
-   "item": "98cc0db177",
-   "bytes": 47282,
-   "sha256_16": "c8086218606a628a",
-   "why_this_frame": "window open over the dimmed magnified background"
-  },
-  "LetterboxPush": {
-   "family": "zoom",
-   "file": "measured/inventory_stills/LetterboxPush.jpg",
-   "timeline_frame": 288,
-   "item": "503f31b9a8",
-   "bytes": 63557,
-   "sha256_16": "6b8f758b12760742",
-   "why_this_frame": "bars fully in, plate at peak push"
-  },
-  "DepthPull": {
-   "family": "zoom",
-   "file": "measured/inventory_stills/DepthPull.jpg",
-   "timeline_frame": 420,
-   "item": "ff5e451801",
-   "bytes": 52960,
-   "sha256_16": "6d136024c4c0a2af",
-   "why_this_frame": "mid-hold, grade and edge blur at full"
-  },
-  "DipToBlack": {
-   "family": "transition",
-   "file": "measured/inventory_stills/DipToBlack.jpg",
-   "timeline_frame": 120,
-   "item": "c9d25681f3",
-   "bytes": 8989,
-   "sha256_16": "32137aad983f35b1",
-   "why_this_frame": "the seam itself — full black is the mechanism"
-  },
-  "SlideOver": {
-   "family": "transition",
-   "file": "measured/inventory_stills/SlideOver.jpg",
-   "timeline_frame": 240,
-   "item": "85b1e6c1f2",
-   "bytes": 42789,
-   "sha256_16": "d2052c9a2401c401",
-   "why_this_frame": "B's edge and drop shadow crossing the frame"
-  },
-  "CardSwipe": {
-   "family": "transition",
-   "file": "measured/inventory_stills/CardSwipe.jpg",
-   "timeline_frame": 360,
-   "item": "4b5a751f14",
-   "bytes": 49703,
-   "sha256_16": "011a063b0615cb6f",
-   "why_this_frame": "A thrown off, B risen underneath"
-  },
-  "ZoomThrough": {
-   "family": "transition",
-   "file": "measured/inventory_stills/ZoomThrough.jpg",
-   "timeline_frame": 475,
-   "item": "212376c501",
-   "bytes": 57420,
-   "sha256_16": "888c4eac2275161c",
-   "why_this_frame": "A magnifying out while B rises — early, where both read"
-  },
-  "StepPush": {
-   "family": "transition",
-   "file": "measured/inventory_stills/StepPush.jpg",
-   "timeline_frame": 600,
-   "item": "2185feb737",
-   "bytes": 47540,
-   "sha256_16": "4b92f70a66a1fe0a",
-   "why_this_frame": "A and B sharing the frame mid-push"
-  },
-  "CrossfadeZoom": {
-   "family": "transition",
-   "file": "measured/inventory_stills/CrossfadeZoom.jpg",
-   "timeline_frame": 720,
-   "item": "c2ce577a20",
-   "bytes": 42979,
-   "sha256_16": "b5d139a89075e46d",
-   "why_this_frame": "both plates superimposed mid-dissolve"
-  },
-  "Stack": {
-   "family": "transition",
-   "file": "measured/inventory_stills/Stack.jpg",
-   "timeline_frame": 828,
-   "item": "d2782baedc",
-   "bytes": 39025,
-   "sha256_16": "5e8c41932b0c6ede",
-   "why_this_frame": "progress 0 — the plate alone, before the switcher furniture"
-  },
-  "ShutterFlash": {
-   "family": "transition",
-   "file": "measured/inventory_stills/ShutterFlash.jpg",
-   "timeline_frame": 953,
-   "item": "e60567719f",
-   "bytes": 52079,
-   "sha256_16": "24dd80052b0ee824",
-   "why_this_frame": "the shutter part-closed, where the mechanism is legible"
-  },
-  "FilmStrip": {
-   "family": "transition",
-   "file": "measured/inventory_stills/FilmStrip.jpg",
-   "timeline_frame": 1080,
-   "item": "f7c6fdd991",
-   "bytes": 75539,
-   "sha256_16": "c44b348101300445",
-   "why_this_frame": "tiles on the strip, grid and ghosts around them"
-  },
-  "ShutterFlashOverlay": {
-   "family": "tight-cut overlay",
-   "file": "measured/inventory_stills/ShutterFlashOverlay.jpg",
-   "timeline_frame": 1200,
-   "item": "b30c61e8e1",
-   "bytes": 20949,
-   "sha256_16": "bfaba6a05604d097",
-   "why_this_frame": "peak wash, speaker still perceptible through it"
-  },
-  "LightLeakOverlay": {
-   "family": "tight-cut overlay",
-   "file": "measured/inventory_stills/LightLeakOverlay.jpg",
-   "timeline_frame": 1320,
-   "item": "d0be6950ea",
-   "bytes": 20715,
-   "sha256_16": "ad2e67a21712e41f",
-   "why_this_frame": "warm leak at peak, drifting tl-br"
-  },
-  "EvidenceCard": {
-   "family": "frame composition",
-   "file": "measured/inventory_stills/EvidenceCard.jpg",
-   "timeline_frame": 1040,
-   "item": "68581f22c1",
-   "bytes": 48796,
-   "sha256_16": "ffc5fad594c87f81",
-   "why_this_frame": "card settled, accent rule and source line legible"
-  },
-  "DeviceMockup": {
-   "family": "frame composition",
-   "file": "measured/inventory_stills/DeviceMockup.jpg",
-   "timeline_frame": 1150,
-   "item": "a5e825902e",
-   "bytes": 68285,
-   "sha256_16": "131dee1fe6ad7aef",
-   "why_this_frame": "phone bezel with the notch, still cropped to the DEVICE's aspect"
-  },
-  "EmojiCard": {
-   "family": "frame composition",
-   "file": "measured/inventory_stills/EmojiCard.jpg",
-   "timeline_frame": 1270,
-   "item": "6e5dff58fb",
-   "bytes": 62884,
-   "sha256_16": "0a5374ce2d053e01",
-   "why_this_frame": "card settled and the reaction badge popped — it lands ~0.22s after the card"
-  }
- },
- "_still_asset": "The three frame compositions are drawn on measured/corpus_evidence_still.jpg — source second 39.3 of th_lagos_en, extracted with ffmpeg and uploaded to the project as image asset 5170f875. Corpus material, CC BY-SA 4.0, so the picture of a component that takes a picture is itself rights-clear and reproducible from the fixture."
+  "_still_asset": "The three frame compositions are drawn on measured/corpus_evidence_still.jpg — source second 39.3 of th_lagos_en, extracted with ffmpeg and uploaded to the project as image asset 5170f875. Corpus material, CC BY-SA 4.0, so the picture of a component that takes a picture is itself rights-clear and reproducible from the fixture.",
+  "_the_nine": "THE NINE ADDED 2026-09-21. Six text components and three zooms, placed on real gaps of the same th_lagos_en timeline and rendered by the same cloud path as the 18. Their copy is SAMPLED FROM THE FIXTURE'S OWN TRANSCRIPT — the words spoken under each placement — never invented. Every one carries a per-item `propertyOverrides`, which is the write field chatcut_job_app.py:1334 records as never found; it works, and inspect_item marks the values `(override)`."
 }

@@ -87,3 +87,38 @@ The probe's first registration was rejected outright:
 `Object.prototype.toString.call(x)` — the ordinary way to ask what a value is —
 is not available. `typeof` plus `Array.isArray` answers the same question and is
 what the shipped probe used. Worth knowing before a port reaches for it.
+
+## The per-item override field IS `propertyOverrides` — measured 2026-09-21
+
+`chatcut_job_app.py:1334` records this as an open question and builds around it:
+
+> ChatCut supports per-ITEM property overrides — `inspect_item` prints "Motion
+> Graphic Effective Props … (default)" — but the WRITE field is not in any
+> surface I have read, and two guesses at it (`props`, `propertyValues`) were
+> both refused. Guessing a third is the exact habit that cost ten turns of
+> parameter spelling.
+
+**The third guess is right, and it was already written down in this repo.**
+`measured/text_family_checks_2026-09-19.md` names `propertyOverrides` as the key
+`inspect_item` prints — and it is also the key `edit_item` ACCEPTS on an `adds`
+entry. Nine placements carried one on 2026-09-21; all nine read back with the
+supplied values marked `(override)` beside the untouched `(default)` rows:
+
+    propertyOverrides: {"notes":"Madichi|#FFE066|-4; Street of Lagos|…"}
+    propertyOverrides: {"clip":"135a65c7-…","srcFrom":1100}
+
+**This was not a fourth guess.** `edit_item` REJECTS unknown fields by name —
+`adds[0]: unknown fields "startFrame", "props"` — so a `validateOnly` dry-run
+distinguishes *accepted* from *silently ignored* before anything commits. That
+is the cheap move the note's own caution was reaching for: the surface will tell
+you whether a field exists if you ask it without committing.
+
+Two corrections it carries:
+
+* the start-frame field on an `adds` entry is **`fromFrame`**, not `startFrame`
+  (which the read-back calls `startFrame`, which is what makes it a trap);
+* **the one-asset-per-title workaround is no longer needed.** Registering N
+  assets to carry N strings was a real cost — N registrations per plan — and one
+  asset plus N per-item overrides does the same job. That is Builder 1's call on
+  his own file; this note exists so the decision is made against a measurement
+  rather than against the open question the comment currently states.
