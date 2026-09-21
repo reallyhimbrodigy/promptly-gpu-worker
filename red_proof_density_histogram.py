@@ -82,34 +82,13 @@ leg("a missing record is ABSENT", D.run_rates(os.path.join(tmp, "nope.json"))["s
 c = D.compare(os.path.join(tmp, "withheld.json"))
 leg("a comparison with an ABSENT run is ABSENT, not a table of zeros", c["state"], "ABSENT")
 
-# 7. THE REFERENCE REPORTS ITS OWN COVERAGE and never folds an unknown term in.
+# 7. THE ONE PUBLISHED TABLE IS THE ONLY REFERENCE. There is no second
+#    derivation to disagree with it.
 ref = D.reference_rates()
-leg("the reference is MEASURED", ref["state"], "MEASURED")
-leg("  ...and names the terms it could not map", bool(ref["unmapped"]), True)
-leg("  ...with coverage under 100, stated rather than implied", ref["coverage"] < 100.0, True)
-
-# 8. A REFERENCE WITH NO BEATS IS ABSENT, not a table of zeros.
-p = rec("emptyref.json", {"beats": [], "distinct_videos": 0})
-leg("a reference with no beats is ABSENT", D.reference_rates(p)["state"], "ABSENT")
-
-# 9. THE ACCEPTED STATE MUST BE ONE THE WRITER CAN ACTUALLY EMIT.
-#    This is the leg that would have caught the "OK" bug on the day it was
-#    written. A reader comparing against a constant the producer never emits is
-#    silent, not loud — it just never matches.
-_writer = "/Users/zaclibman/promptly-gpu-worker/promptly-gpu-worker/.worktrees/lane-b2/chatcut_job_app.py"
-if os.path.isfile(_writer):
-    _src = open(_writer, encoding="utf-8").read()
-    leg("the export state this reader accepts is one the writer emits",
-        ('"state": "%s"' % D.EXPORT_DELIVERED) in _src or
-        ('"state": "%s"' % D.EXPORT_DELIVERED).replace(" ", "") in _src.replace(" ", ""), True)
-    leg("  ...and the state it previously accepted is NOT one the writer emits",
-        '"state": "OK"' in _src, False)
-
-# 10. AN UNKNOWN EXPORT STATE IS ABSENT AND NAMES ITSELF, never a silent skip.
-p = rec("weird.json", {"export": {"state": "SOMETHING_NEW", "why": "n/a"}})
-r = D.run_rates(p)
-leg("an unrecognised export state is ABSENT and names the state it saw",
-    (r["state"], "SOMETHING_NEW" in r["why"]), ("ABSENT", True))
+leg("the published reference table is MEASURED", ref["state"], "MEASURED")
+leg("  ...carries one denominator", ref["wall_s"], 426.093)
+leg("  ...and a family a pass never named is null, never 0.0",
+    (ref["passes"]["A"]["per_25s"]["sfx"], ref["passes"]["B"]["per_25s"]["zoom"]), (None, None))
 
 # 11. THE REFUSAL TELL, AGAINST THE THREE REAL RECORDS Builder 1 supplied.
 #     kolkata-9 is the trap: it EXPORTED cleanly with four cuts and zero

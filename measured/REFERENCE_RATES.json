@@ -1,11 +1,8 @@
 {
  "_what": "The five reference rates, re-derived against WALL TIME. Supersedes the 861.6s figures.",
  "_wall_time_s": 426.093,
- "_wall_time_source": "the ten assets in ChatCut project 74036980 (Zac's ten), durationMs",
- "_beats_tile_their_videos": "SETTLED BY MEASUREMENT, not assumed. Pass B's ten beat-run spans join to the ten video durations as a bijection with a MAX RESIDUAL OF 0.013s and 0.077s in total across 426.093s. The beats TILE; they do not sample. So wall time IS the denominator and there is no inflation factor to apply. Pass A does not tile: two of its runs overrun their clips by 2.34s and 6.63s.",
  "_the_seam": "THE 294 BEATS ARE TWO ANNOTATORS, NOT TWO READINGS, AND THEIR VOCABULARIES DO NOT OVERLAP AT ALL. Pass A uses 60 distinct treatment terms, pass B uses 31, and the intersection is ZERO. Two of A's terms are Title-Case; thirty of B's thirty-one are. They are different annotation systems applied to the same ten videos.",
  "_why_one_set_is_not_publishable": "NEITHER PASS COVERS ALL FIVE FAMILIES. Pass A names no SFX treatment at all (0 of 155 beats); pass B names no zoom treatment at all (0 of 139). So the five-family table was only ever completable by AVERAGING ACROSS THE SEAM: last night's 'sfx 1.31/25s' is the mean of 0.00 and 2.64, and 'zoom 0.23' is the mean of 0.47 and 0.00. Those are not rates; they are artefacts of averaging an annotator who names a family with one who does not. Zac asked for one set with provenance — the honest answer is that one set does not exist until a canonical annotator is chosen or the two vocabularies are mapped onto each other, and this file is that answer.",
- "_which_is_better_evidence": "Pass B tiles its videos to 13 milliseconds and pass A overruns two of them, which favours B on boundary quality. But B carries no zoom vocabulary, so B cannot report a zoom rate at any quality. Choosing B silently would publish zoom 0.00 for a corpus that visibly contains punch-ins.",
  "_absent_is_not_zero": "A family a pass never names is ABSENT, written null, never 0.00. A rate of zero says the annotator looked and found none; null says the vocabulary had no word for it.",
  "_superseded": {
   "published_2026-09-20": {
@@ -18,7 +15,7 @@
   "against": "861.6s, described as beat span across 294 beats",
   "wrong_how": "861.6s is BOTH passes summed — twice the footage — and the five numbers are cross-annotator means, two of which average a real rate with a vocabulary gap"
  },
- "_provenance": "MODEL-ANNOTATED readings of ten videos. Counts are a model's treatment labels, not mechanical counts. The rates GRADE and never instruct.",
+ "_provenance": "MODEL-ANNOTATED readings of ten videos, 426.093s of wall time from ChatCut project 74036980; counts are treatment labels a model assigned, not mechanical counts; the rates GRADE and never instruct.",
  "passes": {
   "A": {
    "beats": 155,
@@ -58,5 +55,6 @@
     "zoom": null
    }
   }
- }
+ },
+ "_one_table": "This file is the ONLY reference table. The function that summed both passes is deleted, not kept beside it — a second way to compute a number is how the wrong one gets quoted, and the wrong one here averaged a real rate with a vocabulary gap. The beats TILE their videos (pass B joins the ten durations as a bijection, max residual 0.013s), which is what settles the denominator at wall time."
 }

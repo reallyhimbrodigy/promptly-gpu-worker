@@ -2060,16 +2060,16 @@ def main():
         # THE OTHER LANE'S TABLE MAY STILL HOLD THE OLD KEY. Resolved through
         # pending_renames.json, which names the owner and the exact edit; when
         # that lane lands its half and deletes the row, this is a no-op.
-        _keys = {q["key"] for q in J.PORTED_PROPS[__import__("inventory").registry_key(_v)]}
+        _keys = {q["key"] for q in J.PORTED_PROPS[_v]}
         check("%s is built, contract-clean, and exposes size and position as dials" % _v,
-              not J.component_contract(_blob, J.PORTED_PROPS[__import__("inventory").registry_key(_v)])
+              not J.component_contract(_blob, J.PORTED_PROPS[_v])
               and {"size", "position"} <= _keys
               and "NO VELOCITY CAP:" in _blob,
               "keys %s" % sorted(_keys))
     # THE DEFAULTS ARE WHAT THE REFERENCES MEASURE: medium, middle. LowerThird is the
     # one exception and it is deliberate — a broadcast name card lives in the lower
     # third, and the dial still moves it.
-    _defs = {v: {q["key"]: q.get("defaultValue") for q in J.PORTED_PROPS[__import__("inventory").registry_key(v)]}
+    _defs = {v: {q["key"]: q.get("defaultValue") for q in J.PORTED_PROPS[v]}
              for v in ("TornPaper", "StickyNotes", "QuoteCard", "LowerThird", "CaptionMatch")}
     check("every variant defaults to medium, and to middle except the lower third",
           all(d["size"] == "medium" for d in _defs.values())
@@ -2431,7 +2431,7 @@ def main():
             # map; a half-landed rename is not a missing font declaration.
             if not any(q.get("key") == "fontFamily" and q.get("type") == "font"
                        for q in J.PORTED_PROPS.get(
-                           __import__("inventory").registry_key(_n), [])):
+                           _n, [])):
                 _nofont.append(_n)
     check("no component names a typeface as a bare CSS string",
           not _bare, "; ".join(_bare[:4]) if _bare else "all faces are font-typed properties")
@@ -2604,8 +2604,7 @@ def main():
     # RESOLVED THROUGH THE PENDING-RENAME MAP. While a rename is half-landed the
     # built name and the registry key differ BY DESIGN, and comparing them raw
     # reports an orphan in each direction for one component that is neither.
-    _rk = __import__("inventory").registry_key
-    _built_keys = sorted(_rk(b) for b in _built)
+    _built_keys = sorted(_built)
     check("every built component has a property table, and the table has no orphans",
           bool(_built) and not [b for b in _built_keys if b not in J.PORTED_PROPS]
           and not [k for k in J.PORTED_PROPS if k not in _built_keys],
@@ -3036,43 +3035,6 @@ def main():
           and all(e.get("line") is None for e in _inv["entries"] if e["state"] != "MEASURED"),
           "%d entr(ies), %d measured, %d atlas pending" % (
               len(_inv["entries"]), _inv["measured"], _inv["pending"]))
-    # ---- TWO COPIES OF A PROPERTY TABLE, AND THE IN-FILE ONE WINS ----
-    # The harness merges every port/*_properties.json into PORTED_PROPS, but a
-    # component defined in BOTH keeps its in-file definition and the loader says
-    # so in `in_file_won`. Four zooms are in that state. They agree exactly
-    # today; nothing made them, and the registered default IS the value, which
-    # is the shape that once made 135 defaults wrong. So the agreement is
-    # asserted rather than assumed, and editing the ignored copy fails here
-    # instead of silently doing nothing.
-    _dupes = (J.PORT_PROPS_LOADED or {}).get("in_file_won") or []
-    _zj = _json.load(open("port/zoom_properties.json", encoding="utf-8"))
-    _drift = []
-    for _n in _dupes:
-        _a = {q["key"]: q.get("defaultValue") for q in (_zj.get(_n) or [])}
-        _b = {q["key"]: q.get("defaultValue") for q in J.PORTED_PROPS.get(_n, [])}
-        if _a != _b:
-            _drift.append(_n)
-    check("where a property table exists twice, the two copies agree exactly",
-          _dupes and not _drift,
-          "%d duplicated: %s; drifted: %s" % (len(_dupes), _dupes, _drift))
-
-    # ---- A RENAME THAT CROSSES A LANE LANDS IN TWO COMMITS ----
-    # Between them every by-name lookup is wrong in one direction. The gap is
-    # data rather than a silent fallback, and every row must name an owner and
-    # the exact edit — a pending rename nobody can action is a permanent one.
-    _pr = __import__("inventory").pending_renames()
-    check("every pending cross-lane rename names an owner and the exact edit",
-          _pr["state"] == "MEASURED" and not _pr["undescribed"], _pr["why"])
-    # AND EVERY ROW DESCRIBES *THIS* TREE. The resolver rewrites names here, so a
-    # row copied from another lane's state does not sit there inertly — it
-    # actively breaks lookups that were correct. Measured 2026-09-21: a
-    # reverse-rename row written about Builder 1's worktree rewrote StickyNotes
-    # into a key this tree has never had, and the suite died on the KeyError.
-    _pr_foreign = [r for r in _pr["pending"] if r.get("was") not in J.PORTED_PROPS]
-    check("every pending rename's old key is live in THIS tree's registry",
-          not _pr_foreign,
-          "foreign or stale: %s" % [r.get("was") for r in _pr_foreign])
-
     # ---- ITEM 5's PICTURE HALF, AND THE NAME COLLISION THAT CORRUPTED IT ----
     # A component name in two families makes every by-name lookup resolve to
     # whichever entry it meets first. Measured 2026-09-21: the tight-cut

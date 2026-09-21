@@ -1,6 +1,0 @@
-{
- "_why": "A rename that crosses a lane boundary lands in two commits, and between them every by-name lookup is wrong in one direction. This file is that gap AS IT EXISTS IN THIS TREE, and the resolver reads it. It is NOT a place to describe another lane's tree: a row here rewrites names HERE, so a row copied from someone else's state actively breaks lookups that were correct. Measured 2026-09-21 — I wrote the reverse-rename row describing Builder 1's worktree, and the resolver dutifully rewrote StickyNotes into a key this tree does not have.",
- "_rule": "Every row's `was` MUST be a live key in PORTED_PROPS here, or the row is stale or foreign and the check fails. An entry is deleted by whoever lands the other half. Empty is the normal state.",
- "pending": [],
- "_elsewhere": "Builder 1's tree has the INVERSE gap: he landed HandwrittenNote across ten sites and must revert it, and change the notes default to three. That instruction is in the message to him and in collision_quarantine.json, which is where a statement about another lane's tree belongs — not here, where it would be executed."
-}

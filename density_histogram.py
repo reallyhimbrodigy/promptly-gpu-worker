@@ -44,105 +44,36 @@ about THIS pair of durations, not a law, and the durations are printed beside it
 """
 import json
 import os
-import re
+import lane_contract as _C
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FAMILIES = ("cut", "card", "text", "sfx", "zoom")
 
-# THE MAPPING IS KEYWORD-BASED AND ITS MISSES ARE REPORTED. The reference
-# vocabulary is 90+ free-text treatment names a model wrote; folding an
-# unrecognised one into a family would inflate that family by exactly the amount
-# nobody can see. Anything unmatched is counted as UNMAPPED and printed.
-_MAP = (
-    ("sfx",  r"\bsfx\b|whoosh|swoosh|click|pop accent|sound effect"),
-    ("zoom", r"punch-?in|push-?in|zoom|reframe|whip-?pan|dolly"),
-    ("card", r"card|stat|counter|numeral|quote|title|end ?card|nameplate|name/identity|"
-             r"callout|highlight box|badge|banner|logo|icon|graphic|chart|list|"
-             r"progress|split-?screen|mockup|polaroid|overlay graphic"),
-    ("text", r"caption|text overlay|kinetic text|typed|search-?bar|word-by-word|"
-             r"subtitle|keyword|font"),
-    ("cut",  r"\bcut\b|cutaway|b-?roll|transition|wipe|flash|montage|"
-             r"hard cut|l-cut|angle/shot change|pov|shot"),
-)
+def reference_rates(path="measured/REFERENCE_RATES.json"):
+    """-> the ONE published table. There is no second derivation.
 
+    The function that used to live here summed EVERY beat in the index. That is
+    two annotators, not two readings — 60 distinct treatment terms in one pass,
+    31 in the other, intersection ZERO — so it produced a five-family table by
+    averaging a real rate with a vocabulary GAP. "sfx 1.31" was the mean of 0.00
+    and 2.64. It is deleted rather than kept beside the right answer, because a
+    second way to compute a number is how the wrong one gets quoted.
 
-def _fam_of_treatment(name):
-    n = str(name).lower()
-    for fam, pat in _MAP:
-        if re.search(pat, n):
-            return fam
-    return None
-
-
-def reference_rates(path="reference_index.json"):
-    """SUPERSEDED FOR PUBLICATION by measured/REFERENCE_RATES.json — see below.
-
-    This function sums ALL beats in the index. That is two annotators, not two
-    readings: 60 distinct treatment terms in one pass, 31 in the other, and the
-    intersection is ZERO. Pass A names no SFX at all and pass B names no zoom at
-    all, so any five-family table computed here averages a real rate with a
-    vocabulary GAP — "sfx 1.31" was the mean of 0.00 and 2.64.
-
-    It is kept because the run side and the mapping are still correct and the
-    red proof drives it, but `compare()` now refuses to publish against it.
+    Regenerate the table with derive_reference_rates.py.
     """
-    """-> {state, per_25s, counts, seconds, videos, unmapped, coverage, provenance}"""
-    p = path if os.path.isabs(path) else os.path.join(HERE, path)
-    if not os.path.isfile(p):
-        return {"state": "ABSENT", "why": "no reference index at %s" % path}
-    try:
-        d = json.load(open(p, encoding="utf-8"))
-    except Exception as e:                                    # noqa: BLE001
-        return {"state": "FAILED", "why": "unreadable reference index: %s" % e}
-    beats = d.get("beats") or []
-    if not beats:
-        return {"state": "ABSENT", "why": "the reference index carries no beats"}
-    counts = {f: 0 for f in FAMILIES}
-    unmapped, seconds, seen = {}, 0.0, 0
-    for b in beats:
-        seconds += float(b.get("dur") or 0)
-        seen += 1
-        for t in (b.get("treat") or []):
-            fam = _fam_of_treatment(t)
-            if fam is None:
-                unmapped[t] = unmapped.get(t, 0) + 1
-            else:
-                counts[fam] += 1
-    if seconds <= 0:
-        return {"state": "FAILED", "why": "beat durations sum to %r — cannot normalise" % seconds}
-    mapped = sum(counts.values())
-    total = mapped + sum(unmapped.values())
-    return {
-        "state": "MEASURED",
-        "per_25s": {f: round(counts[f] * 25.0 / seconds, 3) for f in FAMILIES},
-        "counts": counts, "seconds": round(seconds, 1), "beats": seen,
-        "videos": d.get("distinct_videos"),
-        "unmapped": sorted(unmapped.items(), key=lambda kv: -kv[1]),
-        "coverage": round(100.0 * mapped / total, 1) if total else 0.0,
-        "provenance": "MODEL-ANNOTATED — beat spans and treatment names are a model's reading "
-                      "of %s videos, not mechanical counts" % d.get("distinct_videos"),
-    }
-
-
-# THE STATE THE WRITER ACTUALLY EMITS FOR A DELIVERED EXPORT.
-# It is MEASURED. The first version of this reader tested for "OK", which the
-# writer has never emitted — `grep '"state": "OK"' chatcut_job_app.py` returns
-# nothing — so a PERFECT export would have read ABSENT.
-#
-# THIS IS WORSE THAN THE end_s BUG ONE FIELD OVER, AND BUILDER 1 NAMED WHY:
-# `end_s` is absent on every record, so it fails the first time anyone looks.
-# `state` EXISTS and holds a plausible value, so the comparison simply never
-# matches and a withheld export and a delivered one both read ABSENT — which is
-# precisely the distinction this instrument exists to make. A wrong constant that
-# is never equal is silent; a missing field is loud.
-EXPORT_DELIVERED = "MEASURED"
+    d = _read_pub_file(path)
+    if not d:
+        return {"state": _C.ABSENT, "why": "no published table at %s" % path}
+    return {"state": _C.MEASURED, "passes": d.get("passes") or {},
+            "wall_s": d.get("_wall_time_s"), "provenance": d.get("_provenance"),
+            "why": d.get("_why")}
 
 
 def _items_from_record(rec):
     """-> (items, why) — the placed items, or None with the reason there are none."""
     ex = rec.get("export") or {}
     st = str(ex.get("state") or "")
-    if st.upper() != EXPORT_DELIVERED:
+    if st.upper() != _C.EXPORT_DELIVERED:
         # NAME THE STATE SEEN. A state this reader does not know about must be
         # visible in the output, not folded into the same ABSENT as a refusal.
         return None, "export state is %s (%s)" % (ex.get("state"), ex.get("why"))
@@ -221,8 +152,7 @@ def run_rates(record_path):
     other = {}
     for i in items:
         t = str(i.get("itemType") or i.get("type") or "")
-        fam = {"caption": "text", "audio": "sfx", "video": "cut",
-               "effect": "zoom", "motion-graphic": "card"}.get(t)
+        fam = _C.FAMILY_OF_ITEM_TYPE.get(t)
         if fam is None:
             other[t] = other.get(t, 0) + 1
         else:
@@ -306,15 +236,19 @@ def refusal_suspect(record_path):
             "why": ("; ".join(marks[:6]) if marks else "no refusal tell on the record")}
 
 
-def _read_pub(path="measured/REFERENCE_RATES.json"):
-    """-> {pass: {...}} the per-annotator publication rates, or {} if absent."""
+def _read_pub_file(path):
     p = path if os.path.isabs(path) else os.path.join(HERE, path)
     if not os.path.isfile(p):
-        return {}
+        return None
     try:
-        return (json.load(open(p, encoding="utf-8")) or {}).get("passes") or {}
+        return json.load(open(p, encoding="utf-8"))
     except Exception:                                          # noqa: BLE001
-        return {}
+        return None
+
+
+def _read_pub(path="measured/REFERENCE_RATES.json"):
+    """-> {pass: {...}} the per-annotator publication rates, or {} if absent."""
+    return (_read_pub_file(path) or {}).get("passes") or {}
 
 
 def compare(record_path, reference="reference_index.json"):
@@ -346,10 +280,6 @@ def compare(record_path, reference="reference_index.json"):
                 r = pv["per_25s"].get(f)
                 row["ref_%s" % nm] = r
                 row["ratio_%s" % nm] = (round(u / r, 2) if r else None)
-        else:
-            r = ref["per_25s"][f]
-            row["reference_per_25s"] = r
-            row["ratio"] = round(u / r, 2) if r else None
         out["rows"].append(row)
     return out
 
