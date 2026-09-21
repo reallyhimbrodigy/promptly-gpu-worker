@@ -14,24 +14,41 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SMOKE = os.path.join(HERE, "smoke_blend_mode_stripped.py")
 
 MUTATIONS = [
-    # DepthPull is the multiply case: a darkening layer becoming a covering one.
-    ("depthpull_stops_saying_it", "port/bodies/DepthPull.jsx",
-     " * CHATCUT STRIPS mixBlendMode, AND THIS COMPONENT HAS THE WORST CASE OF IT.",
-     " * DepthPull applies a vignette and a glow.",
-     "L3 multiply_users_acknowledged",
-     lambda s: "CHATCUT STRIPS mixBlendMode" in s),
-    # ShutterFlashOverlay is the menu case.
-    ("menu_component_stops_saying_it", "port/bodies/ShutterFlashOverlay.jsx",
-     " * CHATCUT STRIPS mixBlendMode, so the beam and the dot below composite",
-     " * The beam and the dot below composite",
-     "L1 every_user_names_the_strip",
-     lambda s: "CHATCUT STRIPS mixBlendMode" in s),
-    # The detector itself goes blind: with no body seen to declare a blend, the
-    # population empties and every leg below would pass over nothing.
+    # SOMEBODY ADDS A `screen` GLOW BACK. This is the realistic regression: the
+    # declaration looks correct, reads correctly, and is inert.
+    ("a_blend_comes_back", "port/bodies/ShutterFlashOverlay.jsx",
+     "          opacity: beamOpacity }}>",
+     '          opacity: beamOpacity, mixBlendMode: "screen" }}>',
+     "L1 no_blend_declarations",
+     lambda s: "opacity: beamOpacity }}>" in s),
+    # ON A MENU COMPONENT. Retargeted to L1: the menu leg it used to name was a
+    # strict SUBSET of L1, so this mutation went red on L1 and the menu leg was
+    # never reached — rc=1 phrase=False, which is the signature of a red that is
+    # not about the leg it claims. The menu leg is deleted; this one stays,
+    # because a blend appearing on an offerable component is worth its own case.
+    ("a_blend_comes_back_on_the_menu", "port/bodies/StickyNotes.jsx",
+     '  const notes = [];',
+     '  const notes = [];\n  const _x = { mixBlendMode: "screen" };',
+     "L1 no_blend_declarations",
+     lambda s: "const notes = [];" in s),
+    # THE REASON IS DELETED and the next person re-adds a glow with nothing in
+    # the tree to tell them why it cannot work.
+    # AIMED AT ShutterFlash, WHICH CARRIES EXACTLY ONE. It was aimed at
+    # DepthPull and passed: DepthPull states the finding TWICE — once in the
+    # header and once beside the brightness filter — so deleting the header left
+    # the second standing and the acknowledgement survived. The mutation changed
+    # real bytes and could not change the verdict.
+    ("the_reason_is_lost", "port/bodies/ShutterFlash.jsx",
+     " * NO BLEND MODE DECLARED, DELIBERATELY. The beam and dot asked for `screen`\n * and ChatCut strips mixBlendMode at registration, so the declaration never\n * survived.",
+     " * The beam and dot draw over the seam.",
+     "L2 the_finding_is_recorded",
+     lambda s: "NO BLEND MODE DECLARED, DELIBERATELY" in s),
+    # THE DETECTOR GOES BLIND: with the pattern broken it finds nothing and
+    # would report a clean corpus forever.
     ("detector_goes_blind", "smoke_blend_mode_stripped.py",
-     "        modes = re.findall(r'mixBlendMode:\\s*\"([a-z-]+)\"', src)",
-     "        modes = re.findall(r'mixBlendModeXX:\\s*\"([a-z-]+)\"', src)",
-     "L0 population_nonempty",
+     "DECL = r'mixBlendMode:\\s*\"([a-z-]+)\"'",
+     "DECL = r'mixBlendModeXX:\\s*\"([a-z-]+)\"'",
+     "L3 detector_finds_a_known_positive",
      lambda s: "mixBlendMode:" in s),
 ]
 

@@ -26,10 +26,11 @@
  * opacity ramp has no per-frame pixel displacement to bound. Exempt by nature
  * rather than by margin, the same way DipToBlack is.
  *
- * CHATCUT STRIPS mixBlendMode, so the beam and the dot below composite
- * NORMALLY, not in `screen`. Measured 2026-09-21 by reading a registered asset
- * back; it is the fifth auto-rewrite and the only one that changes the picture
- * rather than the code.
+ * THE BEAM AND DOT DECLARE NO BLEND MODE, DELIBERATELY. They asked for
+ * `screen`; ChatCut strips mixBlendMode at registration — measured 2026-09-21
+ * by reading a registered asset back — so the declaration never survived and
+ * was dead code that looked live. Removed rather than annotated: the source
+ * now says what runs, and registered_diff can hold the two byte-identical.
  *
  * THE 0.82 IS UNAFFECTED AND THAT IS NOT LUCK. The wash is the term the
  * perceptibility measurement is about, and the wash was always a normal
@@ -84,7 +85,7 @@ const Component = ({ item }) => {
       ) : null}
       {beamOpacity > 0.001 ? (
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none",
-          opacity: beamOpacity, mixBlendMode: "screen" }}>
+          opacity: beamOpacity }}>
           <div style={{
             position: "absolute", left: 0, right: 0, top: "50%", height: 4,
             transform: "translateY(-50%)",
@@ -96,7 +97,7 @@ const Component = ({ item }) => {
       ) : null}
       {dotOpacity > 0.001 ? (
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none",
-          opacity: dotOpacity, mixBlendMode: "screen" }}>
+          opacity: dotOpacity }}>
           <div style={{
             position: "absolute", left: "50%", top: "50%", width: 28, height: 28,
             transform: "translate(-50%, -50%)", borderRadius: "50%",

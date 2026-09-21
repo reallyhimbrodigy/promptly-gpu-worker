@@ -14,18 +14,22 @@ leaves the code looking exactly as the author wrote it and changes the render �
 so the source is a truthful account of a composite that never happens, and four
 rounds of reading it found nothing.
 
-WHAT THIS CHECKS, AND WHAT IT CANNOT. It cannot make the blend work. What it
-can do is stop the source LYING: every body that declares mixBlendMode must
-also carry the acknowledgement, so the next reader knows the layer composites
-normally before they measure anything against it. That is exactly the cost I
-paid — a perceptibility number solved against screen and soft-light when the
-runtime does neither, corrected only because a rendered frame disagreed with the
-arithmetic.
+THE RULE IS NOW ZERO DECLARATIONS, NOT ZERO SILENT ONES (Zac, 2026-09-21:
+"acknowledge the strip in the body or lose the declaration"). The first version
+of this check asked every declaring body to carry an acknowledgement. That was
+the right shape for an afternoon and the wrong shape to keep: a declaration
+that CANNOT TAKE EFFECT is a fallback in source, which this lane already
+forbids, and an annotated one is still dead code that looks live. All four
+bodies lost theirs, the population went to zero, and this check went red on its
+own success — which is the correct behaviour for a leg over an empty set and
+the reason the floor exists.
 
-THE RISK IS NOT EQUAL ACROSS BLEND MODES, so the report names them. `screen`
-stripped to normal makes a glow opaque instead of additive. `multiply` stripped
-to normal is worse: a vignette that darkened what was under it becomes a flat
-covering layer. DepthPull has one of each.
+So it counts the whole body corpus instead, and asserts the property directly.
+
+WHY THE REASON IS ALSO ASSERTED. Deleting every declaration leaves nothing to
+explain why, and the next person to want a `screen` glow will simply add one
+back. L2 requires the finding to survive somewhere in the corpus, so the
+deletion carries its own argument.
 """
 import os
 import re
@@ -33,12 +37,16 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BODIES = os.path.join(HERE, "port", "bodies")
-sys.path.insert(0, HERE)
-import lane_contract as lc                                     # noqa: E402
 
 # The acknowledgement a body must carry if it declares mixBlendMode. Matched on
 # the FACT, not on a form of words, so a rewrite of the surrounding prose does
 # not silently drop it.
+# THE DETECTOR'S PATTERN, HOISTED SO THE CANARY USES THE SAME ONE. It had its
+# own copy inline, so breaking the detector left the canary matching happily and
+# the blindness went unreported — a check testing a second copy of the thing it
+# is checking.
+DECL = r'mixBlendMode:\s*"([a-z-]+)"'
+
 ACK = re.compile(r"strips?\s+mixBlendMode|mixBlendMode\s+(?:is\s+)?(?:was\s+)?(?:stripped|removed)",
                  re.IGNORECASE)
 
@@ -52,52 +60,50 @@ def leg(name, ok, got):
 
 
 def main():
-    users = {}
-    for f in sorted(os.listdir(BODIES)):
-        if not f.endswith(".jsx"):
-            continue
-        src = open(os.path.join(BODIES, f), encoding="utf-8").read()
-        modes = re.findall(r'mixBlendMode:\s*"([a-z-]+)"', src)
-        if modes:
-            users[f[:-4]] = (sorted(set(modes)), bool(ACK.search(src)))
-
-    # A CHECK OVER AN EMPTY POPULATION ASSERTS NOTHING.
-    leg("L0 population_nonempty", len(users) >= 1,
-        "%d body/bodies declare mixBlendMode" % len(users))
-    if not users:
-        print("0/0 — refusing to report a pass over an empty population")
+    bodies = sorted(f for f in os.listdir(BODIES) if f.endswith(".jsx"))
+    # A CHECK OVER AN EMPTY POPULATION ASSERTS NOTHING — and here the population
+    # is every body, so it stays non-empty even when zero of them declare a
+    # blend. That is the whole repair: the first version counted DECLARERS, so
+    # fixing the defect emptied the check.
+    leg("L0 corpus_nonempty", len(bodies) >= 20, "%d bodies" % len(bodies))
+    if not bodies:
+        print("0/0 — refusing to report a pass over an empty corpus")
         return 1
 
-    ls = lc.live_set()
-    if ls["state"] != lc.MEASURED:
-        print("HARNESS FAILURE: live_set is %s" % ls["state"])
-        return 2
+    declared = {}
+    ack_bodies = []
+    for f in bodies:
+        src = open(os.path.join(BODIES, f), encoding="utf-8").read()
+        modes = re.findall(DECL, src)
+        if modes:
+            declared[f[:-4]] = sorted(set(modes))
+        if ACK.search(src):
+            ack_bodies.append(f[:-4])
 
-    for n, (modes, ack) in sorted(users.items()):
-        where = ("ON MENU" if n in ls["menu"]
-                 else "renderable" if n in ls["renderable"]
-                 else "out of scope")
-        print("     %-22s %-18s %-12s ack=%s" % (n, ",".join(modes), where, ack))
+    # L1 THE PROPERTY. ChatCut strips mixBlendMode, so a declaration is inert by
+    # construction and the source would describe a composite that never happens.
+    leg("L1 no_blend_declarations", not declared,
+        "declaring: %s" % ({k: ",".join(v) for k, v in declared.items()} or "none"))
 
-    # L1 every declaring body says so. This is the leg that stops the source
-    # being a truthful description of a composite that never runs.
-    silent = sorted(n for n, (m, a) in users.items() if not a)
-    leg("L1 every_user_names_the_strip", not silent, "silent: %s" % (silent or "none"))
+    # L2 THE REASON SURVIVES, PER BODY AND BY NAME. This first floored on a
+    # COUNT (>= 3 bodies carry the finding) and the red proof walked straight
+    # past it: deleting DepthPull's note left three others standing, so the
+    # total held while the body that most needs the warning lost it. That is
+    # this repo's own rule about a floor on a sum hiding which contributor
+    # vanished, and I wrote the leg that way anyway. Named individually now.
+    MUST_CARRY = ["DepthPull", "LightLeakOverlay", "ShutterFlash", "ShutterFlashOverlay"]
+    lost = [n for n in MUST_CARRY if n not in ack_bodies]
+    leg("L2 the_finding_is_recorded", not lost,
+        "%d/%d carry it; lost: %s" % (len(MUST_CARRY) - len(lost), len(MUST_CARRY), lost or "none"))
 
-    # L2 NOTHING ON THE MENU CARRIES AN UNACKNOWLEDGED BLEND. The menu is the
-    # offerable set; a component there whose source describes a blend it will
-    # not get is one somebody will measure against the wrong model, which is
-    # precisely what happened to LightLeakOverlay.
-    on_menu = sorted(n for n, (m, a) in users.items() if n in ls["menu"] and not a)
-    leg("L2 menu_has_no_silent_blend", not on_menu, "on menu and silent: %s" % (on_menu or "none"))
-
-    # L3 `multiply` is named separately because the failure is worse and the
-    # shape is different: screen stripped to normal makes a glow opaque; multiply
-    # stripped to normal turns a darkening layer into a covering one.
-    mult = sorted(n for n, (m, a) in users.items() if "multiply" in m)
-    mult_unack = sorted(n for n in mult if not users[n][1])
-    leg("L3 multiply_users_acknowledged", not mult_unack,
-        "%d use multiply %s | unacknowledged: %s" % (len(mult), mult or "", mult_unack or "none"))
+    # L3 THE DETECTOR CAN STILL SEE ONE. Breaking the pattern empties `declared`
+    # and L1 then passes for the wrong reason — a clean corpus and a blind
+    # detector are the same output. The canary is a string this file owns, so it
+    # cannot go stale with the corpus.
+    canary = 'style={{ opacity: 1, mixBlendMode: "screen" }}'
+    leg("L3 detector_finds_a_known_positive",
+        re.findall(DECL, canary) == ["screen"],
+        "canary -> %s" % re.findall(DECL, canary))
 
     print("%d/%d legs ok" % (4 - len(FAILS), 4))
     if FAILS:

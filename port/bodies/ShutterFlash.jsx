@@ -28,11 +28,12 @@
  * slow squash. Measured in measured/transition_peaks_2026-09-20.md rather than
  * silently exceeded.
  *
- * CHATCUT STRIPS mixBlendMode: the beam and dot composite NORMALLY rather than
- * in `screen`. Measured 2026-09-21 from a registered read-back. Recorded here
- * even though this component is out of scope on usage, because the population
- * that carries the hazard is the set of bodies that DECLARE the blend, not the
- * set anybody happens to be looking at.
+ * NO BLEND MODE DECLARED, DELIBERATELY. The beam and dot asked for `screen`
+ * and ChatCut strips mixBlendMode at registration, so the declaration never
+ * survived. Removed rather than annotated, on the same rule as
+ * ShutterFlashOverlay: a declaration that cannot take effect is dead code that
+ * looks live. Out of scope on usage, treated the same way regardless — the
+ * population that carries the hazard is the set of bodies that DECLARE it.
  *
  * CONTRACT (from ChatCut's validator): exactly one top-level component and NO
  * top-level constants — the five phase boundaries and two sizes are module
@@ -121,7 +122,7 @@ const Component = ({ item }) => {
       ) : null}
       {totalBeamOpacity > 0.001 ? (
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none",
-          opacity: totalBeamOpacity, mixBlendMode: "screen" }}>
+          opacity: totalBeamOpacity }}>
           <div style={{ position: "absolute", left: 0, right: 0, top: "50%", height: 4,
             transform: "translateY(-50%)",
             background: `linear-gradient(90deg, transparent 0%, ${flashColor}33 10%, ${flashColor} 50%, ${flashColor}33 90%, transparent 100%)`,
@@ -130,7 +131,7 @@ const Component = ({ item }) => {
       ) : null}
       {dotOpacity > 0.001 ? (
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none",
-          opacity: dotOpacity, mixBlendMode: "screen" }}>
+          opacity: dotOpacity }}>
           <div style={{ position: "absolute", left: "50%", top: "50%", width: 28, height: 28,
             transform: "translate(-50%, -50%)", borderRadius: "50%", background: flashColor,
             boxShadow: `0 0 40px 10px ${flashColor}, 0 0 100px 30px ${flashColor}aa, 0 0 220px 60px ${flashColor}55` }} />

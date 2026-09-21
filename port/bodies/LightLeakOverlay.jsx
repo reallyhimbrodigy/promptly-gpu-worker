@@ -31,8 +31,11 @@
  * nested ({item}) injection, <img> -> <Img> and the trailing newline, and the
  * only one that silently changes what the component LOOKS LIKE. The layers
  * composite NORMALLY: flat colour over the picture, far heavier than a screen.
- * The source keeps mixBlendMode so it renders correctly anywhere else; what
- * ships here is measured against the stripped form, because that is what runs.
+ * THE DECLARATIONS ARE NOW REMOVED rather than kept and annotated. Keeping
+ * them was argued as "so it renders correctly anywhere else"; that is a
+ * fallback in source, which this lane has a standing rule against, and the
+ * measured peak (l2 0.70, intensity 0.65) is derived from the NORMAL composite
+ * anyway. The source now says what runs.
  *
  * NO VELOCITY CAP: nothing moves that the cap can bound. The glows translate,
  * but they are BLURRED BY 28-40px and drawn at partial opacity —
@@ -150,10 +153,10 @@ const Component = ({ item }) => {
     <div style={rootStyle}>
       {washOpacity > 0.001 ? (
         <div style={{ position: "absolute", inset: 0, background: pal.secondary,
-          mixBlendMode: "soft-light", opacity: washOpacity, pointerEvents: "none" }} />
+          opacity: washOpacity, pointerEvents: "none" }} />
       ) : null}
       {l1Opacity > 0.001 ? (
-        <div style={{ position: "absolute", inset: 0, mixBlendMode: "screen",
+        <div style={{ position: "absolute", inset: 0,
           opacity: l1Opacity, pointerEvents: "none" }}>
           <div style={{ position: "absolute", left: "-20%", top: "-20%",
             width: "140%", height: "140%",
@@ -163,7 +166,7 @@ const Component = ({ item }) => {
         </div>
       ) : null}
       {l2Opacity > 0.001 ? (
-        <div style={{ position: "absolute", inset: 0, mixBlendMode: "screen",
+        <div style={{ position: "absolute", inset: 0,
           opacity: l2Opacity, pointerEvents: "none" }}>
           <div style={{ position: "absolute", left: "20%", top: "20%",
             width: "60%", height: "60%",
