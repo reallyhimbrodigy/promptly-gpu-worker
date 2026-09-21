@@ -267,21 +267,36 @@ def name_collisions(library_path="library_73.json"):
         return {"state": "FAILED", "collisions": {}, "why": "no library at %s" % library_path}
     seen = {}
     for fam, items in lib.items():
-        if fam == "_why":
+        if fam.startswith("_") or not isinstance(items, list):
             continue
         for it in items:
             nm = it if isinstance(it, str) else (it.get("name") or str(it))
             seen.setdefault(nm, []).append(fam)
-    coll = {nm: fams for nm, fams in seen.items() if len(fams) > 1}
+    # A DECLARED TWO-HOME COMPONENT IS ONE COMPONENT, NOT A DUPLICATE.
+    # StickyNotes is emitted as a text overlay when its three items MARK
+    # STRUCTURE and as a motion graphic when they ARE the referent — one
+    # component, routed, never duplicated (handler.py:8287, ruled 2026-09-21).
+    # The declaration lives in the library beside the families it spans, so a
+    # reader meeting the name twice finds out why in the same file. An
+    # UNDECLARED name in two families is still a finding, which is the whole
+    # point: this reads a decision, it does not suppress a class.
+    two_home = set(lib.get("_two_home") or [])
+    coll = {nm: fams for nm, fams in seen.items()
+            if len(fams) > 1 and nm not in two_home}
+    homes = {nm: fams for nm, fams in seen.items()
+             if len(fams) > 1 and nm in two_home}
     # The quarantine is DATA and lives beside the library, so a described
     # collision is visible to anyone reading the tree rather than buried in this
     # function. Anything NOT described is a finding.
     known = {c["name"] for c in (_read("collision_quarantine.json", {}) or {}).get("collisions", [])}
     undescribed = {nm: fams for nm, fams in coll.items() if nm not in known}
     return {"state": "MEASURED", "collisions": coll, "undescribed": undescribed,
-            "why": "%d name(s) across %d famil(ies); %d collision(s), %d undescribed%s"
-                   % (len(seen), len([k for k in lib if k != "_why"]), len(coll),
-                      len(undescribed),
+            "two_home": homes,
+            "why": "%d component(s) across %d famil(ies); %d two-home (%s); "
+                   "%d collision(s), %d undescribed%s"
+                   % (len(seen), len([k for k in lib if not k.startswith("_")]),
+                      len(homes), ",".join(sorted(homes)) or "none",
+                      len(coll), len(undescribed),
                       (": " + ", ".join("%s in %s" % (n, "+".join(f))
                                         for n, f in sorted(coll.items()))) if coll else "")}
 
@@ -326,7 +341,7 @@ def build(library_path="library_73.json"):
     pics = pictures()
     entries = []
     for fam, items in lib.items():
-        if fam == "_why":
+        if fam.startswith("_") or not isinstance(items, list):
             continue
         for it in items:
             nm = it if isinstance(it, str) else (
@@ -344,10 +359,10 @@ def build(library_path="library_73.json"):
             "pending": len(entries) - meas,
             "pictured": pictured, "unpictured": len(entries) - pictured,
             "pictures_broken": broken,
-            "families": len([k for k in lib if k != "_why"]),
-            "why": "%d entr(ies) across %d famil(ies); %d measured, %d atlas pending; "
+            "families": len([k for k in lib if not k.startswith("_")]),
+            "why": "%d placement(s) across %d famil(ies); %d measured, %d atlas pending; "
                    "%d pictured, %d unpictured%s"
-                   % (len(entries), len([k for k in lib if k != "_why"]),
+                   % (len(entries), len([k for k in lib if not k.startswith("_")]),
                       meas, len(entries) - meas, pictured, len(entries) - pictured,
                       (", %d BROKEN" % broken) if broken else "")}
 

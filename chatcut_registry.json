@@ -2602,10 +2602,6 @@
    "reason": "not a single component",
    "detail": "a DISPATCHER, not a component — it switches on `platform` to TweetBubble / InstagramComment / IMessageBubble / TikTokComment. Register those instead."
   },
-  "StickyNotes": {
-   "reason": "structured props ChatCut cannot express",
-   "detail": "notes: StickyNote[] — THE MOTION GRAPHIC. The text-overlay variant that once shared this name is HandwrittenNote, which IS expressible (its notes arrive as one semicolon-separated text property) and is not refused."
-  },
   "TikTokComment": {
    "reason": "the blob reads an identifier ChatCut does not have",
    "detail": "cancelRender (line 384), setTimeout (line 398), Image (line 399), clearTimeout (line 401)"
@@ -2613,6 +2609,15 @@
   "TweetBubble": {
    "reason": "structured props ChatCut cannot express",
    "detail": "stats: { replies: number"
+  }
+ },
+ "superseded": {
+  "StickyNotes": {
+   "was": "refused",
+   "old_reason": "structured props ChatCut cannot express",
+   "superseded_by": "the flattened semicolon body — port/bodies/StickyNotes.jsx",
+   "ruling": "Zac 2026-09-21: the flattened body IS the port. The array-typed shape was never a different component, only a different transport, so the row retires as superseded rather than standing as a refusal. A refusal on the record for a component that ships is a reader's dead end.",
+   "date": "2026-09-21"
   }
  }
 }

@@ -1,14 +1,26 @@
 {
- "_why": "A component name in two families makes every by-name lookup resolve to whichever entry it meets first. Two were found on 2026-09-21. One was a mistake and is FIXED in the library (the tight-cut overlays were listed under the transitions' names). One is REAL and needs a rename decision, so it is described here with its consequence rather than skipped quietly — a checker that carries its own exceptions hides them.",
- "_rule": "The check FAILS on any collision not listed here. An entry is a decision on the record with a date and an owner, never a way to make the check green.",
+ "_why": "A component name in two families makes every by-name lookup resolve to whichever entry it meets first. The check that finds them is real and stays. This file is where the ones it finds are RESOLVED on the record — including the one where the resolution was wrong and had to be reversed, because that is the entry a reader learns from.",
+ "_rule": "The check FAILS on any collision that is neither resolved here nor declared two-home in the library. An entry is a decision with a date and an owner, never a way to make the check green.",
  "collisions": [],
  "_resolved": [
   {
+   "name": "ShutterFlashOverlay / LightLeakOverlay",
+   "found": "2026-09-20",
+   "resolved": "2026-09-20",
+   "what": "The two tight-cut overlays were listed in the library under the TRANSITIONS' names — `ShutterFlash` and `LightLeak` — so the overlay entries collided with real, different transition components.",
+   "cost": "The inventory handed ShutterFlashOverlay the transition's still AND the transition's `peak 369.0 px/frame` — the largest displacement in the set, published against a component whose body says nothing moves, every value is an opacity. It also reported 14 of 15 pictured while listing one name twice.",
+   "resolution": "A straightforward naming error, mine. Fixed by using the components' own names. The library's own derivation note had them right two paragraphs away; the list and the note disagreed and nobody read them together."
+  },
+  {
    "name": "StickyNotes",
-   "resolved": "2026-09-21",
-   "ruling": "Zac: the motion graphic keeps the name (plural, a set of notes, the 31-MG member); the text-overlay variant is renamed for what it is.",
-   "now": "motion graphic = StickyNotes; text overlay = HandwrittenNote",
-   "kept_here": "A resolved collision stays on the record. The quarantine is the only place that says this name once meant two things, and the next person to find a StickyNotes reference in an old report needs that."
+   "found": "2026-09-21",
+   "resolved": "2026-09-21, after being resolved WRONG first",
+   "what": "`StickyNotes` was in `motion graphic` and in `text overlay`.",
+   "first_reading": "I reported it as TWO components sharing one name, citing two different bodies (16336 bytes against 5443), different property shapes, both built.",
+   "first_resolution": "Zac ruled on that evidence: the motion graphic keeps the name, the text-overlay variant is renamed for what it is — a single handwritten note. Landed as HandwrittenNote in 935bb3c across five sites here and five more in chatcut_job_app.py.",
+   "why_it_was_wrong": "The evidence was manufactured by the act it justified. I had ported this component with a ONE-note default that I chose myself; I then read that default back as proof the component was singular. handler.py:8287 had said the opposite the whole time, in the LIVE prompt: 'ONE COMPONENT, TWO HOMES — route it, never duplicate it. This renders the IDENTICAL component as the StickyNotes motion graphic; same pixels either way.' Plus 'the three-note rhythm is the moment'. I did not read it until after the rename had landed, and Builder 1 was the one who surfaced it.",
+   "reversal": "Zac 2026-09-21: ONE component with two homes. Name reverted to StickyNotes. Default is THREE notes — three is the point, one is the degenerate case. The flattened semicolon body IS the port, so the array-typed `refused` row retires as SUPERSEDED rather than standing as unexpressible. Listed ONCE on the platter with both homes named. The collision check treats a declared two-home component as one, not a duplicate.",
+   "the_lesson": "The two bodies differing was TRUE and was not evidence of two components — one was a port with a flattened transport. 'Different bytes' answers a different question from 'different component', and I let the first stand in for the second. The live prompt was the artefact that owned the answer and it was never consulted."
   }
  ]
 }

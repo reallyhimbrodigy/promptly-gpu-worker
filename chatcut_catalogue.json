@@ -842,7 +842,7 @@
    }
   },
   "StickyNotes": {
-   "when": "WHEN STEPS OR ITEMS ARE ENUMERATED",
+   "when": "WHEN THE DIALOGUE GIVES THREE PARALLEL ITEMS OF EQUAL WEIGHT",
    "reach_for_it_instead_of": [
     "Scattered hand-written notes",
     "scattered notes",
@@ -851,7 +851,7 @@
    "size_band": "unlisted",
    "still": "catalogue_stills/StickyNotes.png",
    "still_state": "MEASURED",
-   "note": "THIS ENTRY IS THE MOTION GRAPHIC. Its declared props (noteFontFamily, noteSize, showFog, topOffset) and its example_props array of three notes are the MG's, and catalogue_stills/StickyNotes.png shows three notes. The text-overlay variant that once shared this name is HandwrittenNote and has its own entry.",
+   "note": "THREE NOTES IS THE POINT; ONE IS THE DEGENERATE CASE. On ChatCut the notes arrive flattened as text|colour|rotation separated by semicolons, because that schema has no array type — a TRANSPORT difference, not a second component.",
    "required": [
     "notes"
    ],
@@ -881,7 +881,8 @@
       "rotation": -2
      }
     ]
-   }
+   },
+   "two_homes": "Listed ONCE. Emit it under TEXT when the three items mark structure — the video's own three rules, three takeaways, three chapters. Emit it under MOTION GRAPHICS when the three items ARE the referent the speaker is pointing at — three things on a list they are reading, three notifications, three names. Structure is an overlay; evidence is a graphic. One component, routed, never duplicated, and never both for one moment."
   },
   "TikTokComment": {
    "when": "WHEN SOCIAL PROOF OR A MESSAGE IS QUOTED",
@@ -1032,31 +1033,6 @@
      "likes": 1200,
      "views": 98000
     }
-   }
-  },
-  "HandwrittenNote": {
-   "when": "WHEN ONE TAKEAWAY SHOULD LOOK HANDWRITTEN",
-   "reach_for_it_instead_of": [
-    "a single hand-written note",
-    "one tip",
-    "one takeaway on paper"
-   ],
-   "size_band": "size atlas pending",
-   "still": "catalogue_stills/HandwrittenNote.png",
-   "still_state": "ABSENT — not yet rendered",
-   "note": "Renamed from StickyNotes 2026-09-21. A SINGLE handwritten note is the default and the job; it accepts up to three, and three is the ceiling rather than the point. Distinct component from the StickyNotes motion graphic, which keeps that name.",
-   "required": [
-    "notes"
-   ],
-   "declared": [
-    "fontFamily",
-    "notes",
-    "size",
-    "position",
-    "accentColor"
-   ],
-   "example_props": {
-    "notes": "Key takeaway|#FFE066|-3"
    }
   }
  }

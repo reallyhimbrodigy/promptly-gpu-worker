@@ -4,18 +4,32 @@
  * registered blob comes back byte-identical and port/registered_diff.mjs can assert
  * exact equality, which is the only way to know the code that runs is the code we
  * built. */
-/* HandwrittenNote - the sticky_note text overlay, ported from the old pipeline's family.
+/* StickyNotes - the sticky_note text overlay, ported from the old pipeline's family.
  *
- * RENAMED FROM StickyNotes, 2026-09-21 (Zac). The MOTION GRAPHIC keeps that name:
- * it is plural by nature, a set of notes, and it is one of the 31 MG members with
- * `notes: StickyNote[]`. This is a different component that happened to share the
- * name, and the sharing was not harmless - every by-name lookup resolved to
- * whichever it met first, which handed one of them the other's picture AND the
- * other's measured peak displacement.
+ * ONE COMPONENT, TWO HOMES (Zac, ruling 2026-09-21, and handler.py:8287 said so
+ * all along). It is emitted as a TEXT OVERLAY when the three items MARK
+ * STRUCTURE - the video's own three rules, three takeaways, three chapters -
+ * and as a MOTION GRAPHIC when the three items ARE the referent the speaker is
+ * pointing at. Structure is an overlay; evidence is a graphic. Never both for
+ * one moment. It is ONE component and it is routed, never duplicated.
  *
- * WHAT THIS ONE IS: a single handwritten note - one line on coloured paper, the
- * property table's default being exactly that. It accepts up to three, and three
- * is the ceiling rather than the point.
+ * THREE NOTES IS THE POINT; ONE IS THE DEGENERATE CASE. The live prompt is
+ * explicit - "the three-note rhythm is the moment, the stagger, the slam, the
+ * three ideas landing as one" - and the property default is three accordingly.
+ *
+ * THIS FLATTENED BODY *IS* THE PORT. ChatCut's property schema has no array
+ * type, so the notes arrive as text|colour|rotation separated by semicolons.
+ * That is a TRANSPORT difference, not a different component: the registry's old
+ * `refused` row for the array-typed shape is superseded by this, not standing
+ * as a refusal.
+ *
+ * WHAT I GOT WRONG, KEPT BECAUSE THE NEXT PERSON WILL BE TEMPTED THE SAME WAY.
+ * I ported this with a ONE-note default that I chose, then read that default
+ * back as evidence that the component was singular, then had it split from the
+ * motion graphic and renamed HandwrittenNote on the strength of it. The
+ * evidence was manufactured by the act it was meant to justify. handler.py:8287
+ * had the correct description the entire time and I did not read it until the
+ * rename was already landed.
  *
  * WHY IT IS BACK. text_overlays was a FAMILY in the live pipeline and it is absent
  * from the 73. The references place text most of the time; until this lands the
@@ -24,7 +38,7 @@
  * Three were retired from the enum while the record kept carrying their fields,
  * which is how a family reads as two variants and is five.
  *
- * One to three handwritten-style notes. Takeaways, tips, the educational beat.
+ * THREE handwritten-style notes by default, one to three by range. Takeaways, tips, the educational beat.
  * ChatCut's property schema has NO ARRAY type (text, number, color, boolean,
  * select, font, image, video), so the notes arrive as text|color|rotation
  * separated by semicolons, and a malformed entry is DROPPED AND NAMED in the

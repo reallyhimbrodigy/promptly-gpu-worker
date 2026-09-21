@@ -2035,20 +2035,27 @@ def main():
     check("the library carries the whole text-overlay family, and the count is corrected with a why",
           # THE FIVE FROM THE SCHEMA'S HISTORY, plus PlainText — the workhorse, which
           # is not in that history because the enum never had a name for "just words".
-          sorted(_fam) == ["CaptionMatch", "HandwrittenNote", "LowerThird", "PlainText",
-                           "QuoteCard", "TornPaper"]
+          sorted(_fam) == ["CaptionMatch", "LowerThird", "PlainText", "QuoteCard",
+                           "StickyNotes", "TornPaper"]
           # THE COUNT IS NOT A LITERAL HERE. It was `== 79`, and when the
           # library was corrected to 77 this leg went red on a tree that had
           # just got MORE accurate -- a check defending a DECISION, which is
           # the same defect as the 79 that the decision fixed. What it should
           # assert is that the file's own note NAMES whatever the file counts,
           # so a count that moves without its reason moving still fails.
-          and ("TOTAL %d." % sum(len(v) for v in _lib.values() if isinstance(v, list)))
+          # BOTH counts, because they are different numbers: a two-home component
+          # occupies two family placements and is still one component.
+          and ("TOTAL %d." % sum(len(v) for k, v in _lib.items()
+                                 if isinstance(v, list) and not k.startswith("_")))
+              in (_lib.get("_why") or "")
+          and ("COMPONENTS %d." % (sum(len(v) for k, v in _lib.items()
+                                       if isinstance(v, list) and not k.startswith("_"))
+                                   - len(_lib.get("_two_home") or [])))
               in (_lib.get("_why") or "")
           and "COUNT CORRECTED" in (_lib.get("_why") or ""),
-          "%d items, family %s" % (sum(len(v) for v in _lib.values() if isinstance(v, list)), sorted(_fam)))
+          "%d items, family %s" % (sum(len(v) for k, v in _lib.items() if isinstance(v, list) and not k.startswith("_")), sorted(_fam)))
     # EVERY VARIANT IS BUILT, CONTRACT-CLEAN, AND CARRIES THE TWO DIALS.
-    for _v in ("TornPaper", "HandwrittenNote", "QuoteCard", "LowerThird", "CaptionMatch"):
+    for _v in ("TornPaper", "StickyNotes", "QuoteCard", "LowerThird", "CaptionMatch"):
         _blob = open("port/build/%s.jsx" % _v, encoding="utf-8").read()
         # THE OTHER LANE'S TABLE MAY STILL HOLD THE OLD KEY. Resolved through
         # pending_renames.json, which names the owner and the exact edit; when
@@ -2063,7 +2070,7 @@ def main():
     # one exception and it is deliberate — a broadcast name card lives in the lower
     # third, and the dial still moves it.
     _defs = {v: {q["key"]: q.get("defaultValue") for q in J.PORTED_PROPS[__import__("inventory").registry_key(v)]}
-             for v in ("TornPaper", "HandwrittenNote", "QuoteCard", "LowerThird", "CaptionMatch")}
+             for v in ("TornPaper", "StickyNotes", "QuoteCard", "LowerThird", "CaptionMatch")}
     check("every variant defaults to medium, and to middle except the lower third",
           all(d["size"] == "medium" for d in _defs.values())
           and all(d["position"] == "middle" for v, d in _defs.items() if v != "LowerThird")
@@ -2071,7 +2078,7 @@ def main():
           str({v: (d["size"], d["position"]) for v, d in _defs.items()}))
 
     # ---- A MALFORMED ENTRY IS A FAULT, NOT A LABEL IN THE VIDEO (Zac, 2026-09-19) ----
-    # HandwrittenNote used to render "dropped N malformed entries" INTO THE FRAME. An error
+    # StickyNotes used to render "dropped N malformed entries" INTO THE FRAME. An error
     # rendered into a user's video is worse than an empty note; silently dropping is the
     # other half of the same mistake, handing back a graphic missing a line with nothing
     # saying so. It is a fault at the rewatch (so the agent can fix it) and at the
@@ -2089,13 +2096,13 @@ def main():
           and J.packed_prop_faults("notes", "a|#fff|0;b|#fff|0;c|#fff|0") == [],
           "4 entries named, 3 clean")
     _bad_items = [{"id": "aaaaaaaa-1111", "itemType": "motion-graphic",
-                   "asset": {"name": "HandwrittenNote"}, "propertyOverrides": {"notes": "|#FFE066|-3"}}]
+                   "asset": {"name": "StickyNotes"}, "propertyOverrides": {"notes": "|#FFE066|-3"}}]
     # THREE STATES, BECAUSE AN EMPTY LIST IS NOT AN ALL-CLEAR. Measured the hard way:
     # a deliberately malformed entry was planted, placed, and the check returned [] on
     # TWO paid runs — it read each item's own `propertyOverrides`, which the read-back
     # does not carry (the values live behind inspect_item, a thing this repo had
     # already learned once). An absent measurement read exactly like a clean one.
-    _no_props = [{"id": "aaaaaaaa-1111", "itemType": "motion-graphic", "asset": {"name": "HandwrittenNote"}}]
+    _no_props = [{"id": "aaaaaaaa-1111", "itemType": "motion-graphic", "asset": {"name": "StickyNotes"}}]
     _with_bad = J.component_faults(_no_props, {"aaaaaaaa-1111": {"notes": "|#FFE066|-3"}})
     _with_ok = J.component_faults(_no_props, {"aaaaaaaa-1111": {"notes": "ok|#fff|0"}})
     check("a component whose properties could not be read is ABSENT, never a clean pass",
@@ -2105,7 +2112,7 @@ def main():
           J.component_faults(_no_props)["why"][:100])
     check("with the property map the fault fires and names the item and its component",
           _with_bad["state"] == "MEASURED" and _with_bad["faults"]
-          and "aaaaaaaa" in _with_bad["faults"][0] and "HandwrittenNote" in _with_bad["faults"][0]
+          and "aaaaaaaa" in _with_bad["faults"][0] and "StickyNotes" in _with_bad["faults"][0]
           and _with_ok["state"] == "MEASURED" and _with_ok["faults"] == [],
           _with_bad["faults"][0][:110])
     # AND BOTH SEAMS ARE FED THE MAP THAT ACTUALLY HAS THE VALUES.
@@ -2116,7 +2123,7 @@ def main():
           and "def _props_for_items(" in _appf,
           "rewatch and read-back both fed")
     # THE ERROR IS NOT IN THE PICTURE, and the fault reaches BOTH seams.
-    _sn = open("port/build/HandwrittenNote.jsx", encoding="utf-8").read()
+    _sn = open("port/build/StickyNotes.jsx", encoding="utf-8").read()
     _sn_code = _re.sub(r"^\s*//.*$", "", _re.sub(r"/\*.*?\*/", "", _sn, flags=_re.S), flags=_re.M)
     _app = open("chatcut_job_app.py", encoding="utf-8").read()
     check("the component renders no error text, and the fault reaches the rewatch AND the read-back",
@@ -2160,10 +2167,10 @@ def main():
     # END TO END: the parsed props make the planted fault fire.
     check("the parsed properties make a planted malformed entry FAULT",
           J.component_faults([{"id": "2bbe2a3b1e", "itemType": "motion-graphic",
-                               "asset": {"name": "HandwrittenNote"}}],
+                               "asset": {"name": "StickyNotes"}}],
                              {"2bbe2a3b1e": _ip["props"]})["faults"],
           str(J.component_faults([{"id": "2bbe2a3b1e", "itemType": "motion-graphic",
-                                   "asset": {"name": "HandwrittenNote"}},],
+                                   "asset": {"name": "StickyNotes"}},],
                                  {"2bbe2a3b1e": _ip["props"]})["faults"])[:110])
     # AND NO SITE WALKS THE ENVELOPE FOR A KEY THAT IS A STRING.
     _appp = _re.sub(r"^\s*#.*$", "", open("chatcut_job_app.py", encoding="utf-8").read(), flags=_re.M)
@@ -2348,10 +2355,10 @@ def main():
     check("PlainText is the sixth text-overlay variant, and the count carries its reason",
           "PlainText" in (_lib2.get("text overlay") or [])
           and len(_lib2.get("text overlay") or []) == 6
-          and ("TOTAL %d." % sum(len(v) for v in _lib2.values() if isinstance(v, list)))
+          and ("TOTAL %d." % sum(len(v) for k, v in _lib2.items() if isinstance(v, list) and not k.startswith("_")))
               in (_lib2.get("_why") or ""),
           "%d items, text overlay %d" % (
-              sum(len(v) for v in _lib2.values() if isinstance(v, list)),
+              sum(len(v) for k, v in _lib2.items() if isinstance(v, list) and not k.startswith("_")),
               len(_lib2.get("text overlay") or [])))
 
     # ---- COMPARING A THING WITH ITSELF ANSWERS ZERO BY CONSTRUCTION ----
@@ -3032,6 +3039,15 @@ def main():
     _pr = __import__("inventory").pending_renames()
     check("every pending cross-lane rename names an owner and the exact edit",
           _pr["state"] == "MEASURED" and not _pr["undescribed"], _pr["why"])
+    # AND EVERY ROW DESCRIBES *THIS* TREE. The resolver rewrites names here, so a
+    # row copied from another lane's state does not sit there inertly — it
+    # actively breaks lookups that were correct. Measured 2026-09-21: a
+    # reverse-rename row written about Builder 1's worktree rewrote StickyNotes
+    # into a key this tree has never had, and the suite died on the KeyError.
+    _pr_foreign = [r for r in _pr["pending"] if r.get("was") not in J.PORTED_PROPS]
+    check("every pending rename's old key is live in THIS tree's registry",
+          not _pr_foreign,
+          "foreign or stale: %s" % [r.get("was") for r in _pr_foreign])
 
     # ---- ITEM 5's PICTURE HALF, AND THE NAME COLLISION THAT CORRUPTED IT ----
     # A component name in two families makes every by-name lookup resolve to
@@ -3047,6 +3063,16 @@ def main():
           _pic["state"] == "MEASURED" and _pic["by_name"]
           and all(v["on_disk"] for v in _pic["by_name"].values()),
           _pic["why"])
+    # A DECLARED TWO-HOME COMPONENT IS ONE COMPONENT. It must be DECLARED in the
+    # library and it must actually span two families — a declaration for a name
+    # that sits in one family is a standing exemption for a condition that does
+    # not exist, which is how an exemption outlives the thing it excused.
+    check("every two-home declaration names a component that really spans two families",
+          _coll["state"] == "MEASURED"
+          and set(_coll["two_home"]) == set(_lib.get("_two_home") or [])
+          and all(len(f) > 1 for f in _coll["two_home"].values()),
+          "declared %s; spanning %s" % (sorted(_lib.get("_two_home") or []),
+                                        {k: sorted(v) for k, v in _coll["two_home"].items()}))
     check("no component name sits in two families except the ones described",
           _coll["state"] == "MEASURED" and not _coll["undescribed"],
           _coll["why"])
@@ -3065,7 +3091,8 @@ def main():
     # THE COUNT IS GUARDED AGAINST THE LIBRARY, not asserted as a literal. A
     # library that grows silently and an inventory that silently covers less of
     # it are the same defect seen from two ends.
-    _libn = sum(len(v) for k, v in _json.load(open("library_73.json")).items() if k != "_why")
+    _libn = sum(len(v) for k, v in _json.load(open("library_73.json")).items()
+                if isinstance(v, list) and not k.startswith("_"))
     check("the inventory's entry count is the library's, not a number in this file",
           len(_inv["entries"]) == _libn,
           "inventory %d vs library %d" % (len(_inv["entries"]), _libn))
