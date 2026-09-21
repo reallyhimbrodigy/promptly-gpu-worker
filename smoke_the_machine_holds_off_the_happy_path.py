@@ -3012,6 +3012,35 @@ def main():
           and all(e.get("line") is None for e in _inv["entries"] if e["state"] != "MEASURED"),
           "%d entr(ies), %d measured, %d atlas pending" % (
               len(_inv["entries"]), _inv["measured"], _inv["pending"]))
+    # ---- ITEM 5's PICTURE HALF, AND THE NAME COLLISION THAT CORRUPTED IT ----
+    # A component name in two families makes every by-name lookup resolve to
+    # whichever entry it meets first. Measured 2026-09-21: the tight-cut
+    # overlays were listed under the TRANSITIONS' names, so ShutterFlashOverlay
+    # was handed the transition's still AND the transition's peak 369.0 px/frame
+    # -- the highest displacement in the set, published against the one
+    # component whose body says nothing moves. A wrong value is worse than a
+    # missing one, because the missing one is counted.
+    _pic = J.inventory.pictures() if hasattr(J, "inventory") else __import__("inventory").pictures()
+    _coll = __import__("inventory").name_collisions()
+    check("every still named in the manifest is actually on disk",
+          _pic["state"] == "MEASURED" and _pic["by_name"]
+          and all(v["on_disk"] for v in _pic["by_name"].values()),
+          _pic["why"])
+    check("no component name sits in two families except the ones described",
+          _coll["state"] == "MEASURED" and not _coll["undescribed"],
+          _coll["why"])
+    # THE PICTURED COUNT IS DERIVED FROM THE LIBRARY, not asserted. Every name in
+    # the still manifest must BE a library component -- a picture of something
+    # the library does not list is the phantom defect with a photograph.
+    _inv2 = __import__("inventory").build()
+    _names = {e["name"] for e in _inv2["entries"]}
+    check("every pictured component is a library component, and none is broken",
+          set(_pic["by_name"]) <= _names and _inv2["pictures_broken"] == 0
+          and _inv2["pictured"] == len(_pic["by_name"]),
+          "%d pictured of %d manifest, %d broken; not in library: %s"
+          % (_inv2["pictured"], len(_pic["by_name"]), _inv2["pictures_broken"],
+             sorted(set(_pic["by_name"]) - _names)))
+
     # THE COUNT IS GUARDED AGAINST THE LIBRARY, not asserted as a literal. A
     # library that grows silently and an inventory that silently covers less of
     # it are the same defect seen from two ends.

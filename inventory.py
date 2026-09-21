@@ -209,6 +209,79 @@ def line_for(name, family, facts):
     return dict(out, why="the catalogue has no entry for %s" % name)
 
 
+def name_collisions(library_path="library_73.json"):
+    """-> {state, collisions, why} — any component name appearing in TWO families.
+
+    MEASURED 2026-09-21: `ShutterFlash` sat in `transition` AND in
+    `tight-cut overlay`, because the overlay was listed under the transition's
+    name instead of its own (`ShutterFlashOverlay`). They are different
+    components with different bodies.
+
+    EVERYTHING THAT LOOKS A COMPONENT UP BY NAME THEN RESOLVED TO WHICHEVER ONE
+    IT FOUND FIRST, and both halves of item 5 went wrong in the same way and in
+    the same direction — silently, with a plausible value:
+      * the PICTURE field handed the overlay the transition's still, and the
+        inventory reported 14 of 15 pictured while showing ShutterFlash twice;
+      * the LINE field handed it the transition's `peak 369.0 px/frame` — for a
+        component whose own body says NO VELOCITY CAP, nothing moves, every
+        value here is an opacity. The highest displacement in the set, published
+        against the one component that has none.
+
+    A WRONG VALUE IS WORSE THAN A MISSING ONE: the missing one is counted.
+    This is the family's own law — two things with the same name counting
+    different things — arriving in the component registry.
+    """
+    lib = _read(library_path)
+    if not isinstance(lib, dict) or not lib:
+        return {"state": "FAILED", "collisions": {}, "why": "no library at %s" % library_path}
+    seen = {}
+    for fam, items in lib.items():
+        if fam == "_why":
+            continue
+        for it in items:
+            nm = it if isinstance(it, str) else (it.get("name") or str(it))
+            seen.setdefault(nm, []).append(fam)
+    coll = {nm: fams for nm, fams in seen.items() if len(fams) > 1}
+    # The quarantine is DATA and lives beside the library, so a described
+    # collision is visible to anyone reading the tree rather than buried in this
+    # function. Anything NOT described is a finding.
+    known = {c["name"] for c in (_read("collision_quarantine.json", {}) or {}).get("collisions", [])}
+    undescribed = {nm: fams for nm, fams in coll.items() if nm not in known}
+    return {"state": "MEASURED", "collisions": coll, "undescribed": undescribed,
+            "why": "%d name(s) across %d famil(ies); %d collision(s), %d undescribed%s"
+                   % (len(seen), len([k for k in lib if k != "_why"]), len(coll),
+                      len(undescribed),
+                      (": " + ", ".join("%s in %s" % (n, "+".join(f))
+                                        for n, f in sorted(coll.items()))) if coll else "")}
+
+
+def pictures(path="measured/inventory_stills.json"):
+    """-> {state, by_name, why} — the rendered still per component, or ABSENT.
+
+    ITEM 5 IS A PICTURE *AND* A LINE, and until tonight the picture half was
+    zero for all 77. A component with a line and no picture is not half
+    documented — the line says what it is FOR and only the frame says what it
+    LOOKS LIKE, which is the half a reader cannot reconstruct.
+
+    ABSENT is a state here, not a blank: a component with no still says so and
+    is counted, because "no picture" and "picture nobody recorded" are the same
+    string once the field is empty.
+    """
+    d = _read(path)
+    if not isinstance(d, dict) or not d.get("components"):
+        return {"state": "ABSENT", "by_name": {}, "why": "no still manifest at %s" % path}
+    by = {}
+    for nm, rec in d["components"].items():
+        f = os.path.join(HERE, rec.get("file", ""))
+        # THE MANIFEST IS NOT THE PICTURE. A row naming a file that is not on
+        # disk is exactly the phantom-component defect one level down, so the
+        # bytes are checked rather than the record trusted.
+        by[nm] = dict(rec, on_disk=os.path.isfile(f))
+    return {"state": "MEASURED", "by_name": by,
+            "why": "%d still(s); %d present on disk"
+                   % (len(by), sum(1 for v in by.values() if v["on_disk"]))}
+
+
 def build(library_path="library_73.json"):
     """-> {state, entries, measured, pending, families, why}"""
     lib = _read(library_path)
@@ -219,6 +292,7 @@ def build(library_path="library_73.json"):
     cat = _read("chatcut_catalogue.json", {}) or {}
     facts = {"caption": caption_facts(src), "motion": motion_facts(),
              "sfx": sfx_facts(), "catalogue": cat.get("components") or cat}
+    pics = pictures()
     entries = []
     for fam, items in lib.items():
         if fam == "_why":
@@ -226,14 +300,25 @@ def build(library_path="library_73.json"):
         for it in items:
             nm = it if isinstance(it, str) else (
                 it.get("name") or it.get("component") or str(it))
-            entries.append(line_for(nm, fam, facts))
+            e = line_for(nm, fam, facts)
+            pic = (pics.get("by_name") or {}).get(nm)
+            e["picture"] = (pic["file"] if (pic and pic["on_disk"]) else None)
+            e["picture_state"] = ("MEASURED" if (pic and pic["on_disk"])
+                                  else ("BROKEN" if pic else "ABSENT"))
+            entries.append(e)
     meas = sum(1 for e in entries if e["state"] == "MEASURED")
+    pictured = sum(1 for e in entries if e["picture_state"] == "MEASURED")
+    broken = sum(1 for e in entries if e["picture_state"] == "BROKEN")
     return {"state": "MEASURED", "entries": entries, "measured": meas,
             "pending": len(entries) - meas,
+            "pictured": pictured, "unpictured": len(entries) - pictured,
+            "pictures_broken": broken,
             "families": len([k for k in lib if k != "_why"]),
-            "why": "%d entr(ies) across %d famil(ies); %d measured, %d atlas pending"
+            "why": "%d entr(ies) across %d famil(ies); %d measured, %d atlas pending; "
+                   "%d pictured, %d unpictured%s"
                    % (len(entries), len([k for k in lib if k != "_why"]),
-                      meas, len(entries) - meas)}
+                      meas, len(entries) - meas, pictured, len(entries) - pictured,
+                      (", %d BROKEN" % broken) if broken else "")}
 
 
 # THE CHECK THAT KEEPS IT CLEAN. Zac: "keep the check that proves it stays
