@@ -75,6 +75,17 @@ def _fam_of_treatment(name):
 
 
 def reference_rates(path="reference_index.json"):
+    """SUPERSEDED FOR PUBLICATION by measured/REFERENCE_RATES.json — see below.
+
+    This function sums ALL beats in the index. That is two annotators, not two
+    readings: 60 distinct treatment terms in one pass, 31 in the other, and the
+    intersection is ZERO. Pass A names no SFX at all and pass B names no zoom at
+    all, so any five-family table computed here averages a real rate with a
+    vocabulary GAP — "sfx 1.31" was the mean of 0.00 and 2.64.
+
+    It is kept because the run side and the mapping are still correct and the
+    red proof drives it, but `compare()` now refuses to publish against it.
+    """
     """-> {state, per_25s, counts, seconds, videos, unmapped, coverage, provenance}"""
     p = path if os.path.isabs(path) else os.path.join(HERE, path)
     if not os.path.isfile(p):
@@ -225,10 +236,35 @@ def run_rates(record_path):
 
 
 def refusal_suspect(record_path):
-    """-> {state, suspect, why} — is this run's emptiness the editor's or an instrument's?
+    """-> {state, suspect, why, unanswered_classes} — is this run's emptiness the editor's?
 
     A zero that came from a gate refusing correct work is not a density
     measurement, and it enters the histogram looking exactly like restraint.
+
+    TWO TELLS, AND ONLY ONE IS IN THE RECORD.
+
+    (1) ADDS THAT VANISHED BETWEEN TURNS. Measured on kolkata-9: the agent sent
+        SEVEN adds in its first write call and FOUR in its second, and nothing
+        named the three that went. That run exported cleanly with four cuts and
+        zero graphics, and it carries NO unsatisfied refusal at the end — so a
+        check keyed on final state passes it as editorial restraint when its
+        card rate of 0.00 is measuring a shape refusal that bounced a whole call
+        without saying to re-send the rest. This is the tell that catches it.
+
+    (2) A FAULT CLASS WHOSE COUNT DOES NOT MOVE BETWEEN TURNS (Builder 1's rule,
+        and the better of the two). kolkata-11 is the fixture that proves why it
+        must be per-class: its shape faults went 3 -> 0, the agent answered that
+        class completely, while geometry went 3 -> 3 unchanged. "Carries an
+        unsatisfied refusal" is true of it; "ignored the refusals" is false, and
+        a reader that collapses those mislabels a run where the retry loop
+        worked on one class and was unanswerable on the other.
+
+        THIS TELL IS NOT IMPLEMENTED BECAUSE THE RECORD DOES NOT CARRY IT.
+        `gate_findings` has no turn field and is byte-identical between
+        kolkata-10 and kolkata-11, the two runs the rule exists to separate. The
+        per-turn class counts live in the shim log, not the record. Reported as
+        ABSENT rather than approximated — a rule applied to data that cannot
+        support it is worse than the rule being missing.
     """
     if not os.path.isfile(record_path):
         return {"state": "ABSENT", "suspect": None, "why": "no record"}
@@ -237,24 +273,60 @@ def refusal_suspect(record_path):
     except Exception as e:                                    # noqa: BLE001
         return {"state": "FAILED", "suspect": None, "why": "unreadable: %s" % e}
     marks = []
+
+    # (1) adds that shrank between write calls
+    adds = []
+    for c in ((rec.get("shape") or {}).get("calls") or []):
+        raw = c.get("in")
+        if not isinstance(raw, str):
+            continue
+        try:
+            adds.append(len((json.loads(raw) or {}).get("adds") or []))
+        except Exception:                                      # noqa: BLE001
+            continue
+    for i in range(1, len(adds)):
+        if adds[i] < adds[i - 1]:
+            marks.append("adds dropped %d->%d between write calls, unnamed"
+                         % (adds[i - 1], adds[i]))
+
+    # final-state tells, which are real but late
     wh = rec.get("withheld") or {}
     for k in ("unbuilt", "could_not_remove"):
         if wh.get(k):
             marks.append("%s=%d" % (k, len(wh[k])))
     for f in (rec.get("gate_findings") or []):
-        if str(f.get("verdict") or "").upper() in ("FAIL", "REFUSED"):
+        if str(f.get("verdict") or "").upper() in ("FAIL", "REFUSED", "WITHHOLD"):
             marks.append("gate:%s" % f.get("check"))
-    ee = rec.get("empty_edit") or {}
-    if ee.get("state") and str(ee.get("state")).upper() not in ("ABSENT", "MEASURED"):
-        marks.append("empty_edit:%s" % ee.get("state"))
+
     return {"state": "MEASURED", "suspect": bool(marks),
-            "why": ("; ".join(marks[:6]) if marks
-                    else "no unsatisfied refusal on the record")}
+            "adds_per_write_call": adds,
+            "unanswered_classes": {"state": "ABSENT",
+                                   "why": "the record carries no per-turn fault classes; "
+                                          "gate_findings has no turn field"},
+            "why": ("; ".join(marks[:6]) if marks else "no refusal tell on the record")}
+
+
+def _read_pub(path="measured/REFERENCE_RATES.json"):
+    """-> {pass: {...}} the per-annotator publication rates, or {} if absent."""
+    p = path if os.path.isabs(path) else os.path.join(HERE, path)
+    if not os.path.isfile(p):
+        return {}
+    try:
+        return (json.load(open(p, encoding="utf-8")) or {}).get("passes") or {}
+    except Exception:                                          # noqa: BLE001
+        return {}
 
 
 def compare(record_path, reference="reference_index.json"):
     ref, run = reference_rates(reference), run_rates(record_path)
+    # NEVER COMPARE AGAINST THE CROSS-SEAM MEAN. Publication rates live in
+    # measured/REFERENCE_RATES.json, per annotator, with families a pass never
+    # named written null rather than zero.
+    pub = _read_pub()
+    if pub:
+        ref = dict(ref, published=pub)
     out = {"reference": ref, "run": run, "rows": [],
+           "reference_is_per_pass": bool(pub),
            "grades_only": "This instrument GRADES. It has no threshold and no verdict, and none "
                           "of it may reach an agent at ruling time."}
     if ref.get("state") != "MEASURED" or run.get("state") != "MEASURED":
@@ -264,9 +336,21 @@ def compare(record_path, reference="reference_index.json"):
         return out
     out["state"] = "MEASURED"
     for f in FAMILIES:
-        r, u = ref["per_25s"][f], run["per_25s"][f]
-        out["rows"].append({"family": f, "reference_per_25s": r, "run_per_25s": u,
-                            "ratio": round(u / r, 2) if r else None})
+        u = run["per_25s"][f]
+        row = {"family": f, "run_per_25s": u}
+        if pub:
+            # One column per annotator. A family a pass never named is ABSENT
+            # and gets no ratio — a ratio against a vocabulary gap is a number
+            # about nothing.
+            for nm, pv in pub.items():
+                r = pv["per_25s"].get(f)
+                row["ref_%s" % nm] = r
+                row["ratio_%s" % nm] = (round(u / r, 2) if r else None)
+        else:
+            r = ref["per_25s"][f]
+            row["reference_per_25s"] = r
+            row["ratio"] = round(u / r, 2) if r else None
+        out["rows"].append(row)
     return out
 
 

@@ -111,5 +111,35 @@ r = D.run_rates(p)
 leg("an unrecognised export state is ABSENT and names the state it saw",
     (r["state"], "SOMETHING_NEW" in r["why"]), ("ABSENT", True))
 
+# 11. THE REFUSAL TELL, AGAINST THE THREE REAL RECORDS Builder 1 supplied.
+#     kolkata-9 is the trap: it EXPORTED cleanly with four cuts and zero
+#     graphics, and it carries no unsatisfied refusal at the end — so a check
+#     keyed on final state passes it as editorial restraint while its card rate
+#     of 0.00 is measuring a shape refusal that bounced a whole call.
+_R = "/tmp/agentic-records/kolkata-%d.json"
+if os.path.isfile(_R % 9):
+    r9 = D.refusal_suspect(_R % 9)
+    leg("kolkata-9 is flagged despite a clean final state", r9["suspect"], True)
+    leg("  ...and it is the vanished adds that flag it, not a final-state tell",
+        "adds dropped" in r9["why"], True)
+    leg("  ...7 then 4, which is the three graphics that went unnamed",
+        r9["adds_per_write_call"], [7, 4])
+    # the final-state tells alone would NOT have caught it
+    leg("  ...and its final state carries no refusal at all",
+        any(k in r9["why"] for k in ("unbuilt", "gate:")), False)
+    for _n in (10, 11):
+        leg("kolkata-%d is flagged" % _n, D.refusal_suspect(_R % _n)["suspect"], True)
+    # THE RULE THAT NEEDS A FIELD THE RECORD LACKS IS ABSENT, NOT APPROXIMATED.
+    leg("the per-turn fault-class rule is ABSENT with its reason",
+        D.refusal_suspect(_R % 11)["unanswered_classes"]["state"], "ABSENT")
+
+# 12. A CLEAN RUN IS NOT FLAGGED. Without this the tell is a rubber stamp.
+p = rec("clean.json", {"export": {"state": "MEASURED"},
+                       "shape": {"calls": [{"in": json.dumps({"adds": [1, 2]})},
+                                           {"in": json.dumps({"adds": [1, 2, 3]})}]},
+                       "withheld": {}, "gate_findings": []})
+leg("a run with non-decreasing adds and no faults is NOT flagged",
+    D.refusal_suspect(p)["suspect"], False)
+
 print("\n%s" % ("all legs green" if not fail else "%d LEG(S) FAILED" % fail))
 sys.exit(1 if fail else 0)
