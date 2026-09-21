@@ -13,7 +13,9 @@
       "item": "ab815183fe",
       "bytes": 42674,
       "sha256_16": "107d5757bdfe2ab6",
-      "why_this_frame": "mid-hold, the spring settled at peak scale"
+      "why_this_frame": "mid-hold, the spring settled at peak scale",
+      "state": "FILE_ONLY",
+      "looked_at": null
     },
     "FocusWindow": {
       "family": "zoom",
@@ -22,7 +24,9 @@
       "item": "98cc0db177",
       "bytes": 47282,
       "sha256_16": "c8086218606a628a",
-      "why_this_frame": "window open over the dimmed magnified background"
+      "why_this_frame": "window open over the dimmed magnified background",
+      "state": "FILE_ONLY",
+      "looked_at": null
     },
     "LetterboxPush": {
       "family": "zoom",
@@ -31,7 +35,9 @@
       "item": "503f31b9a8",
       "bytes": 63557,
       "sha256_16": "6b8f758b12760742",
-      "why_this_frame": "bars fully in, plate at peak push"
+      "why_this_frame": "bars fully in, plate at peak push",
+      "state": "FILE_ONLY",
+      "looked_at": null
     },
     "DepthPull": {
       "family": "zoom",
@@ -40,7 +46,9 @@
       "item": "ff5e451801",
       "bytes": 52960,
       "sha256_16": "6d136024c4c0a2af",
-      "why_this_frame": "mid-hold, grade and edge blur at full"
+      "why_this_frame": "mid-hold, grade and edge blur at full",
+      "state": "FILE_ONLY",
+      "looked_at": null
     },
     "DipToBlack": {
       "family": "transition",
@@ -49,7 +57,9 @@
       "item": "c9d25681f3",
       "bytes": 8989,
       "sha256_16": "32137aad983f35b1",
-      "why_this_frame": "the seam itself — full black is the mechanism"
+      "why_this_frame": "the seam itself — full black is the mechanism",
+      "state": "FILE_ONLY",
+      "looked_at": null
     },
     "SlideOver": {
       "family": "transition",
@@ -58,7 +68,9 @@
       "item": "85b1e6c1f2",
       "bytes": 42789,
       "sha256_16": "d2052c9a2401c401",
-      "why_this_frame": "B's edge and drop shadow crossing the frame"
+      "why_this_frame": "B's edge and drop shadow crossing the frame",
+      "state": "FILE_ONLY",
+      "looked_at": null
     },
     "CardSwipe": {
       "family": "transition",
@@ -67,7 +79,9 @@
       "item": "4b5a751f14",
       "bytes": 49703,
       "sha256_16": "011a063b0615cb6f",
-      "why_this_frame": "A thrown off, B risen underneath"
+      "why_this_frame": "A thrown off, B risen underneath",
+      "state": "FILE_ONLY",
+      "looked_at": null
     },
     "ZoomThrough": {
       "family": "transition",
@@ -76,7 +90,9 @@
       "item": "212376c501",
       "bytes": 57420,
       "sha256_16": "888c4eac2275161c",
-      "why_this_frame": "A magnifying out while B rises — early, where both read"
+      "why_this_frame": "A magnifying out while B rises — early, where both read",
+      "state": "FILE_ONLY",
+      "looked_at": null
     },
     "StepPush": {
       "family": "transition",
@@ -85,7 +101,9 @@
       "item": "2185feb737",
       "bytes": 47540,
       "sha256_16": "4b92f70a66a1fe0a",
-      "why_this_frame": "A and B sharing the frame mid-push"
+      "why_this_frame": "A and B sharing the frame mid-push",
+      "state": "FILE_ONLY",
+      "looked_at": null
     },
     "CrossfadeZoom": {
       "family": "transition",
@@ -94,7 +112,9 @@
       "item": "c2ce577a20",
       "bytes": 42979,
       "sha256_16": "b5d139a89075e46d",
-      "why_this_frame": "both plates superimposed mid-dissolve"
+      "why_this_frame": "both plates superimposed mid-dissolve",
+      "state": "FILE_ONLY",
+      "looked_at": null
     },
     "Stack": {
       "family": "transition",
@@ -103,7 +123,9 @@
       "item": "d2782baedc",
       "bytes": 39025,
       "sha256_16": "5e8c41932b0c6ede",
-      "why_this_frame": "progress 0 — the plate alone, before the switcher furniture"
+      "why_this_frame": "progress 0 — the plate alone, before the switcher furniture",
+      "state": "FILE_ONLY",
+      "looked_at": null
     },
     "ShutterFlash": {
       "family": "transition",
@@ -112,7 +134,9 @@
       "item": "e60567719f",
       "bytes": 52079,
       "sha256_16": "24dd80052b0ee824",
-      "why_this_frame": "the shutter part-closed, where the mechanism is legible"
+      "why_this_frame": "the shutter part-closed, where the mechanism is legible",
+      "state": "FILE_ONLY",
+      "looked_at": null
     },
     "FilmStrip": {
       "family": "transition",
@@ -121,7 +145,9 @@
       "item": "f7c6fdd991",
       "bytes": 75539,
       "sha256_16": "c44b348101300445",
-      "why_this_frame": "tiles on the strip, grid and ghosts around them"
+      "why_this_frame": "tiles on the strip, grid and ghosts around them",
+      "state": "FILE_ONLY",
+      "looked_at": null
     },
     "ShutterFlashOverlay": {
       "family": "tight-cut overlay",
@@ -130,7 +156,9 @@
       "item": "b30c61e8e1",
       "bytes": 20949,
       "sha256_16": "bfaba6a05604d097",
-      "why_this_frame": "peak wash, speaker still perceptible through it"
+      "why_this_frame": "peak wash, speaker still perceptible through it",
+      "state": "FILE_ONLY",
+      "looked_at": null
     },
     "LightLeakOverlay": {
       "family": "tight-cut overlay",
@@ -139,7 +167,9 @@
       "item": "d0be6950ea",
       "bytes": 20715,
       "sha256_16": "ad2e67a21712e41f",
-      "why_this_frame": "warm leak at peak, drifting tl-br"
+      "why_this_frame": "warm leak at peak, drifting tl-br",
+      "state": "FILE_ONLY",
+      "looked_at": null
     },
     "EvidenceCard": {
       "family": "frame composition",
@@ -148,7 +178,9 @@
       "item": "68581f22c1",
       "bytes": 48796,
       "sha256_16": "ffc5fad594c87f81",
-      "why_this_frame": "card settled, accent rule and source line legible"
+      "why_this_frame": "card settled, accent rule and source line legible",
+      "state": "FILE_ONLY",
+      "looked_at": null
     },
     "DeviceMockup": {
       "family": "frame composition",
@@ -157,7 +189,9 @@
       "item": "a5e825902e",
       "bytes": 68285,
       "sha256_16": "131dee1fe6ad7aef",
-      "why_this_frame": "phone bezel with the notch, still cropped to the DEVICE's aspect"
+      "why_this_frame": "phone bezel with the notch, still cropped to the DEVICE's aspect",
+      "state": "FILE_ONLY",
+      "looked_at": null
     },
     "EmojiCard": {
       "family": "frame composition",
@@ -166,7 +200,9 @@
       "item": "6e5dff58fb",
       "bytes": 62884,
       "sha256_16": "0a5374ce2d053e01",
-      "why_this_frame": "card settled and the reaction badge popped — it lands ~0.22s after the card"
+      "why_this_frame": "card settled and the reaction badge popped — it lands ~0.22s after the card",
+      "state": "FILE_ONLY",
+      "looked_at": null
     },
     "StickyNotes": {
       "family": "text",
@@ -175,7 +211,9 @@
       "item": "d2b1566baf",
       "bytes": 50812,
       "sha256_16": "25a432d05452ab65",
-      "why_this_frame": "past the 0.28s entrance ease, all three notes at rest"
+      "why_this_frame": "past the 0.28s entrance ease, all three notes at rest",
+      "state": "DRAWS",
+      "looked_at": "three notes, three colours, three rotations, Lora, over the Lagos frame"
     },
     "LowerThird": {
       "family": "text",
@@ -184,7 +222,9 @@
       "item": "878e576289",
       "bytes": 49383,
       "sha256_16": "6dadca8b9359ad2d",
-      "why_this_frame": "bar fully in, name and title both set"
+      "why_this_frame": "bar fully in, name and title both set",
+      "state": "DRAWS",
+      "looked_at": "broadcast bar, name white over title in accent, accent rule"
     },
     "QuoteCard": {
       "family": "text",
@@ -193,7 +233,9 @@
       "item": "1a25ae8e6c",
       "bytes": 48764,
       "sha256_16": "94c326ce3ae8e2d0",
-      "why_this_frame": "panel settled, quote and attribution both on"
+      "why_this_frame": "panel settled, quote and attribution both on",
+      "state": "DRAWS",
+      "looked_at": "serif panel, left accent rule, em-dash attribution"
     },
     "SmoothPush": {
       "family": "zoom",
@@ -202,7 +244,9 @@
       "item": "eb95470e74",
       "bytes": 49431,
       "sha256_16": "0453691334c7b991",
-      "why_this_frame": "late in the push, where the ramp has travelled — never the head, where a zoom and a passthrough look alike"
+      "why_this_frame": "late in the push, where the ramp has travelled — never the head, where a zoom and a passthrough look alike",
+      "state": "DRAWS",
+      "looked_at": "full-bleed plate pushed in, no letterbox"
     },
     "StagedPush": {
       "family": "zoom",
@@ -211,7 +255,9 @@
       "item": "b320a4543f",
       "bytes": 92939,
       "sha256_16": "9e4680c38487a1cf",
-      "why_this_frame": "inside the hold after stage 2 (0.95s:1.30), the frame where the old port rendered an UN-ZOOMED passthrough"
+      "why_this_frame": "inside the hold after stage 2 (0.95s:1.30), the frame where the old port rendered an UN-ZOOMED passthrough",
+      "state": "DRAWS",
+      "looked_at": "pushed on the Wikipedia B-roll, and NO yellow stage warning"
     },
     "StepZoom": {
       "family": "zoom",
@@ -220,7 +266,9 @@
       "item": "dfdc736179",
       "bytes": 43410,
       "sha256_16": "f458c55aef36a39f",
-      "why_this_frame": "well past stepAtFrame=0, so the full 1.3 step is standing"
+      "why_this_frame": "well past stepAtFrame=0, so the full 1.3 step is standing",
+      "state": "DRAWS",
+      "looked_at": "full 1.3 step standing, visibly tighter than SmoothPush"
     },
     "CaptionMatch": {
       "family": "text",
@@ -229,7 +277,9 @@
       "item": "0dfa1351f6",
       "bytes": 56815,
       "sha256_16": "929550c587e78be4",
-      "why_this_frame": "entrance complete, caption at full pop"
+      "why_this_frame": "entrance complete, caption at full pop",
+      "state": "DRAWS",
+      "looked_at": "white sans, centred, soft shadow, no card"
     },
     "TornPaper": {
       "family": "text",
@@ -238,7 +288,9 @@
       "item": "d1b256c785",
       "bytes": 52400,
       "sha256_16": "f14e1c3ef4132459",
-      "why_this_frame": "both strips slammed in"
+      "why_this_frame": "both strips slammed in",
+      "state": "DRAWS",
+      "looked_at": "two slammed strips, cream over accent, uppercase"
     },
     "PlainText": {
       "family": "text",
@@ -247,7 +299,9 @@
       "item": "208e8f2748",
       "bytes": 39551,
       "sha256_16": "c49f203e9b09a55b",
-      "why_this_frame": "entrance risen; the light panel behind the words is the SOURCE's own picture-in-picture inset, proven by the f1339 control with no graphic on the timeline"
+      "why_this_frame": "entrance risen; the light panel behind the words is the SOURCE's own picture-in-picture inset, proven by the f1339 control with no graphic on the timeline",
+      "state": "DRAWS",
+      "looked_at": "white sans centred; the light panel behind is the SOURCE's own PiP inset (proven by the f1339 control)"
     },
     "NamePlate": {
       "family": "ported_mg",
@@ -256,7 +310,9 @@
       "item": "a27cfdb0c1",
       "bytes": 72390,
       "sha256_16": "626007c1ea7f28a6",
-      "why_this_frame": "mid-hold: accent rule drawn, name risen, role staggered in behind it"
+      "why_this_frame": "mid-hold: accent rule drawn, name risen, role staggered in behind it",
+      "state": "DRAWS",
+      "looked_at": "accent rule, Anton name over accent role, on its scrim"
     },
     "MouseDrag": {
       "family": "ported_mg",
@@ -265,10 +321,13 @@
       "item": "b04494a6a4",
       "bytes": 51771,
       "sha256_16": "fc84e47cb1d6f391",
-      "why_this_frame": "the drag settled at the safe-rect centre with the cursor still on the card, before the return arc and wipe-dissolve"
+      "why_this_frame": "the drag settled at the safe-rect centre with the cursor still on the card, before the return arc and wipe-dissolve",
+      "state": "DRAWS",
+      "looked_at": "yellow card with the label and the arrow cursor at the settled centre"
     }
   },
   "_still_asset": "The three frame compositions are drawn on measured/corpus_evidence_still.jpg — source second 39.3 of th_lagos_en, extracted with ffmpeg and uploaded to the project as image asset 5170f875. Corpus material, CC BY-SA 4.0, so the picture of a component that takes a picture is itself rights-clear and reproducible from the fixture.",
   "_the_nine": "THE NINE ADDED 2026-09-21. Six text components and three zooms, placed on real gaps of the same th_lagos_en timeline and rendered by the same cloud path as the 18. Their copy is SAMPLED FROM THE FIXTURE'S OWN TRANSCRIPT — the words spoken under each placement — never invented. Every one carries a per-item `propertyOverrides`, which is the write field chatcut_job_app.py:1334 records as never found; it works, and inspect_item marks the values `(override)`.",
-  "_ported_mg": "THE ported_mg REGISTRATION, started 2026-09-21. These are the components whose contract-shaped code already sits in chatcut_registry.json; the port work left is REGISTER + PLACE + FRAME, not a binding transform. Placed on track V3 of the same th_lagos_en timeline, copy sampled from the fixture's transcript."
+  "_ported_mg": "THE ported_mg REGISTRATION, started 2026-09-21. These are the components whose contract-shaped code already sits in chatcut_registry.json; the port work left is REGISTER + PLACE + FRAME, not a binding transform. Placed on track V3 of the same th_lagos_en timeline, copy sampled from the fixture's transcript.",
+  "_state_contract": "DRAWS = a human-equivalent LOOK at the rendered frame, described. FILE_ONLY = a still exists with a sha but no recorded verdict — a file is not a verdict, and treating one as evidence is how an unproven component reaches a menu. Absence of a row is UNKNOWN, never BLANK."
 }

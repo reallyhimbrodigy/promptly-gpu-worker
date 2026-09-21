@@ -89,3 +89,75 @@ def registry(library="library_73.json"):
             "two_home": sorted(two_home), "by_family": {k: sorted(v) for k, v in fams.items()},
             "why": "%d component(s) in %d famil(ies), %d placement(s), %d two-home"
                    % (len(names), len(fams), placements, len(two_home))}
+
+
+# ── the live set ───────────────────────────────────────────────────────────
+# WHY THIS IS NOT registry(). `registry()` answers "what is in the library
+# file" — 79 components across 80 placements, every one this lane ever ported.
+# `live_set()` answers "what does PRODUCTION use", which is the question the
+# menu is built from, and the two differ by 33. Builder 1 asked for the list
+# and I nearly sent him 46 names in a message; a list in a message is a second
+# copy of a fact, which is the exact thing this file exists to stop.
+#
+# NOT EVERY MEMBER HAS A PICTURE, and that distinction is load-bearing for
+# anyone building stills. Of the 46, thirteen are SOUNDS and seven are CAPTION
+# STYLES — a style is a property of a caption item, not a registered component
+# with code of its own. Neither can be registered, placed and photographed the
+# way the other 26 can. A stills run that takes all 46 as its worklist reports
+# 20 failures that are not failures, and the honest zero is indistinguishable
+# from a broken renderer once it is in the tally.
+_NO_PICTURE_FAMILIES = {
+    "sfx": "a sound has no frame to photograph",
+    "caption style": "a style is a property of a caption item, not a registered component",
+}
+
+
+def live_set(library="library_73.json"):
+    """-> {state, components, n, renderable, n_renderable, no_picture, by_family, why}
+
+    THE LIVE SET, derived from production over 30d and cut at 10 users reached.
+    `renderable` is the subset that can be registered, placed and photographed;
+    it is what a stills or frame-proof run should iterate.
+    """
+    lib = _read(library)
+    if not isinstance(lib, dict) or not lib:
+        return {"state": FAILED, "why": "no library at %s" % library}
+    scope = lib.get("_library")
+    if not isinstance(scope, dict):
+        return {"state": ABSENT, "why": "%s carries no _library — the scope ruling "
+                "has not been published to this file" % library}
+    comps = scope.get("components")
+    # A CLEAN ZERO IS GUILTY UNTIL PROVEN INNOCENT. An empty components map is a
+    # reader or a merge that lost the ruling, never a library with nothing in it,
+    # and returning [] here would read to every caller as "production uses none".
+    if not isinstance(comps, dict) or not comps:
+        return {"state": FAILED, "why": "_library.components is empty or not a map "
+                "— a library with no components is a lost ruling, not a measurement"}
+    by_family = {}
+    for name, row in comps.items():
+        for fam in (row.get("families") or ["(unfamilied)"]):
+            by_family.setdefault(fam, []).append(name)
+    no_picture, renderable = {}, []
+    for name, row in comps.items():
+        fams = row.get("families") or []
+        blocking = [f for f in fams if f in _NO_PICTURE_FAMILIES]
+        # A component in TWO families with one picture-bearing home is renderable
+        # — StickyNotes is a motion graphic and a text overlay and draws either
+        # way. Only a component whose every home is picture-free drops out.
+        if fams and len(blocking) == len(fams):
+            no_picture[name] = _NO_PICTURE_FAMILIES[blocking[0]]
+        else:
+            renderable.append(name)
+    placements = sum(len(v) for v in by_family.values())
+    return {"state": MEASURED,
+            "components": sorted(comps), "n": len(comps),
+            "renderable": sorted(renderable), "n_renderable": len(renderable),
+            "no_picture": no_picture, "n_no_picture": len(no_picture),
+            "by_family": {k: sorted(v) for k, v in sorted(by_family.items())},
+            "cut_users_30d": scope.get("_cut_users_30d"),
+            "source": scope.get("_source"),
+            "why": "%d component(s) in %d famil(ies), %d placement(s); %d renderable, "
+                   "%d with no picture (%d sound, %d caption style)"
+                   % (len(comps), len(by_family), placements, len(renderable),
+                      len(no_picture), len(by_family.get("sfx") or []),
+                      len(by_family.get("caption style") or []))}

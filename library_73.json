@@ -1,159 +1,740 @@
 {
- "caption style": [
-  "CleanCut",
-  "Cove",
-  "Gadzhi",
-  "Lumen",
-  "Prime",
-  "Pulse",
-  "Quintessence",
-  "TwoTone",
-  "TypewriterReveal"
- ],
- "zoom": [
-  "DepthPull",
-  "FocusWindow",
-  "LetterboxPush",
-  "SmoothPush",
-  "SnapReframe",
-  "StagedPush",
-  "StepZoom"
- ],
- "transition": [
-  "CardSwipe",
-  "CrossfadeZoom",
-  "DipToBlack",
-  "FilmStrip",
-  "ShutterFlash",
-  "SlideOver",
-  "Stack",
-  "StepPush",
-  "ZoomThrough"
- ],
- "frame composition": [
-  "DeviceMockup",
-  "EmojiCard",
-  "EvidenceCard"
- ],
- "tight-cut overlay": [
-  "LightLeakOverlay",
-  "ShutterFlashOverlay"
- ],
- "motion graphic": [
-  "AnnotationArrow",
-  "BarRace",
-  "ChatThread",
-  "DropBanner",
-  "DropCard",
-  "EditorialQuote",
-  "EndCard",
-  "IMessageBubble",
-  "InstagramComment",
-  "MouseDrag",
-  "NamePlate",
-  "Notification",
-  "PillCluster",
-  "PillMarquee",
-  "ProgressBar",
-  "PullQuote",
-  "RankedList",
-  "RecordingFrame",
-  "Reticle",
-  "SectionDivider",
-  "SpeechBubble",
-  "Stamp",
-  "StatCard",
-  "StepDivider",
-  "StickyNotes",
-  "TikTokComment",
-  "Timeline",
-  "TimelineRoadmap",
-  "TweetBubble"
- ],
- "sfx": [
-  "awkward-moment.mp3",
-  "boom.mp3",
-  "camera-flash.mp3",
-  "imposter.mp3",
-  "iphoneding.mp3",
-  "money-ching.mp3",
-  "mouse-click-sound.mp3",
-  "popsfx.mp3",
-  "punchsfx.mp3",
-  "rizz.mp3",
-  "shockingsfx.mp3",
-  "swoosh-sound-effects.mp3",
-  "transition-sfx.mp3",
-  "wompwomp.mp3",
-  "woosh-professional.mp3"
- ],
- "text overlay": [
-  "CaptionMatch",
-  "LowerThird",
-  "PlainText",
-  "QuoteCard",
-  "StickyNotes",
-  "TornPaper"
- ],
- "_why": "COUNT CORRECTED 73 -> 78 -> 79 on 2026-09-19. `text_overlays` was a FAMILY in the live pipeline and was missing from this file entirely. Its real variant list came from the schema's OWN HISTORY (handler.py @42df870: torn_paper, sticky_note, quote_card, lower_third, caption_match), not from the current enum — which had been pruned to two while _TextOverlay kept carrying topText/bottomText, quote/attribution and text, the fields of the three retired ones. A family reads as two variants and is five. The filename keeps its historical number; this key is the count. COUNT 78 -> 79 on 2026-09-19: PlainText added as the SIXTH variant. It is not in the old schema's list, and it is not a new idea either — it is the shape Builder-2 measured as the references' most common text (plain, medium, middle). CaptionMatch served that shape for one day only because its port was incomplete: it rendered a fixed sans-serif and never read the caption style it is named for. Once CaptionMatch honoured the edit's chosen style, the plain shape left the menu with it, so the workhorse gets its own component named for what it is.\n\nCOUNT CORRECTED 79 -> 77 on 2026-09-20, and the two are a phantom and an omission in the SAME family.\n\nTHREE ENTRIES NAMED COMPONENTS THAT DO NOT EXIST. DeviceMockup, EmojiCard and EvidenceCard were listed under motion graphic with NO body in ported_mg/ and NO entry in chatcut_registry.json -- not even in its \"refused\" list, which is where a component that was built and rejected goes. They are not refused, they are ABSENT. They appear in Builder-1's 51a2b2f as the families that \"were waiting for\" the source-layer capability, and somewhere between being unblocked and being built they were written down as though the unblocking had built them. A capability that MAKES a component possible is not the component.\n\nAND ONE THAT DOES EXIST WAS MISSING. SpeechBubble has a body in ported_mg/ and sits in the registry's refused list, and was in no family here at all. So the same family was over-counted by three and under-counted by one, which nets to two -- and that is exactly why a NET figure is the wrong thing to check: had either error been one larger they would have cancelled, the total would have stayed 79, and the file would have read correct while naming three things that do not exist.\n\nTHE LIST IS NOW DERIVED FROM ported_mg/ RATHER THAN MAINTAINED BESIDE IT. A hand-kept list of the things that exist drifts from the things that exist; that is the whole defect. 29 bodies, 29 names.\n\nEVERY OTHER FAMILY WAS CHECKED AGAINST ITS OWN ARTIFACTS, so this is a count and not a re-assertion:\n  zoom 7               7 of 7 have a body in port/bodies/\n  transition 9         9 of 9 have a body\n  tight-cut overlay 2  2 of 2 have a body (ShutterFlashOverlay, LightLeakOverlay)\n  text overlay 6       6 of 6 have a body\n  sfx 15               15 of 15 staged as ChatCut assets with a measured attack\n  caption style 9      9 of 9 have a file in ported_captions/\n  motion graphic 29    29 of 29, derived above\nNAMES CORRECTED 2026-09-21, and the count did not move.\n\nThe `tight-cut overlay` family listed `LightLeak` and `ShutterFlash`. The\ncomponents are `LightLeakOverlay` and `ShutterFlashOverlay` — that is what the\nbodies in port/bodies/ are called, what transition_properties.json keys, and\nwhat is registered in ChatCut. This file's OWN derivation note two paragraphs up\nalready named them correctly; the list and the note disagreed and nobody read\nthem together.\n\nIT WAS NOT A COSMETIC DIFFERENCE. `ShutterFlash` is ALSO a transition, and it is\na DIFFERENT COMPONENT with a different body. So one name sat in two families,\nand the first thing to look components up BY NAME — the inventory's picture\nfield — gave the overlay the TRANSITION's still and reported 14 of 15 pictured\nwhile showing ShutterFlash twice. A wrong picture is worse than a missing one:\nthe missing one is counted.\n\nSame shape as the three phantom motion graphics, one level along: that was a\nname with no component, this is one component's name worn by two.\nSTICKYNOTES IS ONE COMPONENT WITH TWO HOMES, and the arc that established it is\nrecorded in collision_quarantine.json rather than here. Short version: the\ncollision check found the name in two families, I reported it as two components,\nit was renamed apart, and the rename was REVERSED because handler.py:8287 had\nalways said \"ONE COMPONENT, TWO HOMES - route it, never duplicate it\" and was\nright. It is declared in `_two_home` above, and the collision check reads that\ndeclaration instead of counting the name as a duplicate.\n\nSO THERE ARE TWO COUNTS AND THEY ARE NOT THE SAME NUMBER. A component in two\nfamilies occupies two family placements and is still one component. Both are\nstated, because naming only one is how a number starts meaning whichever the\nreader assumed.\nTHE THREE PHANTOMS ARE REAL NOW, 2026-09-21, and that closes the 79 -> 77\ncorrection from the other end. DeviceMockup, EmojiCard and EvidenceCard were\nlisted as motion graphics with NO body and no registry entry — not even a\nrefusal — so I removed them. They have bodies today: port/bodies/*.jsx, a\nproperty table in port/frame_composition_properties.json, registered in ChatCut\nand drawn on a corpus still. They go back as their OWN family rather than under\nmotion graphic, because what they have in common is the thing that was never\ntrue of the phantoms: each one TAKES A STILL and composes a frame around it.\n\nRemoving them was right and adding them back is not a reversal of it. A name\nwith no component is a phantom whatever the component would have been; the entry\nhad to go before the thing could exist.\nCOMPONENTS 79.\nTOTAL 80.",
- "_two_home": [
-  "StickyNotes"
- ],
- "_pending_port": {
-  "_ruling": "Zac 2026-09-21, ruling 3. Until a component REGISTERS it is OFF the platter — the platter derives from the registry, the set the agent can actually be served, never from the library. The library KEEPS the entry so the catalogue stays honest about what exists, marked PENDING PORT with the reason on its own line. A name with no reason beside it is indistinguishable from one nobody has looked at.",
-  "_source": "chatcut_registry.json `refused`, verbatim — this file does not restate a reason in its own words",
-  "_count": 10,
-  "components": {
-   "AnnotationArrow": {
-    "status": "PENDING PORT",
-    "reason": "structured props ChatCut cannot express",
-    "detail": "end: { x: number, start: { x: number"
-   },
-   "ChatThread": {
-    "status": "PENDING PORT",
-    "reason": "structured props ChatCut cannot express",
-    "detail": "header: ChatThreadHeader, messages: ChatMessage[]"
-   },
-   "EndCard": {
-    "status": "PENDING PORT",
-    "reason": "structured props ChatCut cannot express",
-    "detail": "palette: { bg: string"
-   },
-   "InstagramComment": {
-    "status": "PENDING PORT",
-    "reason": "the blob reads an identifier ChatCut does not have",
-    "detail": "cancelRender (line 384), setTimeout (line 398), Image (line 399), clearTimeout (line 401)"
-   },
-   "Notification": {
-    "status": "PENDING PORT",
-    "reason": "structured props ChatCut cannot express",
-    "detail": "notifications: NotificationItem[]"
-   },
-   "PillMarquee": {
-    "status": "PENDING PORT",
-    "reason": "structured props ChatCut cannot express",
-    "detail": "pills: string[]"
-   },
-   "ProgressBar": {
-    "status": "PENDING PORT",
-    "reason": "structured props ChatCut cannot express",
-    "detail": "formatValue: (current: number) => string, percentage: never"
-   },
-   "SpeechBubble": {
-    "status": "PENDING PORT",
-    "reason": "not a single component",
-    "detail": "a DISPATCHER, not a component — it switches on `platform` to TweetBubble / InstagramComment / IMessageBubble / TikTokComment. Register those instead."
-   },
-   "TikTokComment": {
-    "status": "PENDING PORT",
-    "reason": "the blob reads an identifier ChatCut does not have",
-    "detail": "cancelRender (line 384), setTimeout (line 398), Image (line 399), clearTimeout (line 401)"
-   },
-   "TweetBubble": {
-    "status": "PENDING PORT",
-    "reason": "structured props ChatCut cannot express",
-    "detail": "stats: { replies: number"
-   }
+  "caption style": [
+    "CleanCut",
+    "Cove",
+    "Gadzhi",
+    "Lumen",
+    "Prime",
+    "Pulse",
+    "Quintessence",
+    "TwoTone",
+    "TypewriterReveal"
+  ],
+  "zoom": [
+    "DepthPull",
+    "FocusWindow",
+    "LetterboxPush",
+    "SmoothPush",
+    "SnapReframe",
+    "StagedPush",
+    "StepZoom"
+  ],
+  "transition": [
+    "CardSwipe",
+    "CrossfadeZoom",
+    "DipToBlack",
+    "FilmStrip",
+    "ShutterFlash",
+    "SlideOver",
+    "Stack",
+    "StepPush",
+    "ZoomThrough"
+  ],
+  "frame composition": [
+    "DeviceMockup",
+    "EmojiCard",
+    "EvidenceCard"
+  ],
+  "tight-cut overlay": [
+    "LightLeakOverlay",
+    "ShutterFlashOverlay"
+  ],
+  "motion graphic": [
+    "AnnotationArrow",
+    "BarRace",
+    "ChatThread",
+    "DropBanner",
+    "DropCard",
+    "EditorialQuote",
+    "EndCard",
+    "IMessageBubble",
+    "InstagramComment",
+    "MouseDrag",
+    "NamePlate",
+    "Notification",
+    "PillCluster",
+    "PillMarquee",
+    "ProgressBar",
+    "PullQuote",
+    "RankedList",
+    "RecordingFrame",
+    "Reticle",
+    "SectionDivider",
+    "SpeechBubble",
+    "Stamp",
+    "StatCard",
+    "StepDivider",
+    "StickyNotes",
+    "TikTokComment",
+    "Timeline",
+    "TimelineRoadmap",
+    "TweetBubble"
+  ],
+  "sfx": [
+    "awkward-moment.mp3",
+    "boom.mp3",
+    "camera-flash.mp3",
+    "imposter.mp3",
+    "iphoneding.mp3",
+    "money-ching.mp3",
+    "mouse-click-sound.mp3",
+    "popsfx.mp3",
+    "punchsfx.mp3",
+    "rizz.mp3",
+    "shockingsfx.mp3",
+    "swoosh-sound-effects.mp3",
+    "transition-sfx.mp3",
+    "wompwomp.mp3",
+    "woosh-professional.mp3"
+  ],
+  "text overlay": [
+    "CaptionMatch",
+    "LowerThird",
+    "PlainText",
+    "QuoteCard",
+    "StickyNotes",
+    "TornPaper"
+  ],
+  "_why": "COUNT CORRECTED 73 -> 78 -> 79 on 2026-09-19. `text_overlays` was a FAMILY in the live pipeline and was missing from this file entirely. Its real variant list came from the schema's OWN HISTORY (handler.py @42df870: torn_paper, sticky_note, quote_card, lower_third, caption_match), not from the current enum — which had been pruned to two while _TextOverlay kept carrying topText/bottomText, quote/attribution and text, the fields of the three retired ones. A family reads as two variants and is five. The filename keeps its historical number; this key is the count. COUNT 78 -> 79 on 2026-09-19: PlainText added as the SIXTH variant. It is not in the old schema's list, and it is not a new idea either — it is the shape Builder-2 measured as the references' most common text (plain, medium, middle). CaptionMatch served that shape for one day only because its port was incomplete: it rendered a fixed sans-serif and never read the caption style it is named for. Once CaptionMatch honoured the edit's chosen style, the plain shape left the menu with it, so the workhorse gets its own component named for what it is.\n\nCOUNT CORRECTED 79 -> 77 on 2026-09-20, and the two are a phantom and an omission in the SAME family.\n\nTHREE ENTRIES NAMED COMPONENTS THAT DO NOT EXIST. DeviceMockup, EmojiCard and EvidenceCard were listed under motion graphic with NO body in ported_mg/ and NO entry in chatcut_registry.json -- not even in its \"refused\" list, which is where a component that was built and rejected goes. They are not refused, they are ABSENT. They appear in Builder-1's 51a2b2f as the families that \"were waiting for\" the source-layer capability, and somewhere between being unblocked and being built they were written down as though the unblocking had built them. A capability that MAKES a component possible is not the component.\n\nAND ONE THAT DOES EXIST WAS MISSING. SpeechBubble has a body in ported_mg/ and sits in the registry's refused list, and was in no family here at all. So the same family was over-counted by three and under-counted by one, which nets to two -- and that is exactly why a NET figure is the wrong thing to check: had either error been one larger they would have cancelled, the total would have stayed 79, and the file would have read correct while naming three things that do not exist.\n\nTHE LIST IS NOW DERIVED FROM ported_mg/ RATHER THAN MAINTAINED BESIDE IT. A hand-kept list of the things that exist drifts from the things that exist; that is the whole defect. 29 bodies, 29 names.\n\nEVERY OTHER FAMILY WAS CHECKED AGAINST ITS OWN ARTIFACTS, so this is a count and not a re-assertion:\n  zoom 7               7 of 7 have a body in port/bodies/\n  transition 9         9 of 9 have a body\n  tight-cut overlay 2  2 of 2 have a body (ShutterFlashOverlay, LightLeakOverlay)\n  text overlay 6       6 of 6 have a body\n  sfx 15               15 of 15 staged as ChatCut assets with a measured attack\n  caption style 9      9 of 9 have a file in ported_captions/\n  motion graphic 29    29 of 29, derived above\nNAMES CORRECTED 2026-09-21, and the count did not move.\n\nThe `tight-cut overlay` family listed `LightLeak` and `ShutterFlash`. The\ncomponents are `LightLeakOverlay` and `ShutterFlashOverlay` — that is what the\nbodies in port/bodies/ are called, what transition_properties.json keys, and\nwhat is registered in ChatCut. This file's OWN derivation note two paragraphs up\nalready named them correctly; the list and the note disagreed and nobody read\nthem together.\n\nIT WAS NOT A COSMETIC DIFFERENCE. `ShutterFlash` is ALSO a transition, and it is\na DIFFERENT COMPONENT with a different body. So one name sat in two families,\nand the first thing to look components up BY NAME — the inventory's picture\nfield — gave the overlay the TRANSITION's still and reported 14 of 15 pictured\nwhile showing ShutterFlash twice. A wrong picture is worse than a missing one:\nthe missing one is counted.\n\nSame shape as the three phantom motion graphics, one level along: that was a\nname with no component, this is one component's name worn by two.\nSTICKYNOTES IS ONE COMPONENT WITH TWO HOMES, and the arc that established it is\nrecorded in collision_quarantine.json rather than here. Short version: the\ncollision check found the name in two families, I reported it as two components,\nit was renamed apart, and the rename was REVERSED because handler.py:8287 had\nalways said \"ONE COMPONENT, TWO HOMES - route it, never duplicate it\" and was\nright. It is declared in `_two_home` above, and the collision check reads that\ndeclaration instead of counting the name as a duplicate.\n\nSO THERE ARE TWO COUNTS AND THEY ARE NOT THE SAME NUMBER. A component in two\nfamilies occupies two family placements and is still one component. Both are\nstated, because naming only one is how a number starts meaning whichever the\nreader assumed.\nTHE THREE PHANTOMS ARE REAL NOW, 2026-09-21, and that closes the 79 -> 77\ncorrection from the other end. DeviceMockup, EmojiCard and EvidenceCard were\nlisted as motion graphics with NO body and no registry entry — not even a\nrefusal — so I removed them. They have bodies today: port/bodies/*.jsx, a\nproperty table in port/frame_composition_properties.json, registered in ChatCut\nand drawn on a corpus still. They go back as their OWN family rather than under\nmotion graphic, because what they have in common is the thing that was never\ntrue of the phantoms: each one TAKES A STILL and composes a frame around it.\n\nRemoving them was right and adding them back is not a reversal of it. A name\nwith no component is a phantom whatever the component would have been; the entry\nhad to go before the thing could exist.\nCOMPONENTS 79.\nTOTAL 80.",
+  "_two_home": [
+    "StickyNotes"
+  ],
+  "_pending_port": {
+    "_ruling": "Zac 2026-09-21, ruling 3. Until a component REGISTERS it is OFF the platter — the platter derives from the registry, the set the agent can actually be served, never from the library. The library KEEPS the entry so the catalogue stays honest about what exists, marked PENDING PORT with the reason on its own line. A name with no reason beside it is indistinguishable from one nobody has looked at.",
+    "_source": "chatcut_registry.json `refused`, verbatim — this file does not restate a reason in its own words",
+    "_count": 10,
+    "components": {
+      "AnnotationArrow": {
+        "status": "PENDING PORT",
+        "reason": "structured props ChatCut cannot express",
+        "detail": "end: { x: number, start: { x: number"
+      },
+      "ChatThread": {
+        "status": "PENDING PORT",
+        "reason": "structured props ChatCut cannot express",
+        "detail": "header: ChatThreadHeader, messages: ChatMessage[]"
+      },
+      "EndCard": {
+        "status": "PENDING PORT",
+        "reason": "structured props ChatCut cannot express",
+        "detail": "palette: { bg: string"
+      },
+      "InstagramComment": {
+        "status": "PENDING PORT",
+        "reason": "the blob reads an identifier ChatCut does not have",
+        "detail": "cancelRender (line 384), setTimeout (line 398), Image (line 399), clearTimeout (line 401)"
+      },
+      "Notification": {
+        "status": "PENDING PORT",
+        "reason": "structured props ChatCut cannot express",
+        "detail": "notifications: NotificationItem[]"
+      },
+      "PillMarquee": {
+        "status": "PENDING PORT",
+        "reason": "structured props ChatCut cannot express",
+        "detail": "pills: string[]"
+      },
+      "ProgressBar": {
+        "status": "PENDING PORT",
+        "reason": "structured props ChatCut cannot express",
+        "detail": "formatValue: (current: number) => string, percentage: never"
+      },
+      "SpeechBubble": {
+        "status": "PENDING PORT",
+        "reason": "not a single component",
+        "detail": "a DISPATCHER, not a component — it switches on `platform` to TweetBubble / InstagramComment / IMessageBubble / TikTokComment. Register those instead."
+      },
+      "TikTokComment": {
+        "status": "PENDING PORT",
+        "reason": "the blob reads an identifier ChatCut does not have",
+        "detail": "cancelRender (line 384), setTimeout (line 398), Image (line 399), clearTimeout (line 401)"
+      },
+      "TweetBubble": {
+        "status": "PENDING PORT",
+        "reason": "structured props ChatCut cannot express",
+        "detail": "stats: { replies: number"
+      }
+    }
+  },
+  "_library": {
+    "_ruling": "Zac 2026-09-21: cut at 10 users reached in 30d. Zooms and text overlays kept regardless — their usage is UNMEASURABLE from recipes rather than zero, and a cut applied to a missing FIELD deletes a family for the reader's blind spot.",
+    "_cut_users_30d": 10,
+    "_source": "measured/LIVE_SET_USAGE.json",
+    "_count": 46,
+    "components": {
+      "CaptionMatch": {
+        "families": [
+          "text overlay"
+        ],
+        "users_30d": null,
+        "why": "text overlay — text_overlays[] is live but records no component type; same reader gap as zooms"
+      },
+      "CardSwipe": {
+        "families": [
+          "transition"
+        ],
+        "users_30d": 18,
+        "why": "18 users in 30d"
+      },
+      "CleanCut": {
+        "families": [
+          "caption style"
+        ],
+        "users_30d": 113,
+        "why": "113 users in 30d"
+      },
+      "Cove": {
+        "families": [
+          "caption style"
+        ],
+        "users_30d": 93,
+        "why": "93 users in 30d"
+      },
+      "DepthPull": {
+        "families": [
+          "zoom"
+        ],
+        "users_30d": null,
+        "why": "zoom — usage UNMEASURABLE from recipes (emphasis_moments carries a moment kind, never a component name), not zero"
+      },
+      "DipToBlack": {
+        "families": [
+          "transition"
+        ],
+        "users_30d": 47,
+        "why": "47 users in 30d"
+      },
+      "EditorialQuote": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": 10,
+        "why": "10 users in 30d"
+      },
+      "EmojiCard": {
+        "families": [
+          "frame composition"
+        ],
+        "users_30d": 67,
+        "why": "67 users in 30d"
+      },
+      "FocusWindow": {
+        "families": [
+          "zoom"
+        ],
+        "users_30d": null,
+        "why": "zoom — usage UNMEASURABLE from recipes (emphasis_moments carries a moment kind, never a component name), not zero"
+      },
+      "Gadzhi": {
+        "families": [
+          "caption style"
+        ],
+        "users_30d": 143,
+        "why": "143 users in 30d"
+      },
+      "LetterboxPush": {
+        "families": [
+          "zoom"
+        ],
+        "users_30d": null,
+        "why": "zoom — usage UNMEASURABLE from recipes (emphasis_moments carries a moment kind, never a component name), not zero"
+      },
+      "LightLeakOverlay": {
+        "families": [
+          "tight-cut overlay"
+        ],
+        "users_30d": 298,
+        "why": "298 users in 30d"
+      },
+      "LowerThird": {
+        "families": [
+          "text overlay"
+        ],
+        "users_30d": null,
+        "why": "text overlay — text_overlays[] is live but records no component type; same reader gap as zooms"
+      },
+      "Lumen": {
+        "families": [
+          "caption style"
+        ],
+        "users_30d": 65,
+        "why": "65 users in 30d"
+      },
+      "PillCluster": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": 82,
+        "why": "82 users in 30d"
+      },
+      "PlainText": {
+        "families": [
+          "text overlay"
+        ],
+        "users_30d": null,
+        "why": "text overlay — text_overlays[] is live but records no component type; same reader gap as zooms"
+      },
+      "Prime": {
+        "families": [
+          "caption style"
+        ],
+        "users_30d": 142,
+        "why": "142 users in 30d"
+      },
+      "PullQuote": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": 15,
+        "why": "15 users in 30d"
+      },
+      "Pulse": {
+        "families": [
+          "caption style"
+        ],
+        "users_30d": 32,
+        "why": "32 users in 30d"
+      },
+      "QuoteCard": {
+        "families": [
+          "text overlay"
+        ],
+        "users_30d": null,
+        "why": "text overlay — text_overlays[] is live but records no component type; same reader gap as zooms"
+      },
+      "RankedList": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": 33,
+        "why": "33 users in 30d"
+      },
+      "ShutterFlashOverlay": {
+        "families": [
+          "tight-cut overlay"
+        ],
+        "users_30d": 381,
+        "why": "381 users in 30d"
+      },
+      "SlideOver": {
+        "families": [
+          "transition"
+        ],
+        "users_30d": 22,
+        "why": "22 users in 30d"
+      },
+      "SmoothPush": {
+        "families": [
+          "zoom"
+        ],
+        "users_30d": null,
+        "why": "zoom — usage UNMEASURABLE from recipes (emphasis_moments carries a moment kind, never a component name), not zero"
+      },
+      "SnapReframe": {
+        "families": [
+          "zoom"
+        ],
+        "users_30d": null,
+        "why": "zoom — usage UNMEASURABLE from recipes (emphasis_moments carries a moment kind, never a component name), not zero"
+      },
+      "StagedPush": {
+        "families": [
+          "zoom"
+        ],
+        "users_30d": null,
+        "why": "zoom — usage UNMEASURABLE from recipes (emphasis_moments carries a moment kind, never a component name), not zero"
+      },
+      "Stamp": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": 60,
+        "why": "60 users in 30d"
+      },
+      "StatCard": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": 106,
+        "why": "106 users in 30d"
+      },
+      "StepZoom": {
+        "families": [
+          "zoom"
+        ],
+        "users_30d": null,
+        "why": "zoom — usage UNMEASURABLE from recipes (emphasis_moments carries a moment kind, never a component name), not zero"
+      },
+      "StickyNotes": {
+        "families": [
+          "motion graphic",
+          "text overlay"
+        ],
+        "users_30d": 7,
+        "why": "text overlay — text_overlays[] is live but records no component type; same reader gap as zooms"
+      },
+      "TornPaper": {
+        "families": [
+          "text overlay"
+        ],
+        "users_30d": null,
+        "why": "text overlay — text_overlays[] is live but records no component type; same reader gap as zooms"
+      },
+      "TwoTone": {
+        "families": [
+          "caption style"
+        ],
+        "users_30d": 127,
+        "why": "127 users in 30d"
+      },
+      "ZoomThrough": {
+        "families": [
+          "transition"
+        ],
+        "users_30d": 31,
+        "why": "31 users in 30d"
+      },
+      "boom.mp3": {
+        "families": [
+          "sfx"
+        ],
+        "users_30d": 343,
+        "why": "343 users in 30d"
+      },
+      "camera-flash.mp3": {
+        "families": [
+          "sfx"
+        ],
+        "users_30d": 42,
+        "why": "42 users in 30d"
+      },
+      "iphoneding.mp3": {
+        "families": [
+          "sfx"
+        ],
+        "users_30d": 19,
+        "why": "19 users in 30d"
+      },
+      "money-ching.mp3": {
+        "families": [
+          "sfx"
+        ],
+        "users_30d": 105,
+        "why": "105 users in 30d"
+      },
+      "mouse-click-sound.mp3": {
+        "families": [
+          "sfx"
+        ],
+        "users_30d": 74,
+        "why": "74 users in 30d"
+      },
+      "popsfx.mp3": {
+        "families": [
+          "sfx"
+        ],
+        "users_30d": 580,
+        "why": "580 users in 30d"
+      },
+      "punchsfx.mp3": {
+        "families": [
+          "sfx"
+        ],
+        "users_30d": 435,
+        "why": "435 users in 30d"
+      },
+      "rizz.mp3": {
+        "families": [
+          "sfx"
+        ],
+        "users_30d": 17,
+        "why": "17 users in 30d"
+      },
+      "shockingsfx.mp3": {
+        "families": [
+          "sfx"
+        ],
+        "users_30d": 95,
+        "why": "95 users in 30d"
+      },
+      "swoosh-sound-effects.mp3": {
+        "families": [
+          "sfx"
+        ],
+        "users_30d": 122,
+        "why": "122 users in 30d"
+      },
+      "transition-sfx.mp3": {
+        "families": [
+          "sfx"
+        ],
+        "users_30d": 253,
+        "why": "253 users in 30d"
+      },
+      "wompwomp.mp3": {
+        "families": [
+          "sfx"
+        ],
+        "users_30d": 37,
+        "why": "37 users in 30d"
+      },
+      "woosh-professional.mp3": {
+        "families": [
+          "sfx"
+        ],
+        "users_30d": 591,
+        "why": "591 users in 30d"
+      }
+    },
+    "_blank_note": "Six components draw BLANK. Five were already out on usage; only Reticle was in the library, so the picture gate and the 10-user cut removed almost the same set by different evidence — which is worth noting rather than treating as one finding."
+  },
+  "_out_of_scope": {
+    "_count": 33,
+    "components": {
+      "AnnotationArrow": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": 6,
+        "why": "below 10 users in 30d (6)"
+      },
+      "BarRace": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": 2,
+        "why": "below 10 users in 30d (2)"
+      },
+      "ChatThread": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": null,
+        "why": "not placed in 30d"
+      },
+      "CrossfadeZoom": {
+        "families": [
+          "transition"
+        ],
+        "users_30d": 8,
+        "why": "below 10 users in 30d (8)"
+      },
+      "DeviceMockup": {
+        "families": [
+          "frame composition"
+        ],
+        "users_30d": null,
+        "why": "not placed in 30d"
+      },
+      "DropBanner": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": null,
+        "why": "not placed in 30d"
+      },
+      "DropCard": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": 4,
+        "why": "below 10 users in 30d (4)"
+      },
+      "EndCard": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": 2,
+        "why": "below 10 users in 30d (2) — and DRAWS BLANK on the build render, so it fails the picture gate too",
+        "blank": true,
+        "draws": "BLANK"
+      },
+      "EvidenceCard": {
+        "families": [
+          "frame composition"
+        ],
+        "users_30d": 3,
+        "why": "below 10 users in 30d (3)"
+      },
+      "FilmStrip": {
+        "families": [
+          "transition"
+        ],
+        "users_30d": null,
+        "why": "not placed in 30d"
+      },
+      "IMessageBubble": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": 2,
+        "why": "below 10 users in 30d (2)"
+      },
+      "InstagramComment": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": 4,
+        "why": "below 10 users in 30d (4)"
+      },
+      "MouseDrag": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": null,
+        "why": "not placed in 30d — stays out on USAGE alone. DISPUTED on drawing: Builder 1's build render reads BLANK; Builder-2's still measured/stills/MouseDrag f470 (project 3b9df622, 2026-09-21) shows it DRAW — a yellow card with its label and the arrow cursor at the settled centre. Both observations kept: one of the two contexts differs (canvas, props or registered defaults) and overwriting either would destroy the evidence that says which. The usage cut is what removes it, so the dispute costs the library nothing.",
+        "blank": true,
+        "draws": "DISPUTED"
+      },
+      "NamePlate": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": 2,
+        "why": "below 10 users in 30d (2)"
+      },
+      "Notification": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": 4,
+        "why": "below 10 users in 30d (4)"
+      },
+      "PillMarquee": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": null,
+        "why": "not placed in 30d"
+      },
+      "ProgressBar": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": 2,
+        "why": "below 10 users in 30d (2)"
+      },
+      "Quintessence": {
+        "families": [
+          "caption style"
+        ],
+        "users_30d": 6,
+        "why": "below 10 users in 30d (6)"
+      },
+      "RecordingFrame": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": null,
+        "why": "not placed in 30d — and DRAWS BLANK on the build render, so it fails the picture gate too",
+        "blank": true,
+        "draws": "BLANK"
+      },
+      "SectionDivider": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": 8,
+        "why": "below 10 users in 30d (8)"
+      },
+      "ShutterFlash": {
+        "families": [
+          "transition"
+        ],
+        "users_30d": 2,
+        "why": "below 10 users in 30d (2)"
+      },
+      "SpeechBubble": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": null,
+        "why": "not placed in 30d"
+      },
+      "Stack": {
+        "families": [
+          "transition"
+        ],
+        "users_30d": 1,
+        "why": "below 10 users in 30d (1)"
+      },
+      "StepDivider": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": 3,
+        "why": "below 10 users in 30d (3)"
+      },
+      "StepPush": {
+        "families": [
+          "transition"
+        ],
+        "users_30d": 8,
+        "why": "below 10 users in 30d (8)"
+      },
+      "TikTokComment": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": 1,
+        "why": "below 10 users in 30d (1)"
+      },
+      "Timeline": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": 1,
+        "why": "below 10 users in 30d (1) — and DRAWS BLANK on the build render, so it fails the picture gate too",
+        "blank": true,
+        "draws": "BLANK"
+      },
+      "TimelineRoadmap": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": 1,
+        "why": "below 10 users in 30d (1) — and DRAWS BLANK on the build render, so it fails the picture gate too",
+        "blank": true,
+        "draws": "BLANK"
+      },
+      "TweetBubble": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": null,
+        "why": "not placed in 30d"
+      },
+      "TypewriterReveal": {
+        "families": [
+          "caption style"
+        ],
+        "users_30d": 4,
+        "why": "below 10 users in 30d (4)"
+      },
+      "awkward-moment.mp3": {
+        "families": [
+          "sfx"
+        ],
+        "users_30d": 8,
+        "why": "below 10 users in 30d (8)"
+      },
+      "imposter.mp3": {
+        "families": [
+          "sfx"
+        ],
+        "users_30d": 5,
+        "why": "below 10 users in 30d (5)"
+      },
+      "Reticle": {
+        "families": [
+          "motion graphic"
+        ],
+        "users_30d": 14,
+        "why": "DRAWS BLANK on the build render (Builder 1, 2026-09-21) — off the menu until it draws. Was in-scope at 14 users in 30d.",
+        "blank": true,
+        "draws": "BLANK"
+      }
+    },
+    "_draws_note": "`draws` records the PICTURE verdict, which is independent of the usage cut. BLANK = observed not drawing on Builder 1's build render 2026-09-21. DISPUTED = the two lanes' renders disagree and neither has been shown wrong. A component absent from this field has no picture verdict at all — that is UNKNOWN, never BLANK."
   }
- }
 }

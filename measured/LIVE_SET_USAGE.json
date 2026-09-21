@@ -1,0 +1,393 @@
+[
+ {
+  "component": "woosh-professional.mp3",
+  "family": "sfx",
+  "users_30d": 591,
+  "jobs_30d": 902
+ },
+ {
+  "component": "popsfx.mp3",
+  "family": "sfx",
+  "users_30d": 580,
+  "jobs_30d": 901
+ },
+ {
+  "component": "punchsfx.mp3",
+  "family": "sfx",
+  "users_30d": 435,
+  "jobs_30d": 641
+ },
+ {
+  "component": "ShutterFlashOverlay",
+  "family": "tight-cut overlay",
+  "users_30d": 381,
+  "jobs_30d": 560
+ },
+ {
+  "component": "boom.mp3",
+  "family": "sfx",
+  "users_30d": 343,
+  "jobs_30d": 499
+ },
+ {
+  "component": "LightLeakOverlay",
+  "family": "tight-cut overlay",
+  "users_30d": 298,
+  "jobs_30d": 441
+ },
+ {
+  "component": "transition-sfx.mp3",
+  "family": "sfx",
+  "users_30d": 253,
+  "jobs_30d": 348
+ },
+ {
+  "component": "Gadzhi",
+  "family": "caption style",
+  "users_30d": 143,
+  "jobs_30d": 180
+ },
+ {
+  "component": "Prime",
+  "family": "caption style",
+  "users_30d": 142,
+  "jobs_30d": 190
+ },
+ {
+  "component": "TwoTone",
+  "family": "caption style",
+  "users_30d": 127,
+  "jobs_30d": 180
+ },
+ {
+  "component": "swoosh-sound-effects.mp3",
+  "family": "sfx",
+  "users_30d": 122,
+  "jobs_30d": 151
+ },
+ {
+  "component": "CleanCut",
+  "family": "caption style",
+  "users_30d": 113,
+  "jobs_30d": 190
+ },
+ {
+  "component": "StatCard",
+  "family": "motion graphic",
+  "users_30d": 106,
+  "jobs_30d": 181
+ },
+ {
+  "component": "money-ching.mp3",
+  "family": "sfx",
+  "users_30d": 105,
+  "jobs_30d": 144
+ },
+ {
+  "component": "shockingsfx.mp3",
+  "family": "sfx",
+  "users_30d": 95,
+  "jobs_30d": 135
+ },
+ {
+  "component": "Cove",
+  "family": "caption style",
+  "users_30d": 93,
+  "jobs_30d": 111
+ },
+ {
+  "component": "PillCluster",
+  "family": "motion graphic",
+  "users_30d": 82,
+  "jobs_30d": 105
+ },
+ {
+  "component": "mouse-click-sound.mp3",
+  "family": "sfx",
+  "users_30d": 74,
+  "jobs_30d": 93
+ },
+ {
+  "component": "EmojiCard",
+  "family": "frame composition",
+  "users_30d": 67,
+  "jobs_30d": 74
+ },
+ {
+  "component": "Lumen",
+  "family": "caption style",
+  "users_30d": 65,
+  "jobs_30d": 89
+ },
+ {
+  "component": "Stamp",
+  "family": "motion graphic",
+  "users_30d": 60,
+  "jobs_30d": 76
+ },
+ {
+  "component": "DipToBlack",
+  "family": "transition",
+  "users_30d": 47,
+  "jobs_30d": 64
+ },
+ {
+  "component": "camera-flash.mp3",
+  "family": "sfx",
+  "users_30d": 42,
+  "jobs_30d": 53
+ },
+ {
+  "component": "wompwomp.mp3",
+  "family": "sfx",
+  "users_30d": 37,
+  "jobs_30d": 40
+ },
+ {
+  "component": "RankedList",
+  "family": "motion graphic",
+  "users_30d": 33,
+  "jobs_30d": 67
+ },
+ {
+  "component": "Pulse",
+  "family": "caption style",
+  "users_30d": 32,
+  "jobs_30d": 42
+ },
+ {
+  "component": "ZoomThrough",
+  "family": "transition",
+  "users_30d": 31,
+  "jobs_30d": 53
+ },
+ {
+  "component": "SlideOver",
+  "family": "transition",
+  "users_30d": 22,
+  "jobs_30d": 48
+ },
+ {
+  "component": "iphoneding.mp3",
+  "family": "sfx",
+  "users_30d": 19,
+  "jobs_30d": 31
+ },
+ {
+  "component": "CardSwipe",
+  "family": "transition",
+  "users_30d": 18,
+  "jobs_30d": 28
+ },
+ {
+  "component": "rizz.mp3",
+  "family": "sfx",
+  "users_30d": 17,
+  "jobs_30d": 17
+ },
+ {
+  "component": "PullQuote",
+  "family": "motion graphic",
+  "users_30d": 15,
+  "jobs_30d": 16
+ },
+ {
+  "component": "Reticle",
+  "family": "motion graphic",
+  "users_30d": 14,
+  "jobs_30d": 16
+ },
+ {
+  "component": "EditorialQuote",
+  "family": "motion graphic",
+  "users_30d": 10,
+  "jobs_30d": 11
+ },
+ {
+  "component": "CrossfadeZoom",
+  "family": "transition",
+  "users_30d": 8,
+  "jobs_30d": 13
+ },
+ {
+  "component": "SectionDivider",
+  "family": "motion graphic",
+  "users_30d": 8,
+  "jobs_30d": 8
+ },
+ {
+  "component": "StepPush",
+  "family": "transition",
+  "users_30d": 8,
+  "jobs_30d": 19
+ },
+ {
+  "component": "awkward-moment.mp3",
+  "family": "sfx",
+  "users_30d": 8,
+  "jobs_30d": 9
+ },
+ {
+  "component": "StickyNotes",
+  "family": "text overlay",
+  "users_30d": 7,
+  "jobs_30d": 7
+ },
+ {
+  "component": "AnnotationArrow",
+  "family": "motion graphic",
+  "users_30d": 6,
+  "jobs_30d": 6
+ },
+ {
+  "component": "Quintessence",
+  "family": "caption style",
+  "users_30d": 6,
+  "jobs_30d": 6
+ },
+ {
+  "component": "imposter.mp3",
+  "family": "sfx",
+  "users_30d": 5,
+  "jobs_30d": 5
+ },
+ {
+  "component": "DropCard",
+  "family": "motion graphic",
+  "users_30d": 4,
+  "jobs_30d": 6
+ },
+ {
+  "component": "InstagramComment",
+  "family": "motion graphic",
+  "users_30d": 4,
+  "jobs_30d": 4
+ },
+ {
+  "component": "Notification",
+  "family": "motion graphic",
+  "users_30d": 4,
+  "jobs_30d": 4
+ },
+ {
+  "component": "TypewriterReveal",
+  "family": "caption style",
+  "users_30d": 4,
+  "jobs_30d": 4
+ },
+ {
+  "component": "EvidenceCard",
+  "family": "frame composition",
+  "users_30d": 3,
+  "jobs_30d": 3
+ },
+ {
+  "component": "StepDivider",
+  "family": "motion graphic",
+  "users_30d": 3,
+  "jobs_30d": 13
+ },
+ {
+  "component": "BarRace",
+  "family": "motion graphic",
+  "users_30d": 2,
+  "jobs_30d": 2
+ },
+ {
+  "component": "EndCard",
+  "family": "motion graphic",
+  "users_30d": 2,
+  "jobs_30d": 2
+ },
+ {
+  "component": "IMessageBubble",
+  "family": "motion graphic",
+  "users_30d": 2,
+  "jobs_30d": 2
+ },
+ {
+  "component": "NamePlate",
+  "family": "motion graphic",
+  "users_30d": 2,
+  "jobs_30d": 2
+ },
+ {
+  "component": "ProgressBar",
+  "family": "motion graphic",
+  "users_30d": 2,
+  "jobs_30d": 2
+ },
+ {
+  "component": "ShutterFlash",
+  "family": "transition",
+  "users_30d": 2,
+  "jobs_30d": 4,
+  "_correction": "was 381/560 \u2014 that is the TIGHT-CUT OVERLAY's figure. Production uses the name ShutterFlash in BOTH transitions[] and tight_cut_overlays[]; they are different components and I applied the overlay's count to the transition. Transition ShutterFlash: 4 placements / 4 jobs / 2 users."
+ },
+ {
+  "component": "DepthPull",
+  "family": "zoom",
+  "users_30d": null,
+  "jobs_30d": null
+ },
+ {
+  "component": "FocusWindow",
+  "family": "zoom",
+  "users_30d": null,
+  "jobs_30d": null
+ },
+ {
+  "component": "LetterboxPush",
+  "family": "zoom",
+  "users_30d": null,
+  "jobs_30d": null
+ },
+ {
+  "component": "SmoothPush",
+  "family": "zoom",
+  "users_30d": null,
+  "jobs_30d": null
+ },
+ {
+  "component": "SnapReframe",
+  "family": "zoom",
+  "users_30d": null,
+  "jobs_30d": null
+ },
+ {
+  "component": "Stack",
+  "family": "transition",
+  "users_30d": 1,
+  "jobs_30d": 1
+ },
+ {
+  "component": "StagedPush",
+  "family": "zoom",
+  "users_30d": null,
+  "jobs_30d": null
+ },
+ {
+  "component": "StepZoom",
+  "family": "zoom",
+  "users_30d": null,
+  "jobs_30d": null
+ },
+ {
+  "component": "TikTokComment",
+  "family": "motion graphic",
+  "users_30d": 1,
+  "jobs_30d": 1
+ },
+ {
+  "component": "Timeline",
+  "family": "motion graphic",
+  "users_30d": 1,
+  "jobs_30d": 1
+ },
+ {
+  "component": "TimelineRoadmap",
+  "family": "motion graphic",
+  "users_30d": 1,
+  "jobs_30d": 2
+ }
+]
