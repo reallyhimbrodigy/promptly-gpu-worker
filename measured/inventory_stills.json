@@ -248,8 +248,27 @@
       "bytes": 39551,
       "sha256_16": "c49f203e9b09a55b",
       "why_this_frame": "entrance risen; the light panel behind the words is the SOURCE's own picture-in-picture inset, proven by the f1339 control with no graphic on the timeline"
+    },
+    "NamePlate": {
+      "family": "ported_mg",
+      "file": "measured/inventory_stills/NamePlate.jpg",
+      "timeline_frame": 260,
+      "item": "a27cfdb0c1",
+      "bytes": 72390,
+      "sha256_16": "626007c1ea7f28a6",
+      "why_this_frame": "mid-hold: accent rule drawn, name risen, role staggered in behind it"
+    },
+    "MouseDrag": {
+      "family": "ported_mg",
+      "file": "measured/inventory_stills/MouseDrag.jpg",
+      "timeline_frame": 470,
+      "item": "b04494a6a4",
+      "bytes": 51771,
+      "sha256_16": "fc84e47cb1d6f391",
+      "why_this_frame": "the drag settled at the safe-rect centre with the cursor still on the card, before the return arc and wipe-dissolve"
     }
   },
   "_still_asset": "The three frame compositions are drawn on measured/corpus_evidence_still.jpg — source second 39.3 of th_lagos_en, extracted with ffmpeg and uploaded to the project as image asset 5170f875. Corpus material, CC BY-SA 4.0, so the picture of a component that takes a picture is itself rights-clear and reproducible from the fixture.",
-  "_the_nine": "THE NINE ADDED 2026-09-21. Six text components and three zooms, placed on real gaps of the same th_lagos_en timeline and rendered by the same cloud path as the 18. Their copy is SAMPLED FROM THE FIXTURE'S OWN TRANSCRIPT — the words spoken under each placement — never invented. Every one carries a per-item `propertyOverrides`, which is the write field chatcut_job_app.py:1334 records as never found; it works, and inspect_item marks the values `(override)`."
+  "_the_nine": "THE NINE ADDED 2026-09-21. Six text components and three zooms, placed on real gaps of the same th_lagos_en timeline and rendered by the same cloud path as the 18. Their copy is SAMPLED FROM THE FIXTURE'S OWN TRANSCRIPT — the words spoken under each placement — never invented. Every one carries a per-item `propertyOverrides`, which is the write field chatcut_job_app.py:1334 records as never found; it works, and inspect_item marks the values `(override)`.",
+  "_ported_mg": "THE ported_mg REGISTRATION, started 2026-09-21. These are the components whose contract-shaped code already sits in chatcut_registry.json; the port work left is REGISTER + PLACE + FRAME, not a binding transform. Placed on track V3 of the same th_lagos_en timeline, copy sampled from the fixture's transcript."
 }
