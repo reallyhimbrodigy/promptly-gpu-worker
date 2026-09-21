@@ -1,0 +1,170 @@
+{
+ "_why": "THE FRAME COMPOSITIONS. Three components that take a STILL and compose a frame around it.",
+ "_measured": "An `image`-typed property delivers a URL STRING, measured by frame 2026-09-21 (measured/mg_runtime_capabilities_2026-09-19.md, second run). You pass an asset id in the override and the component receives the resolved URL, so every `still` default is the empty string and the body guards on it rather than inventing one.",
+ "EvidenceCard": [
+  {
+   "key": "still",
+   "label": "Still",
+   "type": "image",
+   "defaultValue": ""
+  },
+  {
+   "key": "caption",
+   "label": "Caption",
+   "type": "text",
+   "defaultValue": "What the frame shows"
+  },
+  {
+   "key": "source",
+   "label": "Source line (blank for none)",
+   "type": "text",
+   "defaultValue": ""
+  },
+  {
+   "key": "size",
+   "label": "Size",
+   "type": "select",
+   "defaultValue": "medium",
+   "options": [
+    "small",
+    "medium",
+    "large",
+    "xlarge"
+   ]
+  },
+  {
+   "key": "position",
+   "label": "Position",
+   "type": "select",
+   "defaultValue": "middle",
+   "options": [
+    "top",
+    "middle",
+    "bottom"
+   ]
+  },
+  {
+   "key": "accentColor",
+   "label": "Accent colour",
+   "type": "color",
+   "defaultValue": "#C8551F"
+  },
+  {
+   "key": "fontFamily",
+   "label": "Typeface",
+   "type": "font",
+   "defaultValue": "Inter"
+  }
+ ],
+ "DeviceMockup": [
+  {
+   "key": "still",
+   "label": "Still",
+   "type": "image",
+   "defaultValue": ""
+  },
+  {
+   "key": "device",
+   "label": "Device",
+   "type": "select",
+   "defaultValue": "phone",
+   "options": [
+    "phone",
+    "tablet",
+    "laptop"
+   ]
+  },
+  {
+   "key": "size",
+   "label": "Size",
+   "type": "select",
+   "defaultValue": "medium",
+   "options": [
+    "small",
+    "medium",
+    "large",
+    "xlarge"
+   ]
+  },
+  {
+   "key": "position",
+   "label": "Position",
+   "type": "select",
+   "defaultValue": "middle",
+   "options": [
+    "top",
+    "middle",
+    "bottom"
+   ]
+  },
+  {
+   "key": "bezelColor",
+   "label": "Bezel colour",
+   "type": "color",
+   "defaultValue": "#14141A"
+  },
+  {
+   "key": "showNotch",
+   "label": "Draw the notch (phone only)",
+   "type": "boolean",
+   "defaultValue": true
+  }
+ ],
+ "EmojiCard": [
+  {
+   "key": "still",
+   "label": "Still",
+   "type": "image",
+   "defaultValue": ""
+  },
+  {
+   "key": "emoji",
+   "label": "Reaction",
+   "type": "text",
+   "defaultValue": "😂"
+  },
+  {
+   "key": "caption",
+   "label": "Caption (blank for none)",
+   "type": "text",
+   "defaultValue": ""
+  },
+  {
+   "key": "size",
+   "label": "Size",
+   "type": "select",
+   "defaultValue": "medium",
+   "options": [
+    "small",
+    "medium",
+    "large",
+    "xlarge"
+   ]
+  },
+  {
+   "key": "position",
+   "label": "Position",
+   "type": "select",
+   "defaultValue": "middle",
+   "options": [
+    "top",
+    "middle",
+    "bottom"
+   ]
+  },
+  {
+   "key": "accentColor",
+   "label": "Card edge colour",
+   "type": "color",
+   "defaultValue": "#FFE066"
+  },
+  {
+   "key": "fontFamily",
+   "label": "Typeface",
+   "type": "font",
+   "defaultValue": "Inter"
+  }
+ ],
+ "_how_this_is_read": "MEASURED after writing it, and it corrects what I assumed. I put these rows here because PORTED_PROPS lives in chatcut_job_app.py and that is not my file — I expected the harness entry to be wired separately. It is not: the harness MERGES every port/*_properties.json into PORTED_PROPS at import, and its own comment says to ship `<family>_properties.json` beside the body and it will be picked up. So this file is already live; `PORT_PROPS_LOADED.added` lists all three. I followed a convention I did not know existed, which is luck, not method — the convention is written down here now.",
+ "_options_shape": "Bare strings are CORRECT here. The harness's normalise_properties converts them to {value,label} objects, which is the shape ChatCut's registration tool demands — it rejects bare strings outright. Two surfaces with a normaliser between them, so do not 'fix' this table to match the API."
+}

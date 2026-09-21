@@ -140,6 +140,34 @@
    "bytes": 20715,
    "sha256_16": "ad2e67a21712e41f",
    "why_this_frame": "warm leak at peak, drifting tl-br"
+  },
+  "EvidenceCard": {
+   "family": "frame composition",
+   "file": "measured/inventory_stills/EvidenceCard.jpg",
+   "timeline_frame": 1040,
+   "item": "68581f22c1",
+   "bytes": 48796,
+   "sha256_16": "ffc5fad594c87f81",
+   "why_this_frame": "card settled, accent rule and source line legible"
+  },
+  "DeviceMockup": {
+   "family": "frame composition",
+   "file": "measured/inventory_stills/DeviceMockup.jpg",
+   "timeline_frame": 1150,
+   "item": "a5e825902e",
+   "bytes": 68285,
+   "sha256_16": "131dee1fe6ad7aef",
+   "why_this_frame": "phone bezel with the notch, still cropped to the DEVICE's aspect"
+  },
+  "EmojiCard": {
+   "family": "frame composition",
+   "file": "measured/inventory_stills/EmojiCard.jpg",
+   "timeline_frame": 1270,
+   "item": "6e5dff58fb",
+   "bytes": 62884,
+   "sha256_16": "0a5374ce2d053e01",
+   "why_this_frame": "card settled and the reaction badge popped — it lands ~0.22s after the card"
   }
- }
+ },
+ "_still_asset": "The three frame compositions are drawn on measured/corpus_evidence_still.jpg — source second 39.3 of th_lagos_en, extracted with ffmpeg and uploaded to the project as image asset 5170f875. Corpus material, CC BY-SA 4.0, so the picture of a component that takes a picture is itself rights-clear and reproducible from the fixture."
 }

@@ -3026,12 +3026,36 @@ def main():
           # NOT `== 79`: the inventory's size is the library's size, and that
           # is asserted directly two checks below against the library file.
           # Repeating it as a literal here only adds a second place to be wrong.
+          # NOT `== 7`: the family count is the library's, and a new family is a
+          # normal event — `frame composition` landed 2026-09-21 and turned this
+          # leg red for being right. A literal here is the `== 79` defect with a
+          # smaller number.
           _inv["state"] == "MEASURED" and len(_inv["entries"]) > 0
-          and _inv["families"] == 7
+          and _inv["families"] == len([k for k in _lib if not k.startswith("_")])
           and all(e.get("source") for e in _inv["entries"] if e["state"] == "MEASURED")
           and all(e.get("line") is None for e in _inv["entries"] if e["state"] != "MEASURED"),
           "%d entr(ies), %d measured, %d atlas pending" % (
               len(_inv["entries"]), _inv["measured"], _inv["pending"]))
+    # ---- TWO COPIES OF A PROPERTY TABLE, AND THE IN-FILE ONE WINS ----
+    # The harness merges every port/*_properties.json into PORTED_PROPS, but a
+    # component defined in BOTH keeps its in-file definition and the loader says
+    # so in `in_file_won`. Four zooms are in that state. They agree exactly
+    # today; nothing made them, and the registered default IS the value, which
+    # is the shape that once made 135 defaults wrong. So the agreement is
+    # asserted rather than assumed, and editing the ignored copy fails here
+    # instead of silently doing nothing.
+    _dupes = (J.PORT_PROPS_LOADED or {}).get("in_file_won") or []
+    _zj = _json.load(open("port/zoom_properties.json", encoding="utf-8"))
+    _drift = []
+    for _n in _dupes:
+        _a = {q["key"]: q.get("defaultValue") for q in (_zj.get(_n) or [])}
+        _b = {q["key"]: q.get("defaultValue") for q in J.PORTED_PROPS.get(_n, [])}
+        if _a != _b:
+            _drift.append(_n)
+    check("where a property table exists twice, the two copies agree exactly",
+          _dupes and not _drift,
+          "%d duplicated: %s; drifted: %s" % (len(_dupes), _dupes, _drift))
+
     # ---- A RENAME THAT CROSSES A LANE LANDS IN TWO COMMITS ----
     # Between them every by-name lookup is wrong in one direction. The gap is
     # data rather than a silent fallback, and every row must name an owner and
