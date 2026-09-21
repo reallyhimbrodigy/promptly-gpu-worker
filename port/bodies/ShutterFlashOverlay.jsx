@@ -26,6 +26,24 @@
  * opacity ramp has no per-frame pixel displacement to bound. Exempt by nature
  * rather than by margin, the same way DipToBlack is.
  *
+ * CHATCUT STRIPS mixBlendMode, so the beam and the dot below composite
+ * NORMALLY, not in `screen`. Measured 2026-09-21 by reading a registered asset
+ * back; it is the fifth auto-rewrite and the only one that changes the picture
+ * rather than the code.
+ *
+ * THE 0.82 IS UNAFFECTED AND THAT IS NOT LUCK. The wash is the term the
+ * perceptibility measurement is about, and the wash was always a normal
+ * composite — no blend mode to lose. What changes is the beam and the dot:
+ * additive highlights become opaque ones. Over a wash already at 0.82 of a
+ * white flash they land in nearly the same place, which is why the frame still
+ * reads correctly.
+ *
+ * AND THE VERDICT ALREADY COVERS THE STRIPPED FORM. The still this component
+ * was passed on was rendered FROM THE REGISTERED CODE, so it photographed the
+ * normal-blend composite. Every frame in this repo is evidence about the
+ * runtime, never about the source — which is exactly the confusion that made me
+ * solve LightLeakOverlay's peak against a blend that does not happen.
+ *
  * CONTRACT (from ChatCut's validator): exactly one top-level component and NO
  * top-level constants; a plain div root, never AbsoluteFill; editable values
  * read through an identifier literally named `props`; every declared property

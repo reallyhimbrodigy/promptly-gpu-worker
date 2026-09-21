@@ -28,6 +28,12 @@
  * slow squash. Measured in measured/transition_peaks_2026-09-20.md rather than
  * silently exceeded.
  *
+ * CHATCUT STRIPS mixBlendMode: the beam and dot composite NORMALLY rather than
+ * in `screen`. Measured 2026-09-21 from a registered read-back. Recorded here
+ * even though this component is out of scope on usage, because the population
+ * that carries the hazard is the set of bodies that DECLARE the blend, not the
+ * set anybody happens to be looking at.
+ *
  * CONTRACT (from ChatCut's validator): exactly one top-level component and NO
  * top-level constants — the five phase boundaries and two sizes are module
  * constants in the original and nest here; a plain div root, never

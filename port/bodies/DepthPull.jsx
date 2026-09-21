@@ -21,6 +21,24 @@
  * DepthPull is one of the four the cap was MEASURED against: 1.25/2200ms read
  * 33.8 px/frame before it, against an 11px ceiling.
  *
+ * CHATCUT STRIPS mixBlendMode, AND THIS COMPONENT HAS THE WORST CASE OF IT.
+ * Measured 2026-09-21 by reading a registered asset back. Two layers below
+ * declare a blend and neither gets it:
+ *
+ *   multiply (the vignette)  a layer that DARKENED what was under it becomes a
+ *                            flat COVERING layer. Not a weaker vignette — a
+ *                            different thing in front of the picture.
+ *   screen (the glow)        an additive bloom becomes an opaque patch.
+ *
+ * The multiply one is the reason this is called out separately in
+ * smoke_blend_mode_stripped.py: a stripped `screen` overstates a highlight,
+ * while a stripped `multiply` replaces the image instead of shading it.
+ *
+ * NOT YET JUDGED. This component is STALE_BODY — its still photographs a body
+ * re-authored since — and the frame it needs must be read with this in mind: if
+ * it comes back heavier or flatter than the definition, the blend strip is the
+ * first thing to suspect and not the registration.
+ *
  * CONTRACT (from ChatCut's validator): exactly one top-level component and NO
  * top-level constants; the root is a plain div, never AbsoluteFill; every
  * editable value is read through an identifier literally named `props`; and

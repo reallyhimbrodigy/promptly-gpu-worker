@@ -490,8 +490,7 @@
           "motion graphic"
         ],
         "users_30d": 14,
-        "draws": "UNKNOWN",
-        "why": "motion graphic — 14 users reached in 30d, ABOVE the 10-user cut. RESTORED 2026-09-21: it was removed on a BLANK verdict Builder 1 has since retracted. That render registered label=\"\" and supplied content only as propertyOverrides, and whether ChatCut honours propertyOverrides at render is UNPROVEN — so the blank frame is as consistent with content never arriving as with the component not drawing. An unsafe verdict is not evidence, and a component does not lose its place in the library on one. IN SCOPE, and NOT on the menu until a picture says so."
+        "why": "motion graphic — 14 users reached in 30d, above the 10-user cut. RESOLVED 2026-09-21: it was removed on a BLANK, restored as UNKNOWN when that verdict was retracted, and a frame has now settled it — green corner brackets, scan line and target box, on Builder 1's build render. The declared UNKNOWN override is removed so the stills record governs it like every other component; a declared state is for a dispute, not a resting place."
       }
     },
     "_blank_note": "THE BLANK LIST WAS RETRACTED BY THE LANE THAT PRODUCED IT (Builder 1, 2026-09-21). All six blanks came from one harness under one registration that supplied content only via propertyOverrides — an unproven write field — so a blank frame cannot be told apart from content that never arrived. Five were already below the 10-user cut and stay out on USAGE, which needs no picture. Reticle was removed by the picture gate alone and is therefore back in scope with draws UNKNOWN. Keeping both readings of MouseDrag is what located the cause; a single overwritten verdict would have left five components wrongly out and no way to know."

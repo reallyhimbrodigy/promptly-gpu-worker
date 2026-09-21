@@ -61,13 +61,13 @@
     "DipToBlack": {
       "family": "transition",
       "file": "measured/inventory_stills/DipToBlack.jpg",
-      "timeline_frame": 120,
+      "timeline_frame": 300,
       "item": "c9d25681f3",
       "bytes": 8989,
       "sha256_16": "32137aad983f35b1",
       "why_this_frame": "the seam itself — full black is the mechanism",
-      "state": "UNDECIDABLE",
-      "looked_at": "PURE BLACK, edge to edge. A dip to black AT ITS MIDPOINT is black, so the correct output and a completely failed render are the same image. One frame cannot decide this one — it needs the shoulders, a frame either side showing the ramp.",
+      "state": "PASSTHROUGH_SUSPECT",
+      "looked_at": "FRAME OUTSIDE THE COMPONENT'S WINDOW — a verdict about the SAMPLE, not the component. Every transition and overlay runs 10-30 frames at the START of its item (DipToBlack 10, ShutterFlashOverlay 12, ZoomThrough 14, CardSwipe/SlideOver 16, LightLeakOverlay 20) and the build sampled a FIXED 60-frame stride, so every sample lands past the end of the ramp. What the frame shows is the settled B-side, and what the difference-from-control MEASURES is the A-to-B clip swap — not whether the effect rendered. THE SHARPEST CASE: f300 was shot as the midpoint and should be PURE BLACK. It is a fully lit frame. Not a failed dip — a frame 290 frames past a 10-frame window, where progress clamps to 1 and only the B-side shows. Its 87.96% is entirely the clip swap.",
       "looked_at_on": "2026-09-21",
       "body_sha256_16": "58c67927f5b171f2",
       "proof_frame": {
@@ -86,7 +86,9 @@
           "why": "MEASURED, not substituted for the ruling: the ease is cubic-bezier (0.55, 0, 0.85, 0.2), which is back-loaded, so 25% carries only 9.6% of the fade. That clears any noise floor and is the weak end of the ramp. 0.40 is offered as the stronger second frame, not in place of the ruled one."
         },
         "against": "the same frame with the transition absent — a passthrough at full plate opacity"
-      }
+      },
+      "source": "s3://thisismybucketagainwooo/stills/1790032947/DipToBlack/with_f300.png",
+      "control": "s3://thisismybucketagainwooo/stills/1790032947/DipToBlack/control_f300.png"
     },
     "SlideOver": {
       "family": "transition",
@@ -104,28 +106,32 @@
     "CardSwipe": {
       "family": "transition",
       "file": "measured/inventory_stills/CardSwipe.jpg",
-      "timeline_frame": 360,
+      "timeline_frame": 180,
       "item": "4b5a751f14",
       "bytes": 49703,
       "sha256_16": "011a063b0615cb6f",
       "why_this_frame": "A thrown off, B risen underneath",
       "state": "PASSTHROUGH_SUSPECT",
-      "looked_at": "one clip, contained, letterboxed, with no card and no swipe edge anywhere in frame. Either the sampled frame sits outside the transition window or nothing was applied. Indistinguishable from a passthrough at this frame — needs the peak frame, not f360.",
+      "looked_at": "FRAME OUTSIDE THE COMPONENT'S WINDOW — a verdict about the SAMPLE, not the component. Every transition and overlay runs 10-30 frames at the START of its item (DipToBlack 10, ShutterFlashOverlay 12, ZoomThrough 14, CardSwipe/SlideOver 16, LightLeakOverlay 20) and the build sampled a FIXED 60-frame stride, so every sample lands past the end of the ramp. What the frame shows is the settled B-side, and what the difference-from-control MEASURES is the A-to-B clip swap — not whether the effect rendered. 91.35% different from its control and no card, no rotation, no swipe edge anywhere: the control shows a different scene entirely, so the whole 91% is the clip swap.",
       "looked_at_on": "2026-09-21",
-      "body_sha256_16": "263d3db47a0f9b01"
+      "body_sha256_16": "263d3db47a0f9b01",
+      "source": "s3://thisismybucketagainwooo/stills/1790032947/CardSwipe/with_f180.png",
+      "control": "s3://thisismybucketagainwooo/stills/1790032947/CardSwipe/control_f180.png"
     },
     "ZoomThrough": {
       "family": "transition",
       "file": "measured/inventory_stills/ZoomThrough.jpg",
-      "timeline_frame": 475,
+      "timeline_frame": 1680,
       "item": "212376c501",
       "bytes": 57420,
       "sha256_16": "888c4eac2275161c",
       "why_this_frame": "A magnifying out while B rises — early, where both read",
       "state": "PASSTHROUGH_SUSPECT",
-      "looked_at": "a plain contained street frame with no scale artefact and no second layer. Same reading as CardSwipe: at f475 this is indistinguishable from a passthrough.",
+      "looked_at": "FRAME OUTSIDE THE COMPONENT'S WINDOW — a verdict about the SAMPLE, not the component. Every transition and overlay runs 10-30 frames at the START of its item (DipToBlack 10, ShutterFlashOverlay 12, ZoomThrough 14, CardSwipe/SlideOver 16, LightLeakOverlay 20) and the build sampled a FIXED 60-frame stride, so every sample lands past the end of the ramp. What the frame shows is the settled B-side, and what the difference-from-control MEASURES is the A-to-B clip swap — not whether the effect rendered. 22.29% and no scale artefact. Same reading as CardSwipe; the smaller number only means the two scenes happen to look more alike, which is why a percentage cannot stand in for a look.",
       "looked_at_on": "2026-09-21",
-      "body_sha256_16": "74b89e8378d824bf"
+      "body_sha256_16": "74b89e8378d824bf",
+      "source": "s3://thisismybucketagainwooo/stills/1790032947/ZoomThrough/with_f1680.png",
+      "control": "s3://thisismybucketagainwooo/stills/1790032947/ZoomThrough/control_f1680.png"
     },
     "StepPush": {
       "family": "transition",
@@ -202,15 +208,17 @@
     "ShutterFlashOverlay": {
       "family": "tight-cut overlay",
       "file": "measured/inventory_stills/ShutterFlashOverlay.jpg",
-      "timeline_frame": 1200,
+      "timeline_frame": 1080,
       "item": "b30c61e8e1",
       "bytes": 20949,
       "sha256_16": "bfaba6a05604d097",
       "why_this_frame": "peak wash, speaker still perceptible through it",
-      "state": "DRAWS",
-      "looked_at": "near-white wash over the whole canvas with the speaker STILL PERCEPTIBLE through it — t-shirt lettering and background figures readable. That is the measured 0.82 peak behaving exactly as its body documents.",
+      "state": "PASSTHROUGH_SUSPECT",
+      "looked_at": "FRAME OUTSIDE THE COMPONENT'S WINDOW — a verdict about the SAMPLE, not the component. Every transition and overlay runs 10-30 frames at the START of its item (DipToBlack 10, ShutterFlashOverlay 12, ZoomThrough 14, CardSwipe/SlideOver 16, LightLeakOverlay 20) and the build sampled a FIXED 60-frame stride, so every sample lands past the end of the ramp. What the frame shows is the settled B-side, and what the difference-from-control MEASURES is the A-to-B clip swap — not whether the effect rendered. 0.33% different and no wash at all. My own still of this component at f1200 caught it inside the window and showed the flash correctly — so the two frames disagree because one is in the ramp and one is not, and 0.33% is the honest reading of a frame where the overlay is simply not running.",
       "looked_at_on": "2026-09-21",
-      "body_sha256_16": "343d57289fd1fbe6"
+      "body_sha256_16": "2d9f11b8c2615d63",
+      "source": "s3://thisismybucketagainwooo/stills/1790032947/ShutterFlashOverlay/with_f1080.png",
+      "control": "s3://thisismybucketagainwooo/stills/1790032947/ShutterFlashOverlay/control_f1080.png"
     },
     "LightLeakOverlay": {
       "family": "tight-cut overlay",
@@ -393,6 +401,51 @@
       "state": "DRAWS",
       "looked_at": "yellow card with the label and the arrow cursor at the settled centre",
       "body_sha256_16": null
+    },
+    "Reticle": {
+      "state": "DRAWS",
+      "looked_at": "green corner brackets framing the subject's head and shoulders, a faint horizontal scan line across the middle and a subtly lightened target box between them. That is a viewfinder reticle and it is what the component claims to be. The BLANK that removed it from the library is now refuted from three directions: Builder 1's registration argument, my control-is-not-a-control reading, and this frame.",
+      "looked_at_on": "2026-09-21",
+      "timeline_frame": 1020,
+      "body_sha256_16": null,
+      "source": "s3://thisismybucketagainwooo/stills/1790032947/Reticle/with_f1020.png",
+      "control": "s3://thisismybucketagainwooo/stills/1790032947/Reticle/control_f1020.png"
+    },
+    "StatCard": {
+      "state": "DRAWS",
+      "looked_at": "hero number in heavy white, an accent rule under it, and 'RAISED IN 14 DAYS' as the label beneath — the three elements the component is defined by, all present. NOTE, not a defect of the component: the value renders as $20000000 with no thousands separators, so a seven-figure number is hard to read at a glance. That is the prop it was given, and worth a formatting decision rather than a body change.",
+      "looked_at_on": "2026-09-21",
+      "timeline_frame": 1440,
+      "body_sha256_16": null,
+      "source": "s3://thisismybucketagainwooo/stills/1790032947/StatCard/with_f1440.png",
+      "control": "s3://thisismybucketagainwooo/stills/1790032947/StatCard/control_f1440.png"
+    },
+    "Stamp": {
+      "state": "DRAWS",
+      "looked_at": "a red distressed double-outline rectangle reading SOLD OUT, rotated a few degrees off horizontal and overprinted across the subject. It reads as a rubber stamp struck onto the frame, which is exactly the definition.",
+      "looked_at_on": "2026-09-21",
+      "timeline_frame": 1380,
+      "body_sha256_16": null,
+      "source": "s3://thisismybucketagainwooo/stills/1790032947/Stamp/with_f1380.png",
+      "control": "s3://thisismybucketagainwooo/stills/1790032947/Stamp/control_f1380.png"
+    },
+    "PillCluster": {
+      "state": "DRAWS",
+      "looked_at": "a horizontal row of rounded pills — FAST, CHEAP, GOOD, NO WATERMARK — with CHEAP filled in the accent orange and the rest translucent over the picture. The pills overlap slightly at their rounded ends, which reads as a deliberate cluster rather than a layout fault, and every label is legible. Recorded so the overlap can be re-argued if it was not intended.",
+      "looked_at_on": "2026-09-21",
+      "timeline_frame": 720,
+      "body_sha256_16": null,
+      "source": "s3://thisismybucketagainwooo/stills/1790032947/PillCluster/with_f720.png",
+      "control": "s3://thisismybucketagainwooo/stills/1790032947/PillCluster/control_f720.png"
+    },
+    "RankedList": {
+      "state": "DRAWS",
+      "looked_at": "three numbered rows — 1 HOOK, 2 PROOF, 3 CLOSE — each with a horizontal rule and a time badge (0-2s, 2-8s, 8-12s), the first row in accent orange. Row 3 is part-faded because the frame catches its staggered entrance mid-flight, which is the component working rather than failing.",
+      "looked_at_on": "2026-09-21",
+      "timeline_frame": 960,
+      "body_sha256_16": null,
+      "source": "s3://thisismybucketagainwooo/stills/1790032947/RankedList/with_f960.png",
+      "control": "s3://thisismybucketagainwooo/stills/1790032947/RankedList/control_f960.png"
     }
   },
   "_still_asset": "The three frame compositions are drawn on measured/corpus_evidence_still.jpg — source second 39.3 of th_lagos_en, extracted with ffmpeg and uploaded to the project as image asset 5170f875. Corpus material, CC BY-SA 4.0, so the picture of a component that takes a picture is itself rights-clear and reproducible from the fixture.",
@@ -400,5 +453,6 @@
   "_ported_mg": "THE ported_mg REGISTRATION, started 2026-09-21. These are the components whose contract-shaped code already sits in chatcut_registry.json; the port work left is REGISTER + PLACE + FRAME, not a binding transform. Placed on track V3 of the same th_lagos_en timeline, copy sampled from the fixture's transcript.",
   "_state_contract": "DRAWS = a human-equivalent LOOK at the frame, described, and nothing wrong with it. DEFECT = it draws and the picture is wrong; named, and NOT on the menu. PASSTHROUGH_SUSPECT = indistinguishable from no effect at the frame sampled — a verdict about the FRAME CHOICE, not yet about the component. UNDECIDABLE = the correct output and a failed render are the same image (DipToBlack at its midpoint is black); one frame cannot decide it. STALE_BODY = the still is real and photographs code that has since been re-authored. FILE_ONLY = a sha and no recorded look. Absence of a row is UNKNOWN, never BLANK. ONLY DRAWS REACHES THE MENU.",
   "_body_binding": "Every row carries body_sha256_16: the sha of the port/bodies/*.jsx that DREW THIS FRAME. THE ROW RECORDS WHAT WAS SEEN; lane_contract.live_set() DERIVES WHETHER IT STILL APPLIES, by re-hashing the body on disk at read time. So re-authoring a component invalidates its picture the instant the file changes, with nobody remembering to. WITHOUT IT A STILL SILENTLY CERTIFIES SUPERSEDED CODE: seven of these photograph bodies I re-authored in 43b47b4 hours later, and every one of those frames still looks perfectly good. TWO MISTAKES WHILE BUILDING THIS, BOTH KEPT AS THE RECORD. First I backfilled the CURRENT sha onto every row, which made three stills taken before the contain switch pass the staleness check and sit on the menu — a hash carries no evidence of its own currency. Then I hand-wrote STALE_BODY into the seven rows, which SHADOWED the sha check and left the mechanism with no population at all: it was dead, and the red proof exposed it by mutating the binding away and watching nothing go red.",
-  "_proof_frame_contract": "A COMPONENT WHOSE CORRECT OUTPUT AT ITS MIDPOINT CARRIES NO SIGNAL IS PROVEN SOMEWHERE ELSE ON ITS RAMP (Zac, 2026-09-21). DipToBlack at its dip is black, which is exactly what a failed render looks like, so the frame everybody naturally samples is the one frame that can never decide it. `proof_frame` records WHERE on the ramp the signal exists, what the plate should read there, and what it is compared AGAINST — the same frame with the transition absent. Two comparisons are needed and one frame serves both: PRESENT separates it from a failed render, CHANGED separates it from a passthrough. The family is derived from the bodies — a black root plus complementary A/B opacity fades — not hand-listed, so a component that acquires the shape is covered the day it does."
+  "_proof_frame_contract": "A COMPONENT WHOSE CORRECT OUTPUT AT ITS MIDPOINT CARRIES NO SIGNAL IS PROVEN SOMEWHERE ELSE ON ITS RAMP (Zac, 2026-09-21). DipToBlack at its dip is black, which is exactly what a failed render looks like, so the frame everybody naturally samples is the one frame that can never decide it. `proof_frame` records WHERE on the ramp the signal exists, what the plate should read there, and what it is compared AGAINST — the same frame with the transition absent. Two comparisons are needed and one frame serves both: PRESENT separates it from a failed render, CHANGED separates it from a passthrough. The family is derived from the bodies — a black root plus complementary A/B opacity fades — not hand-listed, so a component that acquires the shape is covered the day it does.",
+  "_frame_window_finding": "A DIFFERENCE FROM A CONTROL SAYS SOMETHING CHANGED, NEVER THAT THE EFFECT RENDERED. Builder 1's build is sound — two independent exports are bit-identical at a component-free frame, so the floor really is 0.0000% — and the transition numbers are still nearly meaningless, because for a transition the largest change in the frame is WHICH CLIP IS SHOWING. DipToBlack scored 87.96% on a frame that should have been black and was fully lit. A transition's proof frame must be computed from its own window — start = seamRoom - duration/2, then a chosen progress across `duration` — never from a fixed stride."
 }

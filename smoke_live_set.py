@@ -134,13 +134,20 @@ def main():
         (menu | await_) == set(r.get("renderable") or []) and not (menu & await_),
         "%d + %d = %d of %d" % (len(menu), len(await_), len(menu | await_), r.get("n_renderable") or -1))
 
-    # L12 RETICLE IS THE WORKED EXAMPLE, pinned deliberately. It was dropped
-    # from scope on a BLANK its own author retracted; a retracted verdict must
-    # return a component to the WORKLIST without putting it on the MENU. If this
-    # leg ever fails, the two questions have been collapsed back into one.
-    leg("L12 reticle_in_scope_not_on_menu",
-        "Reticle" in (r.get("renderable") or []) and "Reticle" not in menu
-        and dr.get("Reticle") == "UNKNOWN",
+    # L12 RETICLE STAYS IN SCOPE. This leg used to assert it was in scope AND
+    # OFF THE MENU, which was true and is no longer: a frame settled its picture
+    # and it was promoted. That half was defending a DECISION, not a property —
+    # the class this repo calls a check that encodes a reversed decision — and it
+    # went red on a correct promotion, which is exactly how such a check
+    # announces itself. Kept here as the reason rather than quietly rewritten.
+    #
+    # The half that IS a property is the one worth holding: Reticle was dropped
+    # from SCOPE on a verdict its own author retracted, and that was the error.
+    # Whether it is on the menu is the frame's business and changes; whether it
+    # is in the worklist at all must not regress. L9 already holds the other
+    # half — nothing reaches the menu without a picture.
+    leg("L12 reticle_stays_in_scope",
+        "Reticle" in (r.get("renderable") or []),
         "renderable=%s menu=%s draws=%s" % ("Reticle" in (r.get("renderable") or []),
                                             "Reticle" in menu, dr.get("Reticle")))
 

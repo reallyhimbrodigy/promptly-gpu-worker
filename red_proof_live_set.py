@@ -118,7 +118,7 @@ MUTATIONS = [
     ("reticle_dropped_from_scope", "library_73.json",
      '    "Reticle": {',
      '    "ReticleXX_REMOVED": {',
-     "L12 reticle_in_scope_not_on_menu",
+     "L12 reticle_stays_in_scope",
      lambda s: '"Reticle": {' in s),
 ]
 
