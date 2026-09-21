@@ -284,7 +284,7 @@
    "reach_for_it_instead_of": [],
    "size_band": "unlisted",
    "still": null,
-   "still_state": "ABSENT \u2014 renders empty; sample props still wrong",
+   "still_state": "ABSENT — renders empty; sample props still wrong",
    "note": "",
    "required": [],
    "declared": [],
@@ -373,7 +373,7 @@
    "reach_for_it_instead_of": [],
    "size_band": "MEDIUM",
    "still": null,
-   "still_state": "ABSENT \u2014 renders empty; sample props still wrong",
+   "still_state": "ABSENT — renders empty; sample props still wrong",
    "note": "",
    "required": [
     "label"
@@ -444,7 +444,7 @@
    "when": "WHEN STEPS OR ITEMS ARE ENUMERATED",
    "reach_for_it_instead_of": [
     "unordered keyword tags",
-    "a small static popped-in group of 2\u20138 tags"
+    "a small static popped-in group of 2–8 tags"
    ],
    "size_band": "SMALL",
    "still": "catalogue_stills/PillCluster.png",
@@ -722,7 +722,7 @@
    "size_band": "unlisted",
    "still": null,
    "still_state": "DISPATCHER",
-   "note": "a DISPATCHER, not a component \u2014 it delegates on `platform` to TweetBubble / InstagramComment / IMessageBubble / TikTokComment. Place one of those directly.",
+   "note": "a DISPATCHER, not a component — it delegates on `platform` to TweetBubble / InstagramComment / IMessageBubble / TikTokComment. Place one of those directly.",
    "required": [],
    "declared": [],
    "example_props": {
@@ -851,7 +851,7 @@
    "size_band": "unlisted",
    "still": "catalogue_stills/StickyNotes.png",
    "still_state": "MEASURED",
-   "note": "",
+   "note": "THIS ENTRY IS THE MOTION GRAPHIC. Its declared props (noteFontFamily, noteSize, showFog, topOffset) and its example_props array of three notes are the MG's, and catalogue_stills/StickyNotes.png shows three notes. The text-overlay variant that once shared this name is HandwrittenNote and has its own entry.",
    "required": [
     "notes"
    ],
@@ -1032,6 +1032,31 @@
      "likes": 1200,
      "views": 98000
     }
+   }
+  },
+  "HandwrittenNote": {
+   "when": "WHEN ONE TAKEAWAY SHOULD LOOK HANDWRITTEN",
+   "reach_for_it_instead_of": [
+    "a single hand-written note",
+    "one tip",
+    "one takeaway on paper"
+   ],
+   "size_band": "size atlas pending",
+   "still": "catalogue_stills/HandwrittenNote.png",
+   "still_state": "ABSENT — not yet rendered",
+   "note": "Renamed from StickyNotes 2026-09-21. A SINGLE handwritten note is the default and the job; it accepts up to three, and three is the ceiling rather than the point. Distinct component from the StickyNotes motion graphic, which keeps that name.",
+   "required": [
+    "notes"
+   ],
+   "declared": [
+    "fontFamily",
+    "notes",
+    "size",
+    "position",
+    "accentColor"
+   ],
+   "example_props": {
+    "notes": "Key takeaway|#FFE066|-3"
    }
   }
  }

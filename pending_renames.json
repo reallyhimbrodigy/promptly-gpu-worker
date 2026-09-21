@@ -1,0 +1,15 @@
+{
+ "_why": "A rename that crosses a lane boundary lands in two commits, and between them every by-name lookup is wrong in one direction or the other. This file is that gap, written down. It is NOT a skip list: the resolver below uses it to find the old key, and the smoke fails on any entry older than its stated window or missing an owner.",
+ "_rule": "An entry is deleted by the lane that lands the other half. If this file is empty, every component resolves by its own name and the resolver is a no-op.",
+ "pending": [
+  {
+   "name": "HandwrittenNote",
+   "was": "StickyNotes",
+   "registry": "PORTED_PROPS in chatcut_job_app.py",
+   "owner": "Builder 1 — chatcut_job_app.py is his file and I do not edit it",
+   "requested": "2026-09-21",
+   "ruling": "Zac 2026-09-21: the motion graphic keeps StickyNotes; the text-overlay variant is renamed for what it is, a single handwritten note.",
+   "edit": "rename the PORTED_PROPS key \"StickyNotes\" to \"HandwrittenNote\". The five property rows under it are unchanged — fontFamily, notes, size, position, accentColor. The MOTION GRAPHIC is not in PORTED_PROPS at all, so there is nothing to disambiguate there; this is a pure key rename."
+  }
+ ]
+}

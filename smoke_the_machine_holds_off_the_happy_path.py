@@ -2035,8 +2035,8 @@ def main():
     check("the library carries the whole text-overlay family, and the count is corrected with a why",
           # THE FIVE FROM THE SCHEMA'S HISTORY, plus PlainText — the workhorse, which
           # is not in that history because the enum never had a name for "just words".
-          sorted(_fam) == ["CaptionMatch", "LowerThird", "PlainText", "QuoteCard",
-                           "StickyNotes", "TornPaper"]
+          sorted(_fam) == ["CaptionMatch", "HandwrittenNote", "LowerThird", "PlainText",
+                           "QuoteCard", "TornPaper"]
           # THE COUNT IS NOT A LITERAL HERE. It was `== 79`, and when the
           # library was corrected to 77 this leg went red on a tree that had
           # just got MORE accurate -- a check defending a DECISION, which is
@@ -2048,19 +2048,22 @@ def main():
           and "COUNT CORRECTED" in (_lib.get("_why") or ""),
           "%d items, family %s" % (sum(len(v) for v in _lib.values() if isinstance(v, list)), sorted(_fam)))
     # EVERY VARIANT IS BUILT, CONTRACT-CLEAN, AND CARRIES THE TWO DIALS.
-    for _v in ("TornPaper", "StickyNotes", "QuoteCard", "LowerThird", "CaptionMatch"):
+    for _v in ("TornPaper", "HandwrittenNote", "QuoteCard", "LowerThird", "CaptionMatch"):
         _blob = open("port/build/%s.jsx" % _v, encoding="utf-8").read()
-        _keys = {q["key"] for q in J.PORTED_PROPS[_v]}
+        # THE OTHER LANE'S TABLE MAY STILL HOLD THE OLD KEY. Resolved through
+        # pending_renames.json, which names the owner and the exact edit; when
+        # that lane lands its half and deletes the row, this is a no-op.
+        _keys = {q["key"] for q in J.PORTED_PROPS[__import__("inventory").registry_key(_v)]}
         check("%s is built, contract-clean, and exposes size and position as dials" % _v,
-              not J.component_contract(_blob, J.PORTED_PROPS[_v])
+              not J.component_contract(_blob, J.PORTED_PROPS[__import__("inventory").registry_key(_v)])
               and {"size", "position"} <= _keys
               and "NO VELOCITY CAP:" in _blob,
               "keys %s" % sorted(_keys))
     # THE DEFAULTS ARE WHAT THE REFERENCES MEASURE: medium, middle. LowerThird is the
     # one exception and it is deliberate — a broadcast name card lives in the lower
     # third, and the dial still moves it.
-    _defs = {v: {q["key"]: q.get("defaultValue") for q in J.PORTED_PROPS[v]}
-             for v in ("TornPaper", "StickyNotes", "QuoteCard", "LowerThird", "CaptionMatch")}
+    _defs = {v: {q["key"]: q.get("defaultValue") for q in J.PORTED_PROPS[__import__("inventory").registry_key(v)]}
+             for v in ("TornPaper", "HandwrittenNote", "QuoteCard", "LowerThird", "CaptionMatch")}
     check("every variant defaults to medium, and to middle except the lower third",
           all(d["size"] == "medium" for d in _defs.values())
           and all(d["position"] == "middle" for v, d in _defs.items() if v != "LowerThird")
@@ -2068,7 +2071,7 @@ def main():
           str({v: (d["size"], d["position"]) for v, d in _defs.items()}))
 
     # ---- A MALFORMED ENTRY IS A FAULT, NOT A LABEL IN THE VIDEO (Zac, 2026-09-19) ----
-    # StickyNotes used to render "dropped N malformed entries" INTO THE FRAME. An error
+    # HandwrittenNote used to render "dropped N malformed entries" INTO THE FRAME. An error
     # rendered into a user's video is worse than an empty note; silently dropping is the
     # other half of the same mistake, handing back a graphic missing a line with nothing
     # saying so. It is a fault at the rewatch (so the agent can fix it) and at the
@@ -2086,13 +2089,13 @@ def main():
           and J.packed_prop_faults("notes", "a|#fff|0;b|#fff|0;c|#fff|0") == [],
           "4 entries named, 3 clean")
     _bad_items = [{"id": "aaaaaaaa-1111", "itemType": "motion-graphic",
-                   "asset": {"name": "StickyNotes"}, "propertyOverrides": {"notes": "|#FFE066|-3"}}]
+                   "asset": {"name": "HandwrittenNote"}, "propertyOverrides": {"notes": "|#FFE066|-3"}}]
     # THREE STATES, BECAUSE AN EMPTY LIST IS NOT AN ALL-CLEAR. Measured the hard way:
     # a deliberately malformed entry was planted, placed, and the check returned [] on
     # TWO paid runs — it read each item's own `propertyOverrides`, which the read-back
     # does not carry (the values live behind inspect_item, a thing this repo had
     # already learned once). An absent measurement read exactly like a clean one.
-    _no_props = [{"id": "aaaaaaaa-1111", "itemType": "motion-graphic", "asset": {"name": "StickyNotes"}}]
+    _no_props = [{"id": "aaaaaaaa-1111", "itemType": "motion-graphic", "asset": {"name": "HandwrittenNote"}}]
     _with_bad = J.component_faults(_no_props, {"aaaaaaaa-1111": {"notes": "|#FFE066|-3"}})
     _with_ok = J.component_faults(_no_props, {"aaaaaaaa-1111": {"notes": "ok|#fff|0"}})
     check("a component whose properties could not be read is ABSENT, never a clean pass",
@@ -2102,7 +2105,7 @@ def main():
           J.component_faults(_no_props)["why"][:100])
     check("with the property map the fault fires and names the item and its component",
           _with_bad["state"] == "MEASURED" and _with_bad["faults"]
-          and "aaaaaaaa" in _with_bad["faults"][0] and "StickyNotes" in _with_bad["faults"][0]
+          and "aaaaaaaa" in _with_bad["faults"][0] and "HandwrittenNote" in _with_bad["faults"][0]
           and _with_ok["state"] == "MEASURED" and _with_ok["faults"] == [],
           _with_bad["faults"][0][:110])
     # AND BOTH SEAMS ARE FED THE MAP THAT ACTUALLY HAS THE VALUES.
@@ -2113,7 +2116,7 @@ def main():
           and "def _props_for_items(" in _appf,
           "rewatch and read-back both fed")
     # THE ERROR IS NOT IN THE PICTURE, and the fault reaches BOTH seams.
-    _sn = open("port/build/StickyNotes.jsx", encoding="utf-8").read()
+    _sn = open("port/build/HandwrittenNote.jsx", encoding="utf-8").read()
     _sn_code = _re.sub(r"^\s*//.*$", "", _re.sub(r"/\*.*?\*/", "", _sn, flags=_re.S), flags=_re.M)
     _app = open("chatcut_job_app.py", encoding="utf-8").read()
     check("the component renders no error text, and the fault reaches the rewatch AND the read-back",
@@ -2157,10 +2160,10 @@ def main():
     # END TO END: the parsed props make the planted fault fire.
     check("the parsed properties make a planted malformed entry FAULT",
           J.component_faults([{"id": "2bbe2a3b1e", "itemType": "motion-graphic",
-                               "asset": {"name": "StickyNotes"}}],
+                               "asset": {"name": "HandwrittenNote"}}],
                              {"2bbe2a3b1e": _ip["props"]})["faults"],
           str(J.component_faults([{"id": "2bbe2a3b1e", "itemType": "motion-graphic",
-                                   "asset": {"name": "StickyNotes"}},],
+                                   "asset": {"name": "HandwrittenNote"}},],
                                  {"2bbe2a3b1e": _ip["props"]})["faults"])[:110])
     # AND NO SITE WALKS THE ENVELOPE FOR A KEY THAT IS A STRING.
     _appp = _re.sub(r"^\s*#.*$", "", open("chatcut_job_app.py", encoding="utf-8").read(), flags=_re.M)
@@ -2417,8 +2420,11 @@ def main():
                 _bare.append("%s: %r" % (_n, _v))
         # a component that reads props.fontFamily must DECLARE it as type font
         if "props.fontFamily" in _c:
+            # Looked up by BUILT name, so it resolves through the pending-rename
+            # map; a half-landed rename is not a missing font declaration.
             if not any(q.get("key") == "fontFamily" and q.get("type") == "font"
-                       for q in J.PORTED_PROPS.get(_n, [])):
+                       for q in J.PORTED_PROPS.get(
+                           __import__("inventory").registry_key(_n), [])):
                 _nofont.append(_n)
     check("no component names a typeface as a bare CSS string",
           not _bare, "; ".join(_bare[:4]) if _bare else "all faces are font-typed properties")
@@ -2428,6 +2434,8 @@ def main():
     # Georgia is ABSENT from the catalogue — it answers with Noto Sans/Serif Georgian,
     # which are Georgian-SCRIPT faces, not the serif. Lora is present and is the serif
     # those components use instead.
+    # Walks the REGISTRY's own keys, so it needs no resolving — but the component
+    # that reads a typeface is found by BUILT name, which does.
     _defaults = {q.get("defaultValue") for _n in J.PORTED_PROPS
                  for q in J.PORTED_PROPS[_n] if q.get("type") == "font"}
     _confirmed = {"Inter", "Montserrat", "Lora", "DM Sans", "Space Mono", "Playfair Display"}
@@ -2586,10 +2594,15 @@ def main():
     # property entry gives the user nothing to edit — the registered-default failure this
     # repo has already paid for once: 135 defaults wrong, 0 of 14 components drawing.
     _built = sorted(f[:-4] for f in _os_list("port/build") if f.endswith(".jsx"))
+    # RESOLVED THROUGH THE PENDING-RENAME MAP. While a rename is half-landed the
+    # built name and the registry key differ BY DESIGN, and comparing them raw
+    # reports an orphan in each direction for one component that is neither.
+    _rk = __import__("inventory").registry_key
+    _built_keys = sorted(_rk(b) for b in _built)
     check("every built component has a property table, and the table has no orphans",
-          bool(_built) and not [b for b in _built if b not in J.PORTED_PROPS]
-          and not [k for k in J.PORTED_PROPS if k not in _built],
-          "built %s vs props %s" % (_built, sorted(J.PORTED_PROPS)))
+          bool(_built) and not [b for b in _built_keys if b not in J.PORTED_PROPS]
+          and not [k for k in J.PORTED_PROPS if k not in _built_keys],
+          "built %s vs props %s" % (_built_keys, sorted(J.PORTED_PROPS)))
     check("an unread or absent comparison is ABSENT or FAILED, never a proven pair",
           J.pair_differs(_mk([]), _mk(["b"]), reader=_rd(_same))["state"] == "ABSENT"
           and J.pair_differs(_mk(["a"]), _mk(["b"]), reader=_boom)["state"] == "FAILED"
@@ -3012,6 +3025,14 @@ def main():
           and all(e.get("line") is None for e in _inv["entries"] if e["state"] != "MEASURED"),
           "%d entr(ies), %d measured, %d atlas pending" % (
               len(_inv["entries"]), _inv["measured"], _inv["pending"]))
+    # ---- A RENAME THAT CROSSES A LANE LANDS IN TWO COMMITS ----
+    # Between them every by-name lookup is wrong in one direction. The gap is
+    # data rather than a silent fallback, and every row must name an owner and
+    # the exact edit — a pending rename nobody can action is a permanent one.
+    _pr = __import__("inventory").pending_renames()
+    check("every pending cross-lane rename names an owner and the exact edit",
+          _pr["state"] == "MEASURED" and not _pr["undescribed"], _pr["why"])
+
     # ---- ITEM 5's PICTURE HALF, AND THE NAME COLLISION THAT CORRUPTED IT ----
     # A component name in two families makes every by-name lookup resolve to
     # whichever entry it meets first. Measured 2026-09-21: the tight-cut

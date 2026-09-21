@@ -209,6 +209,37 @@ def line_for(name, family, facts):
     return dict(out, why="the catalogue has no entry for %s" % name)
 
 
+def registry_key(name, path="pending_renames.json"):
+    """-> the key this component currently has in ANOTHER LANE's registry.
+
+    A rename that crosses a lane boundary lands in two commits. Between them the
+    library says one name and the other lane's table still says the old one, and
+    a lookup by the new name raises while a lookup by the old one silently reads
+    a component that no longer has that name.
+
+    So the gap is DATA, and this resolves through it. When the other lane lands
+    its half and deletes the entry, this returns the name unchanged and nothing
+    else has to move.
+    """
+    for r in (_read(path, {}) or {}).get("pending", []):
+        if r.get("name") == name and r.get("was"):
+            return r["was"]
+    return name
+
+
+def pending_renames(path="pending_renames.json"):
+    """-> {state, pending, why} — every rename waiting on another lane."""
+    d = _read(path, {}) or {}
+    rows = d.get("pending", [])
+    bad = [r for r in rows if not (r.get("owner") and r.get("edit") and r.get("requested"))]
+    return {"state": "MEASURED", "pending": rows, "undescribed": bad,
+            "why": "%d pending rename(s)%s" % (
+                len(rows),
+                ("; " + ", ".join("%s was %s, owner %s" % (r.get("name"), r.get("was"),
+                                                           r.get("owner", "?").split(" ")[0])
+                                  for r in rows)) if rows else "")}
+
+
 def name_collisions(library_path="library_73.json"):
     """-> {state, collisions, why} — any component name appearing in TWO families.
 

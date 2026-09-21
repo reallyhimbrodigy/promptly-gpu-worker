@@ -1,18 +1,14 @@
 {
  "_why": "A component name in two families makes every by-name lookup resolve to whichever entry it meets first. Two were found on 2026-09-21. One was a mistake and is FIXED in the library (the tight-cut overlays were listed under the transitions' names). One is REAL and needs a rename decision, so it is described here with its consequence rather than skipped quietly — a checker that carries its own exceptions hides them.",
  "_rule": "The check FAILS on any collision not listed here. An entry is a decision on the record with a date and an owner, never a way to make the check green.",
- "collisions": [
+ "collisions": [],
+ "_resolved": [
   {
    "name": "StickyNotes",
-   "families": [
-    "motion graphic",
-    "text overlay"
-   ],
-   "state": "REAL — two different components, one name",
-   "evidence": "ported_mg/StickyNotes.jsx is 16336 bytes and takes notes: StickyNote[]; port/bodies/StickyNotes.jsx is 5443 bytes and is the text-overlay variant. Different shas, different property shapes, both built.",
-   "consequence": "Any by-name lookup — the inventory line, the inventory picture, the platter — resolves to one of them arbitrarily. Neither is wrong to exist; the NAME is.",
-   "owner": "Zac — a rename is a product decision, not a port decision",
-   "found": "2026-09-21"
+   "resolved": "2026-09-21",
+   "ruling": "Zac: the motion graphic keeps the name (plural, a set of notes, the 31-MG member); the text-overlay variant is renamed for what it is.",
+   "now": "motion graphic = StickyNotes; text overlay = HandwrittenNote",
+   "kept_here": "A resolved collision stays on the record. The quarantine is the only place that says this name once meant two things, and the next person to find a StickyNotes reference in an old report needs that."
   }
  ]
 }

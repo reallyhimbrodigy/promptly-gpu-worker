@@ -4,7 +4,18 @@
  * registered blob comes back byte-identical and port/registered_diff.mjs can assert
  * exact equality, which is the only way to know the code that runs is the code we
  * built. */
-/* StickyNotes - the sticky_note text overlay, ported from the old pipeline's family.
+/* HandwrittenNote - the sticky_note text overlay, ported from the old pipeline's family.
+ *
+ * RENAMED FROM StickyNotes, 2026-09-21 (Zac). The MOTION GRAPHIC keeps that name:
+ * it is plural by nature, a set of notes, and it is one of the 31 MG members with
+ * `notes: StickyNote[]`. This is a different component that happened to share the
+ * name, and the sharing was not harmless - every by-name lookup resolved to
+ * whichever it met first, which handed one of them the other's picture AND the
+ * other's measured peak displacement.
+ *
+ * WHAT THIS ONE IS: a single handwritten note - one line on coloured paper, the
+ * property table's default being exactly that. It accepts up to three, and three
+ * is the ceiling rather than the point.
  *
  * WHY IT IS BACK. text_overlays was a FAMILY in the live pipeline and it is absent
  * from the 73. The references place text most of the time; until this lands the
