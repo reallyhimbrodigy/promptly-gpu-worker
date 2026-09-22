@@ -30,5 +30,49 @@
       "guard": "still",
       "default": ""
     }
+  },
+  "_media_slots": "THE THIRD KIND OF EMPTY (Builder 1, 2026-09-21). A text \"\" renders nothing and is invisible; a number \"\" renders a zero; an IMAGE or VIDEO property whose default is \"\" renders a PANEL, and the panel IS the poster. A content check that counts only text and number properties clears that class truthfully and uselessly — mine cleared EmojiCard with '2 of 2 content properties carry a default' while its poster was a black rectangle over the speaker's face. Only the render caught it. So media slots are enumerated SEPARATELY and by TYPE, never folded into the copy check.",
+  "media_slots": {
+    "_read_from": "editableProperties[].type on the registered assets, 6c0ca574",
+    "_finding": "EmojiCard.still is the only media slot among the TWELVE MENU components — confirmed independently by Builder 1's falsy-default scan. But `renderable` is 27, and the other fifteen are transitions, zooms and overlays that all take `clip` (type video, defaultValue \"\"). ELEVEN render the literal string 'NO CLIP PROP' at frame 0 with default props, and ShutterFlashOverlay and LightLeakOverlay render 'NO CLIP'. That is EmojiCard's defect thirteen times over, found by widening the coverage leg rather than by looking at thirteen renders.",
+    "EmojiCard": {
+      "prop": "still",
+      "type": "image",
+      "default": "",
+      "poster": "draws its own content since 33c7c37: emoji large and centred, caption inside the card, card sized to content, NO aspect-ratio slot — a 4/5 slot is a hole whatever colour it is painted"
+    },
+    "_none_for": [
+      "CaptionMatch",
+      "LowerThird",
+      "PlainText",
+      "QuoteCard",
+      "TornPaper",
+      "StickyNotes",
+      "PillCluster",
+      "RankedList",
+      "Reticle",
+      "Stamp",
+      "StatCard"
+    ],
+    "_queued_no_clip_poster": {
+      "_state": "RECORDED, NOT FIXED. None of the thirteen is on the menu today (all are STALE_BODY or PASSTHROUGH_SUSPECT), so none is being offered and none has been re-registered. Written down so the silence is not mistaken for absence.",
+      "_why_it_is_harder_than_EmojiCard": "EmojiCard has content of its own — an emoji and a caption — so it can draw itself with no source. A transition has NO content of its own: it is a composite of two video layers, and with neither layer there is nothing of the component left to draw. A real poster for these means inventing furniture (two neutral plates mid-slide for SlideOver, a black ramp for DipToBlack), which is a design decision per component and not a mechanical fix.",
+      "_what_works_today": "Builder 1's preview CLIPS are rendered on zac_blueshirt with a real clip supplied, so the moving preview is correct. It is only the frame-0 poster with default props that reads as an error string.",
+      "components": [
+        "CardSwipe",
+        "DipToBlack",
+        "SlideOver",
+        "ZoomThrough",
+        "SmoothPush",
+        "StepZoom",
+        "SnapReframe",
+        "StagedPush",
+        "DepthPull",
+        "FocusWindow",
+        "LetterboxPush",
+        "ShutterFlashOverlay",
+        "LightLeakOverlay"
+      ]
+    }
   }
 }

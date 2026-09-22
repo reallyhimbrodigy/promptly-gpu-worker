@@ -43,6 +43,24 @@ MUTATIONS = [
      '    "PlainText": "PIN FOR A COMPONENT THAT DOES NOT RAMP OPACITY",',
      "L3 no_stale_opacity_pins",
      lambda s: '"DepthPull": "the haze' in s),
+    # ONE OF THE THIRTEEN REACHES THE MENU WITHOUT A POSTER. The queue is only
+    # safe while none of them is offered; the day one is, L4c must fire on it.
+    # THE OFFERED-CHECK GOES BLIND. Editing the record cannot put a queued
+    # component on the menu — the menu is DERIVED — so the rule is hoisted into
+    # queued_on_menu() and mutated there. Break the intersection and a promoted
+    # component with no poster stops being reported.
+    ("offered_check_goes_blind", "smoke_poster_frame_legible.py",
+     '    return sorted(set(queue or []) & set(menu or []))',
+     '    return sorted(set(queue or []) & set())',
+     "L4d queue_recorded_and_off_menu",
+     lambda s: 'set(queue or []) & set(menu or [])' in s),
+    # THE QUEUE GOES QUIET — emptied, so "no offered component has an unresolved
+    # slot" starts reading as "no component does".
+    ("queue_goes_quiet", "measured/REGISTERED_DEFAULTS.json",
+     '        "CardSwipe",\n        "DipToBlack",\n        "SlideOver",',
+     '        "CardSwipe",',
+     "L4d queue_recorded_and_off_menu",
+     lambda s: '        "CardSwipe",\n        "DipToBlack",' in s),
     # THE FALLBACK DETECTOR GOES BLIND: with the pattern broken it finds no
     # bail-out branches at all, and L1 then passes for the wrong reason.
     ("detector_goes_blind", "smoke_poster_frame_legible.py",

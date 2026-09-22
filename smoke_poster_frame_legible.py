@@ -107,6 +107,20 @@ def fallback_renders_only_a_string(src):
     return out
 
 
+def queued_on_menu(queue, menu):
+    """Which queued no-poster components are being OFFERED. PURE, so it can be
+    DRIVEN with a fixture rather than asserted about.
+
+    The real menu contains none of them today, so a leg that only reads the real
+    menu asserts nothing and cannot be mutation-tested — putting a queued name
+    into the record does not put it on the menu, because the menu is DERIVED.
+    Hoisting the rule out means the smoke can hand it a synthetic menu and watch
+    it answer, which is the only way this leg has teeth before one of the
+    thirteen is genuinely promoted.
+    """
+    return sorted(set(queue or []) & set(menu or []))
+
+
 def main():
     ls = lc.live_set()
     if ls["state"] != lc.MEASURED:
@@ -213,7 +227,67 @@ def main():
             stale.append(n)
     leg("L3 no_stale_opacity_pins", not stale, "stale: %s" % (stale or "none"))
 
-    print("%d/%d legs ok" % (5 - len(FAILS), 5))
+    # L4 EVERY MEDIA SLOT IS ENUMERATED, AND AN UNRESOLVED ONE DRAWS ITSELF.
+    #
+    # THE THIRD KIND OF EMPTY. My copy check cleared EmojiCard with "2 of 2
+    # content properties carry a default" — true, and useless, because it counted
+    # TEXT and NUMBER properties and the empty one is an IMAGE. A text "" renders
+    # nothing and is invisible; an image "" renders a PANEL, and the panel is the
+    # poster. So media slots get their own reader rather than being folded into
+    # the copy check, and L1 must still PASS the component — otherwise the copy
+    # check has quietly become a second media check and the reader it replaced
+    # is gone.
+    media = reg.get("media_slots") or {}
+    slots = {k: v for k, v in media.items() if not k.startswith("_")}
+    leg("L4 media_slots_enumerated", bool(slots),
+        "%d media slot(s) recorded: %s"
+        % (len(slots), ", ".join("%s.%s" % (k, v["prop"]) for k, v in sorted(slots.items()))))
+
+    # L4b A RECORDED SLOT WITH AN EMPTY DEFAULT MUST NAME ITS POSTER. An empty
+    # media slot is not a defect — EmojiCard's is empty by design. What would be
+    # a defect is an empty slot with nothing saying what it draws instead.
+    silent = sorted(k for k, v in slots.items()
+                    if not str(v.get("default", "")).strip()
+                    and not str(v.get("poster", "")).strip())
+    leg("L4b empty_slot_names_its_poster", not silent, "silent: %s" % (silent or "none"))
+
+    # L4c THE ENUMERATION COVERS EVERY OFFERED COMPONENT, and scoping it to the
+    # MENU rather than to `renderable` is a decision with a reason, not a
+    # convenience.
+    #
+    # Widening it to all 27 renderable is what FOUND the queue: the fifteen
+    # non-menu components take `clip` (type video, default "") and thirteen of
+    # them render the literal string "NO CLIP PROP" or "NO CLIP" at frame 0 —
+    # EmojiCard's defect thirteen times over. That is recorded in
+    # REGISTERED_DEFAULTS.media_slots._queued_no_clip_poster with why it is
+    # harder than EmojiCard: a transition has no content of its own, so a poster
+    # for one means inventing furniture per component.
+    #
+    # The leg holds the MENU because the menu is what is OFFERED, and a poster
+    # matters for what can be chosen. L4d keeps the queue from going quiet.
+    named = set(slots) | set(media.get("_none_for") or [])
+    offered = [n for n in (ls.get("menu") or [])
+               if os.path.exists(os.path.join(BODIES, n + ".jsx"))]
+    unchecked = sorted(n for n in offered if n not in named)
+    leg("L4c offered_media_coverage", not unchecked,
+        "%d offered with a body, unchecked for media props: %s"
+        % (len(offered), unchecked or "none"))
+
+    # L4d THE QUEUE IS NAMED AND NON-EMPTY, so "no menu component has an
+    # unresolved media slot" is never read as "no component does". The day one of
+    # the thirteen earns a place on the menu, L4c fires on it.
+    q = (media.get("_queued_no_clip_poster") or {}).get("components") or []
+    on_menu_from_queue = queued_on_menu(q, ls.get("menu"))
+    # AND THE RULE IS DRIVEN, not just read. A synthetic menu containing one
+    # queued name must come back non-empty, or the leg is green because the real
+    # menu happens to be clean rather than because the rule works.
+    driven = queued_on_menu(q, ["PlainText", "SlideOver"]) == ["SlideOver"]
+    leg("L4d queue_recorded_and_off_menu",
+        len(q) >= 13 and not on_menu_from_queue and driven,
+        "%d queued; offered without a poster: %s; rule driven on a fixture: %s"
+        % (len(q), on_menu_from_queue or "none", driven))
+
+    print("%d/%d legs ok" % (9 - len(FAILS), 9))
     if FAILS:
         print("FAILED: %s" % ", ".join(FAILS))
     return 1 if FAILS else 0
