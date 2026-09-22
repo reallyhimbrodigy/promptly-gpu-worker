@@ -55,7 +55,13 @@ _UNSAFE = [
     # too narrow — which is the whole reason L1 tests the combination rather
     # than trusting the order.
     (r"\b(?:makes?|making|made) it (?:look|seem|sound) like\b[^.]{0,60}\b(?:endorsed?|said|testimonial|review|recommend\w*)\b"
-     r"|\b(?:pretend|fake|fabricate|forge)\w*\b[^.]{0,60}\b(?:endorsed?|quote|testimonial|review)\b",
+     r"|\b(?:pretend|fake|fabricate|forge)\w*\b[^.]{0,60}\b(?:endors\w*|quote|testimonial|review)\b"
+     # VERB INFLECTION, CLOSED A SECOND TIME. `endorsed?` matched endorse and
+     # endorsed and missed ENDORSING, so "generate a video of the CEO endorsing
+     # us" fell through UNSAFE into GENERATIVE and came back PRICED — the same
+     # defect L1 caught on `make` vs `makes`, one word further along. That is
+     # twice, which is the argument that closing inflections is not a strategy.
+     r"|\b(?:generate|create|make)\b[^.]{0,40}\b(?:endors\w*|praising|recommend\w*)\b",
      "fabricated endorsement or testimonial"),
     (r"\b(?:deepfake|face ?swap|clone (?:his|her|their|my) (?:face|voice))\b",
      "synthetic likeness of a real person"),

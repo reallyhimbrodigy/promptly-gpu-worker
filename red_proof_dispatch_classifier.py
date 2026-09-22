@@ -64,6 +64,14 @@ MUTATIONS = [
      r'    (r"\b(?:cut|caption|zoom|trim)\w*\b", "text-to-video or text-to-speech"),',
      "L7 ordinary_briefs_are_never_convicted",
      lambda s: 'text[- ]to[- ](?:video|speech)' in s),
+    # A FABRICATION GETS A PRICE AGAIN. The worst class: not a miss, an OFFER.
+    # Removing the generate/create arm sends "generate a video of the CEO
+    # endorsing us" back into GENERATIVE and it comes out quoted at 20 credits.
+    ("fabrication_reaches_a_quote_again", "dispatch_classifier.py",
+     r'     r"|\b(?:generate|create|make)\b[^.]{0,40}\b(?:endors\w*|praising|recommend\w*)\b",',
+     r'     r"|\bZZ_NEVER_MATCHES_ZZ\b",',
+     "L8 fabrication_corpus_catch_rate",
+     lambda s: 'praising|recommend' in s),
 ]
 
 

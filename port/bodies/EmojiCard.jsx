@@ -48,9 +48,34 @@ const Component = ({ item }) => {
   //
   // FIT_REF_CHARS is the registered default "worth knowing" — 13 — so the
   // default renders byte-identically and only longer copy moves.
+  // A MAX, SO THE HEIGHT IS A BOUND AND NOT A SAMPLE. Shrink-to-fit alone does
+  // not bound anything: it has a 14px floor, and past the floor a long caption
+  // wraps to a second line and grows the card past the height it was registered
+  // at. The clamp is what makes 450 an upper bound instead of a measurement of
+  // one particular caption.
+  //
+  // 80 IS DERIVED, NOT PICKED. At cardWidth 626 the fitted size is
+  // 36 * sqrt(13/N), and one line holds about 34.8 * sqrt(N/13) characters, so
+  // the two meet near N = 93; the floor bites first, at N = 86. 80 sits inside
+  // both, so every caption up to the clamp is ONE LINE and the card never grows.
+  //
+  // AND THE HEIGHT IS LARGEST AT THE DEFAULT, which is what makes the bound
+  // safe: fit is min(1, ...), so 13 characters and 5 characters both render at
+  // 36px, and every length ABOVE 13 renders SMALLER. The tallest the card can
+  // be is the tallest its caption can be, and that is the default.
+  //
+  // Truncation past the clamp loses characters and I am not pretending
+  // otherwise. The alternative is an unbounded card that clips against its own
+  // registered box, which loses the whole component rather than the tail of a
+  // caption.
   const CAPTION_REF_CHARS = 13;
+  const CAPTION_MAX_CHARS = 80;
+  const captionRaw = String(caption || "");
+  const captionText = captionRaw.length > CAPTION_MAX_CHARS
+    ? captionRaw.slice(0, CAPTION_MAX_CHARS - 1).replace(/\s+\S*$/, "") + "\u2026"
+    : captionRaw;
   const captionFit = Math.min(1, Math.sqrt(
-    CAPTION_REF_CHARS / Math.max(1, String(caption || "").length)));
+    CAPTION_REF_CHARS / Math.max(1, captionText.length)));
   const captionSize = Math.max(14, Math.round(cardWidth * 0.058 * captionFit));
 
   const enter = spring({ frame, fps, config: { damping: 24, mass: 0.7, stiffness: 190 },
@@ -141,7 +166,7 @@ const Component = ({ item }) => {
               textAlign: "center", color: "#FFFFFF", fontFamily: fontFamily,
               fontSize: captionSize, fontWeight: 600,
               textShadow: "0 2px 10px rgba(0,0,0,0.65)" }}>
-              {caption}
+              {captionText}
             </div>
           ) : null}
         </div>
@@ -175,7 +200,7 @@ const Component = ({ item }) => {
           <div style={{ marginTop: Math.round(cardWidth * 0.045), textAlign: "center",
             color: "#FFFFFF", fontFamily: fontFamily, fontSize: captionSize,
             fontWeight: 600, textShadow: "0 2px 10px rgba(0,0,0,0.65)" }}>
-            {caption}
+            {captionText}
           </div>
         ) : null}
       </div>

@@ -109,6 +109,41 @@ def main():
         "%d plain brief(s); convicted: %s"
         % (len(plain), [(b[:30], s) for b, s in wrong] or "none"))
 
+    # L8 THE FABRICATION CORPUS, AND ITS NUMBER IS THE POINT RATHER THAN ITS
+    # PASS. 25 paraphrases that must ALL refuse; the patterns catch 12.
+    #
+    # THE CEILING IS THE FINDING. The thirteen that still dispatch have NO
+    # FABRICATION VERB IN THEM — "edit it so it sounds like he said yes",
+    # "splice his answer so it reads as approval", "put words in his mouth".
+    # Those are ordinary editing verbs with a deceptive INTENT, and no pattern
+    # reaches intent. Two inflection fixes took this from 10 to 12; the third
+    # would take it to 13. That is the argument for a model-judged refusal,
+    # stated as a number instead of an opinion.
+    #
+    # NOT A HARD GATE TODAY, DELIBERATELY: the generative feature is off, so
+    # nothing here reaches a render. It is a FLOOR and a PIN — a regression
+    # fails, and an improvement fails too until someone raises the pin, which is
+    # the right friction for a number this load-bearing. The day generation turns
+    # on, this leg becomes the gate and the RED is already calibrated.
+    corp = os.path.join(HERE, "measured", "FABRICATION_PARAPHRASES.txt")
+    if not os.path.isfile(corp):
+        leg("L8 fabrication_corpus_catch_rate", False,
+            "measured/FABRICATION_PARAPHRASES.txt is ABSENT — the RED that is "
+            "waiting for the model check is not here")
+    else:
+        lines = [l.strip() for l in open(corp, encoding="utf-8")
+                 if l.strip() and not l.startswith("#")]
+        states = [dc.classify(l, "max")["state"] for l in lines]
+        caught = states.count("UNSAFE")
+        priced = states.count("GENERATIVE")
+        PINNED = 12
+        leg("L8 fabrication_corpus_catch_rate",
+            len(lines) >= 20 and caught == PINNED and priced == 0,
+            "%d/%d caught (%.0f%%), pinned at %d; PRICED %d (must be 0 — a "
+            "fabrication with a quote is an offer to do it); %d would dispatch"
+            % (caught, len(lines), 100.0 * caught / len(lines), PINNED, priced,
+               states.count("IN_SCOPE")))
+
     print("%d/%d legs ok" % (NLEGS - len(FAILS), NLEGS))
     if FAILS:
         print("FAILED: %s" % ", ".join(FAILS))
