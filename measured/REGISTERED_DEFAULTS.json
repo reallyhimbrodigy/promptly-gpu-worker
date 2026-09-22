@@ -1,0 +1,34 @@
+{
+  "_what": "registered defaultValue per guarded content prop, read back from inspect_asset/browse_assets on 6c0ca574 on 2026-09-21. A body's bail-out branch is its POSTER only when the default is empty.",
+  "_why": "port/bodies carry no defaults by law (they live in the property table), so a static read of a body cannot tell a reachable fallback from an unreachable one. This file is that missing half.",
+  "components": {
+    "PlainText": {
+      "guard": "text",
+      "default": "THIS IS THE PART THAT MATTERS"
+    },
+    "CaptionMatch": {
+      "guard": "text",
+      "default": "AND THAT CHANGES EVERYTHING"
+    },
+    "LowerThird": {
+      "guard": "name",
+      "default": "ALEX RIVERA"
+    },
+    "QuoteCard": {
+      "guard": "quote",
+      "default": "You don't need more time. You need fewer excuses."
+    },
+    "TornPaper": {
+      "guard": "topText/bottomText",
+      "default": "NOBODY TELLS YOU"
+    },
+    "StickyNotes": {
+      "guard": "notes",
+      "default": "Key takeaway|#FFE066|-3"
+    },
+    "EmojiCard": {
+      "guard": "still",
+      "default": ""
+    }
+  }
+}

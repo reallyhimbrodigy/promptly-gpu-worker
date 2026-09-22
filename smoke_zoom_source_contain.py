@@ -40,7 +40,12 @@ PINNED_COVER = {
     ("LetterboxPush.jsx", 134): "the inner window LAYER, which is the letterbox itself; the outer plate at 107 is contain",
     ("DeviceMockup.jsx", 83): "the frame is mounted INSIDE a phone bezel — the bezel is the subject",
     ("EvidenceCard.jsx", 86): "cropped to a 16/9 card face; the card is the subject",
-    ("EmojiCard.jsx", 78): "cropped to a 4/5 card face; the card is the subject",
+    # MOVED 78 -> 127 by my own EmojiCard poster fix, which inserted the
+    # no-still branch above it. L4 caught it as a stale pin rather than letting
+    # the pin silently protect a line that had become something else — second
+    # time a line-anchored record has drifted under me today, and the second
+    # time the guard for it paid for itself.
+    ("EmojiCard.jsx", 127): "cropped to a 4/5 card face; the card is the subject",
 }
 
 FAILS = []

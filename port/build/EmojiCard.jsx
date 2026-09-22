@@ -45,7 +45,23 @@ const Component = ({ item }) => {
   const enter = spring({ frame, fps, config: { damping: 24, mass: 0.7, stiffness: 190 },
     durationInFrames: Math.max(2, Math.round(fps * 0.5)) });
   const lift = (1 - enter) * Math.round(cardWidth * 0.08);
-  const fade = Math.min(Math.max(enter * 1.35, 0), 1);
+  // NO OPACITY RAMP. This read `Math.min(Math.max(enter * 1.35, 0), 1)`, and
+  // `enter` is a spring that is 0 on frame 0 — so the whole card, badge and
+  // caption rendered FULLY TRANSPARENT on its first frame. Two things were
+  // wrong with that at once.
+  //
+  // It broke this lane's caption law. The six sibling text components ease
+  // POSITION and never opacity, explicitly because FRAME-1-IS-FINAL for
+  // readable text; EmojiCard carries a caption and was fading it in.
+  //
+  // And it made the component's own POSTER blank. ChatCut renders a motion
+  // graphic's preview frames through the open editor's web renderer
+  // (measured: inspect_asset sourceFrameCount returns a `frames` object whose
+  // status is `unavailable` only because no tab is open), and a preview taken
+  // at frame 0 of a component that is transparent at frame 0 is a black tile.
+  // Their agent would be choosing this one from an empty square.
+  //
+  // The lift below still eases, so the entrance survives as a rise.
   // THE REACTION LANDS SECOND. Delayed by ~0.22s so it reads as a response.
   const pop = spring({ frame: frame - Math.round(fps * 0.22), fps,
     config: { damping: 12, mass: 0.6, stiffness: 240 },
@@ -57,18 +73,51 @@ const Component = ({ item }) => {
     boxSizing: "border-box", padding: Math.round(width * 0.07),
     pointerEvents: "none" };
 
+  // NO STILL IS THE DEFAULT STATE, NOT AN ERROR STATE. `still` is an image
+  // property whose registered default is the empty string, so a placement with
+  // default props takes this branch — which means this branch IS the component's
+  // poster, and it used to be the words "NO STILL" in white on transparent.
+  // An error message is what their agent was being shown as the picture of this
+  // component.
+  //
+  // It now draws the component's own shape: the accent-bordered card, the emoji
+  // badge and the caption, with a neutral panel where the frame will go. That
+  // is a legible picture of what EmojiCard IS, and it needs no source to make.
   if (!still) {
     return (
       <div style={rootStyle}>
-        <div style={{ color: "#FFFFFF", fontSize: 44, fontFamily: "sans-serif" }}>
-          NO STILL
+        <div style={{ width: cardWidth, position: "relative",
+          transform: "translateY(" + lift + "px)" }}>
+          <div style={{ width: "100%", borderRadius: Math.round(cardWidth * 0.05),
+            overflow: "hidden", border: Math.round(cardWidth * 0.012) + "px solid " + accentColor,
+            boxSizing: "border-box", backgroundColor: "#1A1A1F",
+            aspectRatio: "4 / 5", boxShadow: "0 18px 46px rgba(0,0,0,0.45)" }} />
+          {emoji ? (
+            <div style={{ position: "absolute", right: -Math.round(badge * 0.22),
+              top: -Math.round(badge * 0.22), width: badge, height: badge,
+              borderRadius: "50%", backgroundColor: "#FFFFFF",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              transform: "scale(" + badgeScale + ")",
+              boxShadow: "0 10px 26px rgba(0,0,0,0.45)" }}>
+              <span style={{ fontSize: Math.round(badge * 0.58), lineHeight: 1 }}>
+                {emoji}
+              </span>
+            </div>
+          ) : null}
+          {caption ? (
+            <div style={{ marginTop: Math.round(cardWidth * 0.045), textAlign: "center",
+              color: "#FFFFFF", fontFamily: fontFamily, fontSize: captionSize,
+              fontWeight: 600, textShadow: "0 2px 10px rgba(0,0,0,0.65)" }}>
+              {caption}
+            </div>
+          ) : null}
         </div>
       </div>
     );
   }
   return (
     <div style={rootStyle}>
-      <div style={{ width: cardWidth, position: "relative", opacity: fade,
+      <div style={{ width: cardWidth, position: "relative",
         transform: "translateY(" + lift + "px)" }}>
         <div style={{ width: "100%", borderRadius: Math.round(cardWidth * 0.05),
           overflow: "hidden", border: Math.round(cardWidth * 0.012) + "px solid " + accentColor,
