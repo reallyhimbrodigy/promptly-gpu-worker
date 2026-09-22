@@ -201,8 +201,81 @@ def build(verbose=True):
     return {"components": comps, "refused": refused}
 
 
+def component_keys(reg):
+    """Every component name in a registry object, however it is nested.
+
+    Keyed by NAME and not by position: the artifact nests components under
+    several parents and a positional read would call a reordering a loss.
+    """
+    out = set()
+
+    def walk(o, key=None):
+        if isinstance(o, dict):
+            if isinstance(o.get("code"), str) and "const Component" in o["code"]:
+                # THE DICT KEY THAT LED HERE IS THE NAME. The blobs carry
+                # baked/code/divergences/overrides/properties and NO name field,
+                # so my first version fell back to a counter and named the lost
+                # nine "<unnamed:32>".."<unnamed:36>" — a refusal that says
+                # "fewer" without saying which, which is a second puzzle rather
+                # than an answer, and unstable besides: a counter is positional,
+                # so a reordering would rename everything.
+                out.add(str(key) if key is not None else "<no key>")
+                return
+            for k, v in o.items():
+                walk(v, k)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v, key)
+    walk(reg)
+    return out
+
+
+def shrink_guard(new_reg, path):
+    """-> (ok, message). REFUSES a write that LOSES a component.
+
+    WHY THIS EXISTS, measured 2026-09-22: `bake_registry.py --write` took the
+    artifact from 37 blobs to 28. It emits the 28 components it builds and
+    overwrites the file wholesale, and THE NINE CAPTION STYLES IN THE COMMITTED
+    ARTIFACT ARE NOT IN ITS OUTPUT. Running the documented build step destroys
+    nine registered caption styles, silently, inside whatever commit happened to
+    run it.
+
+    A SHRINK GUARD AND NOT AN EQUALITY GUARD, deliberately. A deliberate
+    ADDITION must still write, or the guard blocks every legitimate bake and
+    gets removed within a week. Only a LOSS refuses, and the lost keys are
+    NAMED — a refusal that says "fewer" without saying which is a second puzzle
+    rather than an answer.
+    """
+    import os as _os
+    if not _os.path.exists(path):
+        return True, "no artifact on disk — first write, nothing to lose"
+    try:
+        old_reg = json.load(open(path, encoding="utf-8"))
+    except Exception as e:                                     # noqa: BLE001
+        # UNREADABLE IS NOT EMPTY. Treating a corrupt artifact as zero
+        # components would let the guard wave through the very write that
+        # destroys it.
+        return False, ("the artifact on disk is UNREADABLE (%s). Refusing: an "
+                       "unreadable file is not an empty one, and overwriting it "
+                       "is exactly what cannot be undone." % e)
+    lost = sorted(component_keys(old_reg) - component_keys(new_reg))
+    if lost:
+        return False, ("REFUSING TO WRITE — this bake LOSES %d component(s) that "
+                       "are in the artifact on disk:\n    %s\n  A bake that "
+                       "removes components is how nine caption styles disappear "
+                       "inside a commit about something else. If the removal is "
+                       "deliberate, remove them from the artifact in their own "
+                       "commit and re-run."
+                       % (len(lost), "\n    ".join(lost)))
+    return True, "no component lost"
+
+
 if __name__ == "__main__":
     reg = build()
     if "--write" in sys.argv:
+        ok, why = shrink_guard(reg, OUT)
+        if not ok:
+            print("\n  " + why)
+            sys.exit(1)
         json.dump(reg, open(OUT, "w", encoding="utf-8"), indent=1)
-        print("wrote", OUT)
+        print("wrote", OUT, "-", why)
