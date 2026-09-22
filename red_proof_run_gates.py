@@ -39,7 +39,7 @@ MUTATIONS = [
     ("only_exit_one_counts_as_failure", "run_gates.py",
      "    bad = sorted(n for n, rc in results.items() if rc != 0)",
      "    bad = sorted(n for n, rc in results.items() if rc == 1)",
-     "L3b failure_at_9_fails_the_run",
+     "L3b failure_in_the_middle_fails_the_run",
      lambda s: "if rc != 0" in s),
     # THE COUNT FLOOR GOES, so a runner that executed a SUBSET reports green on
     # it -- the subset-as-total failure, which is how a suite rots down to the

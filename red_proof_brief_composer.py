@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+"""RED proof for smoke_brief_composer.py.
+
+`only_becomes_a_ban` is the defect that already happened, restored: a matcher
+treating `only` as a limit on the BRIEF. Measured on the corpus, four of the
+five `only` sentences limit a CATEGORY inside the brief, so that mutation is a
+terminal fault on a CORRECT run four times out of five.
+"""
+import os
+import re
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SMOKE = os.path.join(HERE, "smoke_brief_composer.py")
+WATCHED = ["brief_composer.py", "smoke_brief_composer.py"]
+
+MUTATIONS = [
+    # THE ONLY-IS-A-BAN DEFECT, restored. Adding `only` to the negation set is
+    # the single most plausible "improvement" anyone would make here.
+    ("only_becomes_a_ban", "brief_composer.py",
+     'NEGATION = r"(?:no|not|don\'t|do not|never|without|skip|avoid|leave out|omit)"',
+     'NEGATION = r"(?:no|not|don\'t|do not|never|without|skip|avoid|leave out|omit|only)"',
+     "L5 category_scoped_only_bans_nothing",
+     lambda s: '|omit)"' in s),
+    # THE CONDITION GUARD GOES, so "use zooms only when they add emphasis" bans
+    # zooms — the family the sentence PERMITS.
+    ("conditional_guard_removed", "brief_composer.py",
+     'CONDITIONAL = re.compile(r"\\bonly (?:when|if|where)\\b", re.I)',
+     'CONDITIONAL = re.compile(r"\\bZZ_NEVER_MATCHES_ZZ\\b", re.I)',
+     "L3 only_when_is_a_condition_not_a_ban",
+     lambda s: 'only (?:when|if|where)' in s),
+    # THE DENSITY GUARD GOES: "do not cut EVERY breath" becomes a family ban,
+    # reversing a brief whose previous line asks for cuts.
+    ("quantified_guard_removed", "brief_composer.py",
+     r'QUANTIFIED = re.compile(r"\b(?:every|all|too many|so many|constant(?:ly)?)\b", re.I)',
+     r'QUANTIFIED = re.compile(r"\bZZ_NEVER_MATCHES_ZZ\b", re.I)',
+     "L4b quantified_guard_is_actually_reached",
+     lambda s: 'too many|so many' in s),
+    # THE BINDING WIDENS from 24 characters to a whole sentence, so a negation
+    # anywhere near a family name suppresses it — co-occurrence read as intent.
+    ("negation_binding_widens", "brief_composer.py",
+     'near = re.search(NEGATION + r"[^.;!?]{0,24}?(?:" + words + r")", s, re.I)',
+     'near = re.search(NEGATION + r"[^.;!?]{0,400}?(?:" + words + r")", s, re.I)',
+     "L4c negation_does_not_reach_across_a_sentence",
+     lambda s: '{0,24}?' in s),
+    # A DEFAULT VANISHES from the list — the population floor is what notices.
+    ("default_vanishes", "brief_composer.py",
+     '    ("zooms",       "zooms",\n     "Zoom on moments of emphasis."),\n', "",
+     "L1 every_default_reaches_the_instruction",
+     lambda s: '"Zoom on moments of emphasis."' in s),
+    # IT STARTS TELLING THEIR AGENT NOT TO ASK.
+    ("forbids_questions", "brief_composer.py",
+     'lines.append("If something in the brief is unclear or you need a decision "\n'
+     '                 "only the user can make, ask — the question is relayed to them.")',
+     'lines.append("Do not ask questions; make the call yourself.")',
+     "L6 never_forbids_questions",
+     lambda s: 'the question is relayed to them' in s),
+    # PRECEDENCE STOPS BEING STATED, so the defaults and the user's words sit
+    # side by side with nothing saying which wins — the robust half removed,
+    # leaving only the matcher I do not trust on its own.
+    ("precedence_dropped", "brief_composer.py",
+     '    lines.append("THE USER\'S BRIEF, which wins wherever it disagrees with anything "\n                 "above:")',
+     '    lines.append("THE USER\'S BRIEF:")',
+     "L7 brief_verbatim_and_precedence_stated",
+     lambda s: 'wins wherever it disagrees' in s),
+    # A SUPPRESSION GOES SILENT: the default is dropped and nothing records why.
+    ("suppression_goes_silent", "brief_composer.py",
+     '        "evidence": {k: e for k, (s, e) in states.items() if e},',
+     '        "evidence": {},',
+     "L8 suppression_carries_its_evidence",
+     lambda s: 'for k, (s, e) in states.items() if e' in s),
+]
+
+
+def run_smoke():
+    p = subprocess.run([sys.executable, SMOKE], capture_output=True, text=True)
+    return p.returncode, (p.stdout or "") + (p.stderr or "")
+
+
+def snapshot(paths):
+    return {q: open(os.path.join(HERE, q), "rb").read() for q in paths}
+
+
+def residue(base):
+    return sorted(q for q, b in base.items()
+                  if open(os.path.join(HERE, q), "rb").read() != b)
+
+
+def main():
+    rc, out = run_smoke()
+    if rc != 0:
+        print("HARNESS FAILURE: unmutated gate is not green (rc=%d)" % rc)
+        print(out[-1200:])
+        return 2
+    print("baseline green.\n")
+    base = snapshot(WATCHED)
+
+    red = 0
+    for name, target, old, new, phrase, pre in MUTATIONS:
+        path = os.path.join(HERE, target)
+        src = open(path, encoding="utf-8").read()
+        n = src.count(old)
+        if n != 1:
+            print("  %-28s HARNESS FAILURE  anchor %dx" % (name, n))
+            continue
+        if pre is not None and not pre(src):
+            print("  %-28s HARNESS FAILURE  VACUOUS precondition" % name)
+            continue
+        mutant = src.replace(old, new, 1)
+        try:
+            compile(mutant, path, "exec")
+        except SyntaxError as e:
+            print("  %-28s HARNESS FAILURE  will not parse (%s)" % (name, e))
+            continue
+        open(path, "w", encoding="utf-8").write(mutant)
+        try:
+            mrc, mout = run_smoke()
+        finally:
+            open(path, "w", encoding="utf-8").write(src)
+        fired = re.search(r"^\s+%s\s+FAIL" % re.escape(phrase), mout, re.M) is not None
+        ok = mrc != 0 and fired
+        print("  %-28s %s  rc=%d phrase=%s" % (name, "RED " if ok else "NOT RED", mrc, fired))
+        if ok:
+            red += 1
+        r = residue(base)
+        if r:
+            print("     RESIDUE after %s: %s" % (name, r))
+            return 2
+
+    ok = bool(MUTATIONS) and red == len(MUTATIONS)
+    print("\n%d/%d RED-proven" % (red, len(MUTATIONS)))
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

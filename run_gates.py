@@ -49,6 +49,7 @@ SMOKES = [
     "smoke_poster_frame_legible",
     "smoke_sfx_loudness_states",
     "smoke_run_gates",
+    "smoke_brief_composer",
 ]
 N_EXPECTED = 2 * len(SMOKES)
 

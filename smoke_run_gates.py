@@ -71,11 +71,19 @@ def main():
 
     # L3b AND A FAILURE ANYWHERE, not only first. A verdict that reads one end
     # of the population would pass L3 and miss the other fifteen.
-    for idx in (len(names) // 2, len(names) - 1):
+    # THE LEG NAMES ARE STABLE, NOT INDEX-DERIVED, and that is a fix not a
+    # style choice. They used to read "L3b failure_at_9_fails_the_run" — the
+    # index computed from the population — so ADDING A GATE renamed the leg and
+    # a red-proof mutation anchored on the old name silently stopped matching.
+    # It reported NOT RED with rc=1: the mutant DID break the code, and the
+    # proof could no longer tell, because the target moved out from under it.
+    # A leg name keyed to an incidental is a stale target waiting to happen.
+    for label, idx in (("in_the_middle", len(names) // 2),
+                       ("at_the_end", len(names) - 1)):
         d = dict(clean)
         d[names[idx]] = 2
         rci, si = rg.verdict(d)
-        leg("L3b failure_at_%d_fails_the_run" % idx,
+        leg("L3b failure_%s_fails_the_run" % label,
             rci != 0 and names[idx] in si, "rc=%d %r" % (rci, si))
 
     # L4 A SHORT POPULATION IS A HARNESS FAILURE, NOT A PASS. A runner that
