@@ -40,7 +40,18 @@ const Component = ({ item }) => {
 
   const cardWidth = Math.round(width * widthFraction);
   const badge = Math.round(cardWidth * 0.26);
-  const captionSize = Math.round(cardWidth * 0.058);
+  // FIT A LONGER CAPTION BY SHRINKING, NEVER BY GROWING — the same rule the
+  // three text wrappers carry, and EmojiCard needs it for the same reason they
+  // do: its registered box is DECLARED WIDTH x HEIGHT AT DEFAULT CONTENT, so a
+  // caption that wraps to a second line grows the card past the box it was
+  // registered at and gets clipped.
+  //
+  // FIT_REF_CHARS is the registered default "worth knowing" — 13 — so the
+  // default renders byte-identically and only longer copy moves.
+  const CAPTION_REF_CHARS = 13;
+  const captionFit = Math.min(1, Math.sqrt(
+    CAPTION_REF_CHARS / Math.max(1, String(caption || "").length)));
+  const captionSize = Math.max(14, Math.round(cardWidth * 0.058 * captionFit));
 
   const enter = spring({ frame, fps, config: { damping: 24, mass: 0.7, stiffness: 190 },
     durationInFrames: Math.max(2, Math.round(fps * 0.5)) });
