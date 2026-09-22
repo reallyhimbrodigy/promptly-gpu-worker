@@ -52,6 +52,7 @@ SMOKES = [
     "smoke_brief_composer",
     "smoke_no_use_before_define",
     "smoke_dispatch_classifier",
+    "smoke_what_landed",
 ]
 N_EXPECTED = 2 * len(SMOKES)
 

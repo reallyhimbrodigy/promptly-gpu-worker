@@ -15,6 +15,27 @@ import re
 import subprocess
 import sys
 
+# A MUTATED .py RE-RUN IN A SUBPROCESS CAN BE SERVED A STALE .pyc, AND THE
+# MUTANT THEN REPORTS THE PREVIOUS MUTATION'S BEHAVIOUR.
+#
+# Python invalidates its bytecode cache on (mtime, size). A red proof writes a
+# mutant, runs it, restores, writes the next — all inside one mtime second — so
+# a size collision between two mutants serves the earlier one's .pyc to the
+# later one's run. MEASURED HERE: red_proof_what_landed reported 6/7 with the
+# cache live and 7/7 with PYTHONDONTWRITEBYTECODE=1, and the NOT RED mutation
+# was failing a leg belonging to the PRECEDING mutation.
+#
+# That is a false NOT RED — a mutation that does bite, reported as one that
+# does not — and the same mechanism can produce a false RED, which is worse.
+# The guard costs nothing: the child never writes bytecode, so there is nothing
+# stale to serve.
+def _child_env():
+    import os as _os
+    e = dict(_os.environ)
+    e["PYTHONDONTWRITEBYTECODE"] = "1"
+    return e
+
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 SMOKE = os.path.join(HERE, "smoke_transition_covers_canvas.py")
 
@@ -45,7 +66,7 @@ MUTATIONS = [
 
 
 def run_smoke():
-    p = subprocess.run([sys.executable, SMOKE], capture_output=True, text=True)
+    p = subprocess.run([sys.executable, SMOKE], capture_output=True, text=True, env=_child_env())
     return p.returncode, (p.stdout or "") + (p.stderr or "")
 
 
