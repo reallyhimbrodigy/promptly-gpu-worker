@@ -85,14 +85,20 @@ MUTATIONS = [
      '\n  "CaptionMatch",', '',
      "L6 registration_coverage_is_disclosed",
      lambda s: '"CaptionMatch"' in s),
-    # THE BODIES/BUILD WATCH GOES BLIND by losing its population — the floor is
-    # `bool(shared)`, and an empty family set makes the leg assert nothing while
-    # still printing a tidy line. Third time this class has bitten in this file.
-    ("build_watch_loses_its_population", "smoke_poster_frame_legible.py",
-     'copied = set(fam.get("text overlay") or []) | set(fam.get("frame composition") or [])',
-     'copied = set()',
-     "L7 build_matches_bodies",
-     lambda s: 'fam.get("text overlay")' in s),
+    # THE DECLARATION IS WITHDRAWN, so the real overlap becomes undeclared and
+    # the leg must name it.
+    #
+    # THE OBVIOUS MUTATION HERE IS VACUOUS AND I WROTE IT FIRST: widening
+    # KNOWN_TWO_HOME to accept everything leaves the leg passing, because
+    # nothing is undeclared TODAY and a wider allow-list has nothing extra to
+    # admit. It changed the file and not the verdict. Narrowing bites, because
+    # StickyNotes is really in both sets — the mutation has to make the
+    # population violate the rule, not make the rule looser than the population.
+    ("two_home_declaration_withdrawn", "smoke_poster_frame_legible.py",
+     '    KNOWN_TWO_HOME = {"StickyNotes"}',
+     '    KNOWN_TWO_HOME = set()',
+     "L7b two_registration_homes_are_declared",
+     lambda s: 'StickyNotes' in s),
 ]
 
 

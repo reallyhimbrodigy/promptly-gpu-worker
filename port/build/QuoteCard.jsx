@@ -37,6 +37,20 @@ const Component = ({ item }) => {
   const accent = props.accentColor;
   const textColor = props.textColor;
   // THE REFERENCE SCALE, the same ladder the component sheet already uses.
+  // HOISTED ABOVE `nominalSize` BECAUSE THE FIT LINE BELOW READS IT.
+  // `const` has a temporal dead zone, so a reference above the
+  // declaration is a ReferenceError — ChatCut's validator catches it
+  // statically and REFUSES the whole component: 'Undefined identifier
+  // "quote". Declare it locally, read it from props, ...'
+  //
+  // It got that way because removing the placeholder branch deleted the
+  // only thing standing between the use and the declaration. And the
+  // declaration moves UP rather than the fit block moving DOWN: `pad`
+  // and the flex `gap` both read fontSize above here, so lowering it
+  // trades one dead-zone error for two. I made exactly that trade on
+  // the first attempt and the head-runner caught it.
+  const quote = String(props.quote);
+
   const nominalSize = size === "xlarge" ? 168 : size === "large" ? 128 : size === "small" ? 72 : 96;
   // FIT LONGER COPY BY SHRINKING, NEVER BY GROWING (Zac 2026-09-22).
   //
@@ -82,7 +96,6 @@ const Component = ({ item }) => {
   // FRAME-1-IS-FINAL for readable text, so the words are legible on frame one.
   const t = Math.min(Math.max(frame / Math.max(1, Math.round(0.28 * fps)), 0), 1);
   const ease = 1 - Math.pow(1 - t, 3);
-  const quote = String(props.quote);
   const attribution = String(props.attribution);
   const rise = (1 - ease) * 40;
   if (!quote) {
