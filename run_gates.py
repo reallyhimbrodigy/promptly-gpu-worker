@@ -55,6 +55,7 @@ SMOKES = [
     "smoke_what_landed",
     "smoke_bake_guard",
     "smoke_no_mutating_import",
+    "smoke_menu_lines",
 ]
 N_EXPECTED = 2 * len(SMOKES)
 

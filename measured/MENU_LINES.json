@@ -1,0 +1,43 @@
+{
+ "_rule": "<Name> — <what it is> for <when to use it>. Plain words, no jargon, <= 90 characters, no commas.",
+ "_why": "The line IS the name, because asset.name is the only per-asset free text a motion graphic has and the only text at all an audio asset has. One definition; if a description field turns out to be read, the same bytes go there.",
+ "_separator_note": "The twelve components and seven caption styles use an EM DASH. The thirteen sounds already shipped with a HYPHEN in their filenames. Both parse; changing the sounds means thirteen re-uploads. Flagged for Zac rather than normalised silently.",
+ "components": [
+  "PlainText — a bold line over the picture for one claim you want read",
+  "CaptionMatch — a line styled like the captions for a beat that should read as spoken",
+  "LowerThird — a name above a role for introducing the person on screen",
+  "QuoteCard — a serif quote with a name under it for a line worth quoting",
+  "TornPaper — two slammed strips of text for a two-beat punchline",
+  "StickyNotes — three handwritten notes for three short takeaways",
+  "EmojiCard — a big emoji with a caption under it for a reaction beat",
+  "StatCard — a big number that counts up for a figure worth landing",
+  "Stamp — a red distressed stamp struck across the frame for a verdict",
+  "PillCluster — a row of small labelled pills for a set of attributes",
+  "RankedList — numbered rows with time badges for steps or a ranking",
+  "Reticle — green targeting brackets with a scan line for pointing at something"
+ ],
+ "caption_styles": [
+  "CleanCut — plain white words for when the words should not draw attention",
+  "Cove — words in a soft rounded box for keeping text readable over a busy shot",
+  "Gadzhi — one keyword lit in colour for making the key word land",
+  "Lumen — a bright band behind the line for a loud high-energy beat",
+  "Prime — two stacked lines for when a sentence needs room to breathe",
+  "Pulse — the whole line fades in for a calm even delivery",
+  "TwoTone — every word outlined in a second colour for a punchy look"
+ ],
+ "sounds": [
+  "boom - deep low impact for a heavy landing",
+  "punchsfx - sharp hit for a hard word",
+  "popsfx - short pop for a graphic appearing",
+  "camera-flash - short bright shutter click for a snap or a cut",
+  "swoosh-sound-effects - whoosh for a move",
+  "woosh-professional - cleaner whoosh for a polished move",
+  "transition-sfx - whoosh for a scene change",
+  "iphoneding - notification chime for a message beat",
+  "money-ching - cash register for a money figure",
+  "mouse-click-sound - one click for a UI action",
+  "shockingsfx - stinger for a surprise",
+  "wompwomp - sad trombone for a failure beat",
+  "rizz - rising flourish for a flirty or smug beat"
+ ]
+}
