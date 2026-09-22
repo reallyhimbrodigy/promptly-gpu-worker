@@ -469,7 +469,29 @@ var MotionBlurWrap = ({
 var LABEL_RATIO = 0.14;
 var AFFIX_RATIO = 0.55;
 var ACCENT_HEIGHT_RATIO = 0.045;
-var NUMBER_MIN = 210;
+// 150, WAS 210. THE FLOOR IS THE BOUND AND IT BIT ONE DIGIT PAST THE DEFAULT.
+//
+// numberSize = width * FULL_BLEED_FRAC / totalEm, so numberSize * totalEm is
+// constant and the row is EXACTLY width-bounded — until Math.max(NUMBER_MIN, ..)
+// stops the shrink, after which the row grows and the card runs off the frame.
+//
+// FULL_BLEED_FRAC is 1, so the target IS the full 1080 with no margin, and the
+// baked default "$20,000,000" computes 223.4 against a floor of 210. THIRTEEN
+// PIXELS OF HEADROOM on a component whose entire job is money figures:
+//
+//    8 digits   20,000,000        223.4   1080  fits
+//    9 digits   200,000,000       210.0   1120  OVERFLOWS by 40
+//   10 digits   2,000,000,000     210.0   1276  OVERFLOWS by 196
+//
+// At 150 the shrink continues to twelve digits — 200,000,000,000 lands at
+// 152.7 and exactly 1080 — and the DEFAULT IS UNCHANGED, because 223.4 is above
+// both floors. Nothing that renders today renders differently.
+//
+// Builder 1 found this by halving the declared property and reading the box; he
+// had tested `label` first, got zero delta, and concluded StatCard was bounded.
+// It was `value` — the property he had not varied — and the card is sized by the
+// number row. The bound is now 12 digits and that is stated rather than implied.
+var NUMBER_MIN = 150;
 var NUMBER_MAX = 470;
 var FULL_BLEED_FRAC = 1;
 var easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
