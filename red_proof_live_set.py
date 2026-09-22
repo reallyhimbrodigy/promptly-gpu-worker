@@ -89,6 +89,26 @@ MUTATIONS = [
     # went empty when today's looking gave every in-scope FILE_ONLY row a real
     # verdict, so the mutation changed bytes and could not change a result —
     # vacuous, and correct to pass. Removed rather than left counting.
+    # THE BODIES GO UNREADABLE — the container case Builder 1 actually hit.
+    # Every sha reads None, every recorded still mismatches, and before the fix
+    # `menu` came back [] with state MEASURED beside 27 renderable. The leg must
+    # see a STATE, not a clean zero.
+    # RE-AIMED. This first mutated the bodies PATH and named L17, and came back
+    # rc=1 phrase=False: L17 asserts that a STATE is reported, and the fix
+    # reports ABSENT correctly even with the path broken — so the mutation
+    # proved the fix worked rather than proving the leg guards it. The property
+    # that needs guarding is the None, and L19 drives it in process.
+    ("absent_returns_an_empty_menu_again", "lane_contract.py",
+     '        draws, menu, awaiting = None, None, None',
+     '        draws, menu, awaiting = draws, [], []',
+     "L19 unreadable_bodies_return_None_not_empty",
+     lambda s: 'draws, menu, awaiting = None, None, None' in s),
+    # THE PHOTOGRAPHER GETS GATED ON THE MENU AGAIN — the deadlock restored.
+    ("to_photograph_becomes_the_menu", "lane_contract.py",
+     '    to_photograph = sorted(renderable)',
+     '    to_photograph = sorted(n for n in renderable if draws.get(n) == "DRAWS")',
+     "L18 stale_body_is_photographable",
+     lambda s: 'to_photograph = sorted(renderable)' in s),
     # L13: BYTES_ONLY collapses into DRAWS — a file that got bigger promoted
     # into a picture somebody looked at. This is the exact inference Builder 1
     # caught himself making, written as code.

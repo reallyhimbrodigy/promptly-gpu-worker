@@ -202,12 +202,45 @@ def live_set(library="library_73.json"):
     # that drew the RIGHT thing from one that drew the wrong thing at the right
     # size. Calling it a pixel diff is how it got trusted as a verdict.
     catalogue = _read("catalogue_stills.json") or {}
+
+    # ── IS THE INSTRUMENT EVEN READABLE? ───────────────────────────────────
+    # `_body_sha` reads port/bodies BESIDE THIS MODULE. In a container where the
+    # bodies are deliberately not in the image it returns None for every
+    # component — so every recorded sha mismatches, every still reads
+    # STALE_BODY, and the menu comes back as an EMPTY LIST while state says
+    # MEASURED. Builder 1 hit exactly that: `0 menu components` beside
+    # `27 renderable`, state MEASURED, and his harness then announced "the spec
+    # and the menu have drifted" — a confident diagnosis of the wrong thing,
+    # about a population that was empty. Nothing had drifted.
+    #
+    # That is this session's most expensive shape, in my own contract: a failed
+    # measurement and a clean result rendering identically once you are only
+    # reading the number. So the reading gets a STATE, and where the state is
+    # ABSENT the menu is None rather than [] — a caller can test None, and
+    # cannot mistake it for "nothing qualified".
+    _present = [n for n in renderable if _body_sha(n) is not None]
+    _bodies_expected = len(renderable)
+    if not _bodies_expected:
+        draws_state = MEASURED
+    elif not _present:
+        draws_state = ABSENT
+    elif len(_present) < _bodies_expected:
+        draws_state = "PARTIAL"
+    else:
+        draws_state = MEASURED
+
     draws = {}
     for name in comps:
         declared = (comps[name] or {}).get("draws")
         row = stills.get(name) or {}
         if declared in ("BLANK", "DISPUTED", "UNKNOWN"):
             draws[name] = declared
+        elif row.get("body_sha256_16") and _body_sha(name) is None:
+            # ABSENT IS NOT CHANGED. A body that cannot be read says nothing
+            # about whether the code moved, and calling that STALE_BODY invents
+            # a finding — it reads as "somebody edited this" when the truth is
+            # "this tree has no bodies in it".
+            draws[name] = "BODY_UNREADABLE"
         elif (row.get("body_sha256_16")
               and row["body_sha256_16"] != _body_sha(name)):
             # EVERY VERDICT FROM LOOKING IS ABOUT THE BODY THAT DREW THE FRAME,
@@ -240,20 +273,56 @@ def live_set(library="library_73.json"):
     # menu exists is that the two were being treated as one.
     menu = sorted(n for n in renderable if draws.get(n) == "DRAWS")
     awaiting = sorted(n for n in renderable if draws.get(n) != "DRAWS")
+
+    # ── WHAT A PHOTOGRAPHING HARNESS MUST READ, AND WHY IT IS NOT `menu` ────
+    # THE MENU GATES THE PHOTOGRAPHER ON HAVING PHOTOGRAPHED (Builder 1,
+    # 2026-09-21, found by building against this). `menu` is renderable AND
+    # frame-proven, and a frame-proof is exactly what an inventory build
+    # PRODUCES. So a component whose body is re-authored leaves the menu on the
+    # currency rule — correctly — and if the photographer reads `menu` it is
+    # then never allowed to shoot it. It can never come back.
+    #
+    # It happened inside an hour. My EmojiCard poster fix moved the body sha,
+    # the still went STALE_BODY, the menu fell 12 -> 11, and EmojiCard was
+    # excluded from the one run that would have re-proven it.
+    #
+    # `to_photograph` is the answer and it is `renderable`, deliberately not
+    # `awaiting_picture`: re-shooting a component that is already proven costs
+    # one clip, and refusing to shoot one that is not proven is a deadlock. The
+    # asymmetry decides it.
+    to_photograph = sorted(renderable)
+
+    if draws_state == ABSENT:
+        # None, never []. A caller can test None; [] reads as "nothing
+        # qualified", which is the lie this whole block exists to stop.
+        draws, menu, awaiting = None, None, None
+
     return {"state": MEASURED,
             "components": sorted(comps), "n": len(comps),
             "renderable": sorted(renderable), "n_renderable": len(renderable),
             "no_picture": no_picture, "n_no_picture": len(no_picture),
             "draws": draws,
-            "menu": menu, "n_menu": len(menu),
-            "awaiting_picture": awaiting, "n_awaiting_picture": len(awaiting),
+            "draws_state": draws_state,
+            "bodies_readable": "%d/%d" % (len(_present), _bodies_expected),
+            "menu": menu, "n_menu": (None if menu is None else len(menu)),
+            "awaiting_picture": awaiting,
+            "n_awaiting_picture": (None if awaiting is None else len(awaiting)),
+            "to_photograph": to_photograph, "n_to_photograph": len(to_photograph),
             "by_family": {k: sorted(v) for k, v in sorted(by_family.items())},
             "cut_users_30d": scope.get("_cut_users_30d"),
             "source": scope.get("_source"),
-            "why": "%d component(s) in %d famil(ies), %d placement(s); %d renderable "
-                   "(%d frame-proven ON THE MENU, %d awaiting a picture), "
-                   "%d with no picture (%d sound, %d caption style)"
-                   % (len(comps), len(by_family), placements, len(renderable),
-                      len(menu), len(awaiting), len(no_picture),
-                      len(by_family.get("sfx") or []),
-                      len(by_family.get("caption style") or []))}
+            "why": ("%d component(s) in %d famil(ies), %d placement(s); %d renderable; "
+                    "DRAWS READING IS %s (%d/%d bodies readable) so menu is None — "
+                    "an unreadable instrument does not report an empty menu"
+                    % (len(comps), len(by_family), placements, len(renderable),
+                       draws_state, len(_present), _bodies_expected))
+                   if draws_state == ABSENT else
+                   ("%d component(s) in %d famil(ies), %d placement(s); %d renderable "
+                    "(%d frame-proven ON THE MENU, %d awaiting a picture), "
+                    "%d with no picture (%d sound, %d caption style); "
+                    "draws reading %s, %d/%d bodies readable"
+                    % (len(comps), len(by_family), placements, len(renderable),
+                       len(menu), len(awaiting), len(no_picture),
+                       len(by_family.get("sfx") or []),
+                       len(by_family.get("caption style") or []),
+                       draws_state, len(_present), _bodies_expected))}

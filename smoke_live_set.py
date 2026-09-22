@@ -204,7 +204,55 @@ def main():
     leg("L16 staleness_is_reachable", len(derived_stale) >= 1,
         "%d component(s) DERIVED STALE_BODY %s" % (len(derived_stale), derived_stale or ""))
 
-    print("%d/%d legs ok" % (16 - len(FAILS), 16))
+    # L17 THE DRAWS READING CARRIES A STATE, not just a number.
+    # An unreadable instrument and a clean result must not render identically.
+    leg("L17 draws_reading_has_a_state",
+        r.get("draws_state") in (lc.MEASURED, lc.ABSENT, "PARTIAL")
+        and "/" in str(r.get("bodies_readable")),
+        "draws_state=%s bodies_readable=%s" % (r.get("draws_state"), r.get("bodies_readable")))
+
+    # L18 THE PHOTOGRAPHER IS NOT GATED ON HAVING PHOTOGRAPHED.
+    # `menu` is renderable AND frame-proven, and a frame-proof is what a
+    # photographing run PRODUCES — so a harness that reads `menu` can never
+    # shoot the component that most needs shooting. `to_photograph` is
+    # `renderable`, and a STALE_BODY component must be IN it while being OFF
+    # the menu. That pair is the whole fix and this leg pins both halves.
+    tp = set(r.get("to_photograph") or [])
+    stale = sorted(n for n in (r.get("renderable") or []) if dr.get(n) == "STALE_BODY")
+    leg("L18 stale_body_is_photographable",
+        tp == set(r.get("renderable") or []) and bool(stale) and set(stale) <= tp
+        and not (set(stale) & menu),
+        "%d to_photograph == %d renderable; %d STALE_BODY, all shootable, none on menu"
+        % (len(tp), len(r.get("renderable") or []), len(stale)))
+
+    # L19 THE ABSENT BRANCH IS DRIVEN, not asserted about.
+    #
+    # The real tree always has bodies, so the container case cannot be reached
+    # by reading it — and a leg that merely checks "a state is reported" passes
+    # under the very mutation that would break the branch, which is what
+    # happened on the first attempt. So this CALLS live_set with `_body_sha`
+    # forced to None: the container, in process.
+    #
+    # The property: an unreadable instrument returns None, never []. A caller
+    # can test None; [] reads as "nothing qualified", and that is the lie the
+    # whole branch exists to stop.
+    _real = lc._body_sha
+    try:
+        lc._body_sha = lambda _name: None
+        a = lc.live_set()
+    finally:
+        lc._body_sha = _real
+    leg("L19 unreadable_bodies_return_None_not_empty",
+        a.get("draws_state") == lc.ABSENT
+        and a.get("menu") is None and a.get("n_menu") is None
+        and a.get("awaiting_picture") is None and a.get("draws") is None
+        and a.get("n_renderable") == 27
+        and a.get("to_photograph") and len(a["to_photograph"]) == 27,
+        "state=%s menu=%r n_menu=%r renderable=%s to_photograph=%s"
+        % (a.get("draws_state"), a.get("menu"), a.get("n_menu"),
+           a.get("n_renderable"), len(a.get("to_photograph") or [])))
+
+    print("%d/%d legs ok" % (19 - len(FAILS), 19))
     if FAILS:
         print("FAILED: %s" % ", ".join(FAILS))
     return 1 if FAILS else 0
