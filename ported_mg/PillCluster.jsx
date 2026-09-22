@@ -406,7 +406,15 @@ var PillCluster = ({
   // Corpus law 1 (pass #7b): panel measured letterforms at ~2.5% frame height
   // vs the corpus's 5-6% — the cluster read as UI, not a graphic beat.
   // Outermost pills may crop at the frame edges (edge-crop is corpus-legal).
-  width = 1160,
+  // 1000, NOT 1160. THE DECLARED WIDTH EXCEEDED THE CANVAS BY 80px AND COULD
+  // NEVER BE REALISED — every PillCluster ever rendered has been clipped by the
+  // frame. My measured 999 was not "default content not filling the container";
+  // it was the container CUT OFF at 1080 minus the root's padding, and I read a
+  // clipped box as a content box. Builder 1 read it the same way.
+  // 1000 fits 1080 with 40px of margin either side, so the declared width is a
+  // number the component can actually draw, and the measured box can finally
+  // mean what it says.
+  width = 1000,
   fontSize = 78,
   textColor = "#FFFFFF",
   textShadow = DEFAULT_TEXT_SHADOW,

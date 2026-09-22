@@ -65,7 +65,21 @@ const Component = ({ item }) => {
     padding: Math.round(fontSize * 0.22) + "px " + Math.round(fontSize * 0.42) + "px",
     maxWidth: "94%", whiteSpace: "normal", overflowWrap: "break-word", textAlign: "center" };
   if (!topText && !bottomText) {
-    return (<div style={rootStyle}><div style={{ color: accent, fontSize: 40, fontFamily: "sans-serif" }}>NO TEXT</div></div>);
+    // RENDERS NOTHING, NOT A PLACEHOLDER (Zac 2026-09-22). This returned the
+    // words "NO TEXT" — an error message drawn on the user's video, which is the
+    // NO STILL family: a degraded fallback that ships the component's internal
+    // state as content. Six of the twelve bodies carried one; EmojiCard was
+    // only the one that got CAUGHT, because its trigger property defaults to
+    // empty and so the default placement hit it.
+    //
+    // An empty root, not `return null`: the ChatCut contract wants a plain div
+    // root, and an empty div renders nothing while still satisfying it.
+    //
+    // The absence is not silent — the delivery read-back flags a text component
+    // placed with empty content. That is the right place for it: the editor
+    // should be told, on OUR surface, rather than the viewer being shown a
+    // string on THEIRS.
+    return <div style={rootStyle} />;
   }
   return (
     <div style={rootStyle}>

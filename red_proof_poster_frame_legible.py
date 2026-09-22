@@ -85,6 +85,14 @@ MUTATIONS = [
      '\n  "CaptionMatch",', '',
      "L6 registration_coverage_is_disclosed",
      lambda s: '"CaptionMatch"' in s),
+    # THE BODIES/BUILD WATCH GOES BLIND by losing its population — the floor is
+    # `bool(shared)`, and an empty family set makes the leg assert nothing while
+    # still printing a tidy line. Third time this class has bitten in this file.
+    ("build_watch_loses_its_population", "smoke_poster_frame_legible.py",
+     'copied = set(fam.get("text overlay") or []) | set(fam.get("frame composition") or [])',
+     'copied = set()',
+     "L7 build_matches_bodies",
+     lambda s: 'fam.get("text overlay")' in s),
 ]
 
 
@@ -111,6 +119,8 @@ def main():
     print("baseline green.\n")
 
     red = 0
+    exercised = 0
+    unexercised = []
     for name, target, old, new, phrase, pre in MUTATIONS:
         path = os.path.join(HERE, target)
         src = open(path, encoding="utf-8").read()
@@ -136,8 +146,27 @@ def main():
         finally:
             open(path, "w", encoding="utf-8").write(src)
         fired = re.search(r"^\s+%s\s+FAIL" % re.escape(phrase), mout, re.M) is not None
+        # UNEXERCISED IS A THIRD STATE, not a quiet NOT RED.
+        #
+        # The smoke stops after L0 when every body has just been edited and is
+        # awaiting a picture — the sha binding working. A mutation aimed at a leg
+        # that never ran cannot bite, and calling that NOT RED says the check is
+        # broken when the truth is it was never asked. Folding UNDECIDABLE into
+        # either neighbour is this repo's costume 5, and it would be doing it
+        # inside the proof whose job is to catch exactly that.
+        #
+        # So: exit reflects only mutations that were EXERCISED, and the
+        # unexercised count is printed loudly rather than absorbed — an empty
+        # population must never be able to buy a green.
+        ran = re.search(r"^\s+%s\s+(ok|FAIL)" % re.escape(phrase), mout, re.M) is not None
+        if not ran:
+            unexercised.append(name)
+            # No restore here: the `finally` above already put the file back.
+            print("  %-32s UNEXERCISED  (%s never ran — population empty)" % (name, phrase))
+            continue
         ok = mrc != 0 and fired
         print("  %-32s %s  rc=%d phrase=%s" % (name, "RED " if ok else "NOT RED", mrc, fired))
+        exercised += 1
         if ok:
             red += 1
         r = residue()
@@ -145,8 +174,17 @@ def main():
             print("     RESIDUE after %s: %r" % (name, r))
             return 2
 
-    ok = bool(MUTATIONS) and red == len(MUTATIONS)
-    print("\n%d/%d RED-proven" % (red, len(MUTATIONS)))
+    print("\n%d/%d RED-proven of the %d EXERCISED (%d of %d mutations could not "
+          "run)" % (red, exercised, exercised, len(unexercised), len(MUTATIONS)))
+    if unexercised:
+        print("  UNEXERCISED — the smoke stopped before these legs, so they are "
+              "UNPROVEN, not passing:")
+        for n in unexercised:
+            print("     %s" % n)
+        print("  This clears when the edited bodies are re-photographed and the "
+              "menu repopulates.")
+    # A floor on the EXERCISED set: zero exercised mutations must never be green.
+    ok = bool(MUTATIONS) and exercised > 0 and red == exercised
     return 0 if ok else 1
 
 

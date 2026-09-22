@@ -110,9 +110,18 @@ const Component = ({ item }) => {
           padding: Math.round(cardWidth * 0.06),
           display: "flex", flexDirection: "column", alignItems: "center",
           boxShadow: "0 18px 46px rgba(0,0,0,0.45)" }}>
+          {/* NO SCALE ON THE SOLO EMOJI. badgeScale is the BADGE's delayed pop
+              — spring(frame - 0.22s), which is 0 at frame 0 — and on the badge
+              that is right, because a reaction pinned to a still should arrive
+              after the thing it reacts to. Here the emoji IS the subject, and
+              scaling the subject from zero means the poster frame of this
+              component is a card with a caption and NOTHING IN IT.
+              FRAME-1-IS-FINAL: the card's translateY carries the entrance;
+              readable content does not animate in. Same rule the caption law
+              states, and the same defect I fixed in the fade — arrived at
+              twice from two directions in one body. */}
           {emoji ? (
-            <span style={{ fontSize: soloEmoji, lineHeight: 1,
-              transform: "scale(" + badgeScale + ")" }}>
+            <span style={{ fontSize: soloEmoji, lineHeight: 1 }}>
               {emoji}
             </span>
           ) : null}

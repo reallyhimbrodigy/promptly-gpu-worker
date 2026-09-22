@@ -37,7 +37,33 @@ const Component = ({ item }) => {
   const accent = props.accentColor;
   const textColor = props.textColor;
   // THE REFERENCE SCALE, the same ladder the component sheet already uses.
-  const fontSize = size === "xlarge" ? 168 : size === "large" ? 128 : size === "small" ? 72 : 96;
+  const nominalSize = size === "xlarge" ? 168 : size === "large" ? 128 : size === "small" ? 72 : 96;
+  // FIT LONGER COPY BY SHRINKING, NEVER BY GROWING (Zac 2026-09-22).
+  //
+  // The registered box for this component is 1080 x THE HEIGHT IT DRAWS AT
+  // DEFAULT CONTENT. That makes the default string the definition of capacity:
+  // anything longer must fit inside the same box, so the type gets smaller
+  // rather than the box getting taller.
+  //
+  // WHY sqrt AND NOT A LINEAR FACTOR. At a fixed width, characters-per-line
+  // scales as 1/fontSize and line count as chars*fontSize/width, so
+  // height = lines * fontSize is proportional to chars * fontSize^2. Holding
+  // height constant therefore needs fontSize proportional to 1/sqrt(chars).
+  // A linear factor over-shrinks hard and would make a 2x string half-size
+  // when it only needs 1/1.41.
+  //
+  // FIT_REF_CHARS IS THE REGISTERED DEFAULT'S LENGTH — "You don't need more time. You need fewer excuses." — so the default
+  // content renders byte-identically to today (fit clamps to 1) and only
+  // longer copy moves. If the registered default changes, this constant is
+  // stale and the box it was measured for is wrong; a leg asserts they agree.
+  //
+  // THE FLOOR IS A REAL LIMIT, STATED: below 24px the box CAN be exceeded.
+  // That needs 784 characters at this nominal size, which no plausible copy
+  // reaches — but it is a bound, not an impossibility, and the per-component
+  // wrap leg is what would catch it.
+  const FIT_REF_CHARS = 49;
+  const fit = Math.min(1, Math.sqrt(FIT_REF_CHARS / Math.max(1, String(quote || "").length)));
+  const fontSize = Math.max(24, Math.round(nominalSize * fit));
   const justify = position === "top" ? "flex-start" : position === "bottom" ? "flex-end" : "center";
   const pad = Math.round(fontSize * 0.9);
   // THE FACE IS A font-TYPED PROPERTY, NOT A CSS STRING. Measured 2026-09-19:
@@ -60,7 +86,21 @@ const Component = ({ item }) => {
   const attribution = String(props.attribution);
   const rise = (1 - ease) * 40;
   if (!quote) {
-    return (<div style={rootStyle}><div style={{ color: accent, fontSize: 40, fontFamily: "sans-serif" }}>NO QUOTE</div></div>);
+    // RENDERS NOTHING, NOT A PLACEHOLDER (Zac 2026-09-22). This returned the
+    // words "NO QUOTE" — an error message drawn on the user's video, which is the
+    // NO STILL family: a degraded fallback that ships the component's internal
+    // state as content. Six of the twelve bodies carried one; EmojiCard was
+    // only the one that got CAUGHT, because its trigger property defaults to
+    // empty and so the default placement hit it.
+    //
+    // An empty root, not `return null`: the ChatCut contract wants a plain div
+    // root, and an empty div renders nothing while still satisfying it.
+    //
+    // The absence is not silent — the delivery read-back flags a text component
+    // placed with empty content. That is the right place for it: the editor
+    // should be told, on OUR surface, rather than the viewer being shown a
+    // string on THEIRS.
+    return <div style={rootStyle} />;
   }
   return (
     <div style={rootStyle}>
