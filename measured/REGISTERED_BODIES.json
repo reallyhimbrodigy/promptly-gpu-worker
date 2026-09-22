@@ -1,0 +1,38 @@
+{
+ "_what": "WHAT IS REGISTERED ON CHATCUT, probed through inspect_asset includeCode. NOT a copy of the source and NOT a copy of their blob -- one fact per component about the artefact that will actually render.",
+ "_why": "smoke_poster_frame_legible L1 (no_error_string_as_poster) reads port/bodies/*.jsx and was GREEN while the approved pool's EmojiCard returned the literal string NO STILL. Two failures in one: it read the wrong artefact, and the artefact it read carries 'NO STILL' TWICE IN COMMENTS explaining the fix, so a string test on the source cannot answer this question even in principle. Commit truth is not truth; the registered blob is the running image.",
+ "_probe": "inspect_asset(projectId, assetId, includeCode=true) -- one call per component, and neither lane was making it.",
+ "_state_contract": "VERIFIED_CLEAN | DEFECT | UNPROBED. UNPROBED is not a pass and is counted in the output; a component that is neither clean nor quarantined FAILS the leg.",
+ "probed_on": "2026-09-21",
+ "project": "6c0ca574-a975-4641-930d-cdc4a4648a15",
+ "components": {
+  "EmojiCard": {
+   "asset_id": "247c7ac6ad",
+   "state": "DEFECT",
+   "defect": "reachable error-string fallback",
+   "evidence": "registered code contains `if (!still) { ... NO STILL ... }` and the registered default for `still` is the empty string, so the DEFAULT PLACEMENT takes that branch. Read live off 6c0ca574 on 2026-09-21, and independently off dfa04728 by Builder 1 -- the project brief 1 is editing.",
+   "source_is_fixed": true,
+   "why_it_diverged": "port/bodies/EmojiCard.jsx was re-authored after the pool was registered. The registration was never refreshed, so source and pool disagree and every check either lane ran read the side that was correct.",
+   "quarantine": {
+    "owner": "registration path (Builder 1) — this lane cannot re-register",
+    "raised": "2026-09-21",
+    "blocks": "brief 2 on a clean pool; brief 1 is already running on it",
+    "clears_when": "EmojiCard is re-registered from the fixed body and this record is re-probed to VERIFIED_CLEAN"
+   }
+  }
+ },
+ "unprobed": [
+  "CaptionMatch",
+  "LowerThird",
+  "PillCluster",
+  "PlainText",
+  "QuoteCard",
+  "RankedList",
+  "Reticle",
+  "Stamp",
+  "StatCard",
+  "StickyNotes",
+  "TornPaper"
+ ],
+ "_unprobed_means": "NOT verified. Eleven of twelve have never been compared against what is registered, which is the exact state that let EmojiCard ship. Green on this leg does NOT mean the pool is clean until this list is empty."
+}

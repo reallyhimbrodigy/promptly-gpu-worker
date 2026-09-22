@@ -68,6 +68,23 @@ MUTATIONS = [
      'r"if \\(!!!\\s*[A-Za-z_.]+\\s*\\)\\s*\\{\\s*return \\((.{0,400}?)\\);\\s*\\}"',
      "L1b detector_finds_a_known_positive",
      lambda s: 'if \\(!\\s*[A-Za-z_.]+' in s),
+    # A KNOWN DEFECT LOSES ITS OWNER and becomes furniture -- the exact way a
+    # red stops being read. EmojiCard is allowed to sit in the record BECAUSE
+    # it is owned, dated and has a clearing condition; strip one and it is just
+    # a broken component nobody is carrying.
+    ("defect_loses_its_owner", "measured/REGISTERED_BODIES.json",
+     '"owner": "registration path (Builder 1) \u2014 this lane cannot re-register",',
+     '"_owner_removed": "",',
+     "L5 registration_defects_are_quarantined",
+     lambda s: '"state": "DEFECT"' in s),
+    # COVERAGE SHRINKS SILENTLY: a name leaves the unprobed list without
+    # anything moving into `components`, so the record quietly claims more
+    # verification than was done. That is the denominator rule applied to a
+    # to-do list.
+    ("coverage_shrinks_silently", "measured/REGISTERED_BODIES.json",
+     '\n  "CaptionMatch",', '',
+     "L6 registration_coverage_is_disclosed",
+     lambda s: '"CaptionMatch"' in s),
 ]
 
 

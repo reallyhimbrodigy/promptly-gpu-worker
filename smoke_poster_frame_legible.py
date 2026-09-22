@@ -287,6 +287,51 @@ def main():
         "%d queued; offered without a poster: %s; rule driven on a fixture: %s"
         % (len(q), on_menu_from_queue or "none", driven))
 
+    # -- WHAT IS REGISTERED, which is the only artefact that renders ---------
+    # L1 ABOVE READS port/bodies/*.jsx. THAT IS THE SOURCE, NOT THE POOL.
+    # It was GREEN while the approved pool's EmojiCard returned the literal
+    # string NO STILL, because the pool was registered BEFORE the body was
+    # fixed and nothing re-registered it. Worse: the fixed source carries
+    # "NO STILL" twice in COMMENTS explaining the fix, so a string test over
+    # this file cannot answer the question even in principle -- it now has to
+    # ignore the very string it is hunting.
+    #
+    # Commit truth is not truth. The registered blob is the running image, and
+    # the only surface that shows it is inspect_asset(includeCode=true), which
+    # is a network call and cannot live in a bare gate. So the gate reasons
+    # over a RECORD of that probe, and the record's honesty is what is checked.
+    reg = json.load(open(os.path.join(HERE, "measured", "REGISTERED_BODIES.json")))
+    comps = reg.get("components") or {}
+    unprobed = reg.get("unprobed") or []
+
+    # L5 A DEFECT MAY EXIST, BUT NEVER UNOWNED. A known-broken registration is
+    # allowed to sit here only with an owner, a date and a clearing condition --
+    # the standing rule that a red is fixed, quarantined, or deleted, never left
+    # to become furniture.
+    unowned = []
+    for name, row in sorted(comps.items()):
+        if row.get("state") != "DEFECT":
+            continue
+        q = row.get("quarantine") or {}
+        if not all(q.get(k) for k in ("owner", "raised", "clears_when")):
+            unowned.append(name)
+    leg("L5 registration_defects_are_quarantined", not unowned,
+        "DEFECT: %s | unowned: %s"
+        % (sorted(n for n, r in comps.items() if r.get("state") == "DEFECT"),
+           unowned or "none"))
+
+    # L6 THE UNPROBED LIST IS THE HONEST DENOMINATOR AND IT IS PRINTED.
+    # Eleven of twelve have never been compared against what is registered,
+    # which is exactly the state that let EmojiCard ship. This leg does NOT
+    # fail on that -- a process red would block every commit and get loosened
+    # within a day -- but it refuses to let the count go unsaid, and it fails
+    # if the list shrinks without anything moving into `components`.
+    known = set(comps) | set(unprobed)
+    leg("L6 registration_coverage_is_disclosed",
+        len(known) == 12 and not (set(comps) & set(unprobed)),
+        "%d/12 probed, %d UNPROBED (NOT verified): %s"
+        % (len(comps), len(unprobed), sorted(unprobed)))
+
     print("%d/%d legs ok" % (9 - len(FAILS), 9))
     if FAILS:
         print("FAILED: %s" % ", ".join(FAILS))
