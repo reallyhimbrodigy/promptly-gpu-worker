@@ -73,41 +73,54 @@ const Component = ({ item }) => {
     boxSizing: "border-box", padding: Math.round(width * 0.07),
     pointerEvents: "none" };
 
-  // NO STILL IS THE DEFAULT STATE, NOT AN ERROR STATE. `still` is an image
-  // property whose registered default is the empty string, so a placement with
-  // default props takes this branch — which means this branch IS the component's
-  // poster, and it used to be the words "NO STILL" in white on transparent.
-  // An error message is what their agent was being shown as the picture of this
-  // component.
+  // NO STILL IS THE DEFAULT STATE, AND MY FIRST FIX FOR IT WAS WORSE THAN THE
+  // BUG. `still` is an image property whose registered default is the empty
+  // string, so a default placement takes this branch — which means this branch
+  // IS the component's poster.
   //
-  // It now draws the component's own shape: the accent-bordered card, the emoji
-  // badge and the caption, with a neutral panel where the frame will go. That
-  // is a legible picture of what EmojiCard IS, and it needs no source to make.
+  // It first rendered the words "NO STILL": an error message as the picture of
+  // a component. I replaced that with the card's own shape and a neutral panel
+  // where the frame would go, and Builder 1 LOOKED AT THE RENDER: on a flat
+  // stage it reads "a picture goes here", and on zac_blueshirt it is a large
+  // black rounded rectangle sitting over the speaker's FACE, with the caption
+  // pinned to its bottom edge where it collides with the burned-in captions.
+  // Every check I had passed it. Only the picture said so.
+  //
+  // A NEUTRAL PANEL OF ANY COLOUR IS STILL A RECTANGLE OVER THE FACE, so this
+  // is not a colour change. The card draws ITS OWN CONTENT instead: the emoji
+  // LARGE and centred as the subject, the caption INSIDE the card beneath it,
+  // and the card SIZED TO THAT CONTENT — no 4/5 aspect slot, because a 4/5 slot
+  // is a hole whatever is painted in it. What EmojiCard is, when it has no
+  // still, is an emoji reaction with a line under it. So that is what it draws.
+  //
+  // THREE KINDS OF EMPTY (Builder 1's generalisation, and it is the durable
+  // part): a text "" renders nothing and is invisible; a number "" renders a
+  // zero; an image "" renders a PANEL, and the panel IS the poster. A content
+  // check that counts only text and number properties clears this component
+  // truthfully and uselessly.
   if (!still) {
+    const soloEmoji = Math.round(cardWidth * 0.46);
     return (
       <div style={rootStyle}>
-        <div style={{ width: cardWidth, position: "relative",
-          transform: "translateY(" + lift + "px)" }}>
-          <div style={{ width: "100%", borderRadius: Math.round(cardWidth * 0.05),
-            overflow: "hidden", border: Math.round(cardWidth * 0.012) + "px solid " + accentColor,
-            boxSizing: "border-box", backgroundColor: "#1A1A1F",
-            aspectRatio: "4 / 5", boxShadow: "0 18px 46px rgba(0,0,0,0.45)" }} />
+        <div style={{ position: "relative", maxWidth: cardWidth,
+          transform: "translateY(" + lift + "px)",
+          borderRadius: Math.round(cardWidth * 0.05),
+          border: Math.round(cardWidth * 0.012) + "px solid " + accentColor,
+          backgroundColor: "rgba(12,12,14,0.72)",
+          padding: Math.round(cardWidth * 0.06),
+          display: "flex", flexDirection: "column", alignItems: "center",
+          boxShadow: "0 18px 46px rgba(0,0,0,0.45)" }}>
           {emoji ? (
-            <div style={{ position: "absolute", right: -Math.round(badge * 0.22),
-              top: -Math.round(badge * 0.22), width: badge, height: badge,
-              borderRadius: "50%", backgroundColor: "#FFFFFF",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              transform: "scale(" + badgeScale + ")",
-              boxShadow: "0 10px 26px rgba(0,0,0,0.45)" }}>
-              <span style={{ fontSize: Math.round(badge * 0.58), lineHeight: 1 }}>
-                {emoji}
-              </span>
-            </div>
+            <span style={{ fontSize: soloEmoji, lineHeight: 1,
+              transform: "scale(" + badgeScale + ")" }}>
+              {emoji}
+            </span>
           ) : null}
           {caption ? (
-            <div style={{ marginTop: Math.round(cardWidth * 0.045), textAlign: "center",
-              color: "#FFFFFF", fontFamily: fontFamily, fontSize: captionSize,
-              fontWeight: 600, textShadow: "0 2px 10px rgba(0,0,0,0.65)" }}>
+            <div style={{ marginTop: Math.round(cardWidth * 0.04),
+              textAlign: "center", color: "#FFFFFF", fontFamily: fontFamily,
+              fontSize: captionSize, fontWeight: 600,
+              textShadow: "0 2px 10px rgba(0,0,0,0.65)" }}>
               {caption}
             </div>
           ) : null}

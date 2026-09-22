@@ -57,8 +57,18 @@ MUTATIONS = [
     ("pin_goes_stale", "EmojiCard.jsx",
      '            objectFit: "cover", aspectRatio: "4 / 5" }} />',
      '            objectFit: "contain", aspectRatio: "4 / 5" }} />',
-     "L4 no_stale_pins",
+     "L4 pins_live_and_single",
      lambda s: 'objectFit: "cover", aspectRatio: "4 / 5"' in s),
+    # A PINNED FILE GROWS A SECOND COVER. The old (file, line) pin licensed
+    # exactly one site by accident of its key; keyed on the file, a second crop
+    # would ride in free unless the count is asserted.
+    ("pinned_file_grows_a_second_cover", "EmojiCard.jsx",
+     '            objectFit: "cover", aspectRatio: "4 / 5" }} />',
+     '            objectFit: "cover", aspectRatio: "4 / 5" }} />\n'
+     '          {/* second crop nobody argued for */}\n'
+     '          <Img src={still} style={{ objectFit: "cover" }} />',
+     "L4 pins_live_and_single",
+     lambda s: s.count('objectFit: "cover"') == 1),
 ]
 
 

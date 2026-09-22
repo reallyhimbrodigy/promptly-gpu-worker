@@ -105,10 +105,40 @@ The **body sha** the clip was rendered from. A preview is evidence about the
 code that drew it and no other code; seven of my eleven stills turned out to
 photograph bodies I had re-authored hours later and every one still looked fine.
 
+## EMOJICARD'S POSTER, AND WHY THE PICTURE WAS THE ONLY THING THAT CAUGHT IT
+
+Recorded here because the spec is where a preview's honesty is decided.
+
+`still` is an image property defaulting to "". My first repair replaced the
+words "NO STILL" with the card's own shape and a neutral panel where the frame
+would go. Builder 1 rendered it and LOOKED: on real footage it is a large black
+rounded rectangle over the speaker's FACE, caption pinned to its bottom edge
+colliding with the burned-in captions. Every check I had passed it, including
+one that cleared it with "2 of 2 content properties carry a default" — true and
+useless, because it counted text and number properties and the empty one is an
+IMAGE.
+
+THREE KINDS OF EMPTY, which is the durable part: a text "" renders nothing and
+is invisible; a number "" renders a zero; an image "" renders a PANEL, and the
+panel IS the poster. A content check that does not separate them clears this
+class truthfully.
+
+Now the no-still branch draws the component's own content — emoji large and
+centred as the subject, caption inside the card, card sized to that content and
+no 4/5 slot at all, because a 4/5 slot is a hole whatever colour it is painted.
+
 ## One thing the inventory must not claim
 
-Builder 1 measured captions occupying **0.367–0.666 of frame height across all
-nine styles**. Seven of the twelve default to `position: "middle"`. So any
+Builder 1 measured captions occupying **0.367–0.646 of frame height across the
+SEVEN LIVE styles** — corrected from his own earlier 0.367–0.666, which spanned
+all nine measured styles and so included Quintessence and TypewriterReveal,
+neither of which is in the live set. A constant fitted to a population that
+includes two styles nobody can be served is a constant that has learned the
+population. It is derived from the live styles now, and an unreadable sheet
+returns the recorded value as ABSENT with the fallback named rather than as a
+silent number.
+
+Seven of the twelve default to `position: "middle"`. So any
 inventory line calling a component "centred" is describing a region captions
 usually own, and a preview clip rendered without captions shows a placement the
 user will not get once captions are on. Either the previews carry captions, or

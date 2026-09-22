@@ -33,19 +33,30 @@ BODIES = os.path.join(HERE, "port", "bodies")
 sys.path.insert(0, HERE)
 import lane_contract as lc                                     # noqa: E402
 
-# file -> why this one layer is deliberately cropped. The SUBJECT of each is the
-# card or the inset, not the user's frame.
-PINNED_COVER = {
-    ("FocusWindow.jsx", 154): "the MAGNIFIED INSET — a loupe that contained itself would show the whole frame twice",
-    ("LetterboxPush.jsx", 134): "the inner window LAYER, which is the letterbox itself; the outer plate at 107 is contain",
-    ("DeviceMockup.jsx", 83): "the frame is mounted INSIDE a phone bezel — the bezel is the subject",
-    ("EvidenceCard.jsx", 86): "cropped to a 16/9 card face; the card is the subject",
-    # MOVED 78 -> 127 by my own EmojiCard poster fix, which inserted the
-    # no-still branch above it. L4 caught it as a stale pin rather than letting
-    # the pin silently protect a line that had become something else — second
-    # time a line-anchored record has drifted under me today, and the second
-    # time the guard for it paid for itself.
-    ("EmojiCard.jsx", 127): "cropped to a 4/5 card face; the card is the subject",
+# file -> why its ONE cover site is deliberately cropped. The SUBJECT of each is
+# the card or the inset, not the user's frame.
+#
+# KEYED ON THE FILE, NOT ON A LINE, AND THE LINE NUMBER WAS NEVER LOAD-BEARING.
+# This was (file, line) and it drifted TWICE IN TWO EDITS on the same file:
+# EmojiCard's cover moved 78 -> 127 when I inserted the no-still branch, then
+# 127 -> 140 when I rewrote that branch. Both times L4 correctly refused the
+# stale pin — the guard worked — and both times the repair was to retype a
+# number that was about to move again.
+#
+# Every pinned file contains EXACTLY ONE cover site, so the line carried no
+# information the file did not already carry. L4 now asserts that count instead:
+# one cover per pinned file, pinned by file. Insertions above it are free, and a
+# SECOND cover appearing in a pinned file is caught as an unpinned site rather
+# than being silently covered by a stale pin.
+#
+# This repo's own rule, arrived at the hard way for the third time today: anchor
+# on the thing, not on one spelling of where the thing sits.
+PINNED_COVER_FILES = {
+    "FocusWindow.jsx": "the MAGNIFIED INSET — a loupe that contained itself would show the whole frame twice",
+    "LetterboxPush.jsx": "the inner window LAYER, which is the letterbox itself; its outer plate is contain",
+    "DeviceMockup.jsx": "the frame is mounted INSIDE a phone bezel — the bezel is the subject",
+    "EvidenceCard.jsx": "cropped to a 16/9 card face; the card is the subject",
+    "EmojiCard.jsx": "cropped to a 4/5 card face; the card is the subject",
 }
 
 FAILS = []
@@ -81,7 +92,7 @@ def main():
         for i, line in enumerate(open(p, encoding="utf-8").read().splitlines(), 1):
             if re.search(r'objectFit\s*:\s*"cover"', line):
                 checked += 1
-                if (z + ".jsx", i) not in PINNED_COVER:
+                if (z + ".jsx") not in PINNED_COVER_FILES:
                     unpinned.append("%s:%d" % (z, i))
     leg("L2 no_unpinned_cover_in_zooms", not unpinned,
         "%d cover site(s) in zoom bodies, %d unpinned %s"
@@ -97,17 +108,23 @@ def main():
             nocontain.append(z)
     leg("L3 every_zoom_has_contain", not nocontain, "without contain: %s" % (nocontain or "none"))
 
-    # L4 the pins are LIVE. A pin whose line no longer says cover is a stale
-    # argument, and a stale note is read as fact by the next person.
-    stale = []
-    for (fn, ln), _why in PINNED_COVER.items():
+    # L4 THE PINS ARE LIVE, AND EACH COVERS EXACTLY ONE SITE. A pin for a file
+    # with no cover is a stale argument; a pin for a file with TWO is a pin
+    # quietly licensing a second crop nobody argued for.
+    stale, doubled = [], []
+    for fn in sorted(PINNED_COVER_FILES):
         p = os.path.join(BODIES, fn)
         if not os.path.exists(p):
-            stale.append("%s (no file)" % fn); continue
-        lines = open(p, encoding="utf-8").read().splitlines()
-        if ln > len(lines) or not re.search(r'objectFit\s*:\s*"cover"', lines[ln - 1]):
-            stale.append("%s:%d" % (fn, ln))
-    leg("L4 no_stale_pins", not stale, "stale: %s" % (stale or "none"))
+            stale.append("%s (no file)" % fn)
+            continue
+        n = len(re.findall(r'objectFit\s*:\s*"cover"',
+                           open(p, encoding="utf-8").read()))
+        if n == 0:
+            stale.append(fn)
+        elif n > 1:
+            doubled.append("%s (%d)" % (fn, n))
+    leg("L4 pins_live_and_single", not stale and not doubled,
+        "stale: %s | more than one cover: %s" % (stale or "none", doubled or "none"))
 
     # L5 repo-wide: a cover anywhere in port/bodies is either pinned or a zoom
     # failure already caught above. This is what catches a NEW body shipping cover.
@@ -117,7 +134,7 @@ def main():
             continue
         for i, line in enumerate(open(os.path.join(BODIES, fn), encoding="utf-8")
                                  .read().splitlines(), 1):
-            if re.search(r'objectFit\s*:\s*"cover"', line) and (fn, i) not in PINNED_COVER:
+            if re.search(r'objectFit\s*:\s*"cover"', line) and fn not in PINNED_COVER_FILES:
                 everywhere.append("%s:%d" % (fn, i))
     leg("L5 no_unpinned_cover_anywhere", not everywhere, "unpinned: %s" % (everywhere or "none"))
 
