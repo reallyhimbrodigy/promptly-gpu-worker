@@ -143,6 +143,20 @@ MUTATIONS = [
      'sclaim = stated_range(menu, "peaks between")',
      "L5 menu_short_note_range_is_exact",
      lambda s: 'stated_range(menu, "peaking between")' in s),
+    # THE LEG IS POINTED AT THE PRODUCTION CORPUS INSTEAD OF THE UPLOAD SET —
+    # the mistake anyone would make, since the two directories hold the same
+    # thirteen sounds under different rules. The corpus still has the four short
+    # originals, so `short` and `floored` both fill and the leg must fire.
+    #
+    # THE OBVIOUS MUTATIONS HERE ARE ALL VACUOUS and I checked before writing
+    # this one: widening the floor test, or loosening the count, changes nothing
+    # while the upload set is correct — there is no violation for a looser rule
+    # to admit. Only swapping the POPULATION makes the data break the rule.
+    ("leg_measures_the_corpus_not_the_upload_set", "smoke_sfx_loudness_states.py",
+     '    up = os.path.join(HERE, "measured", "sfx_upload")',
+     '    up = SOUNDS',
+     "L8 upload_set_reads_a_real_loudness",
+     lambda s: '"measured", "sfx_upload"' in s),
 ]
 
 

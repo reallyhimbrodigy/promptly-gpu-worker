@@ -138,6 +138,19 @@ def measure(path):
         return dur, None
 
 
+def integrated(path):
+    """BS.1770 integrated loudness, or None. -> ebur128 prints at INFO level,
+    exactly like volumedetect, so this must NOT run with -v error."""
+    try:
+        v = subprocess.run(["ffmpeg", "-v", "info", "-i", path, "-af", "ebur128",
+                            "-f", "null", "-"], capture_output=True, text=True,
+                           timeout=120)
+        m = re.findall(r"I:\s*(-?[\d.]+) LUFS", (v.stderr or "") + (v.stdout or ""))
+        return float(m[-1]) if m else None
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
 def state_for(duration_ms):
     """The only rule in this file."""
     if duration_ms is None:
@@ -330,6 +343,47 @@ def main():
         len(stated_ms) == 4 and not drift
         and all(v < R128_WINDOW_MS for v in stated_ms.values()),
         "stated %s | drift(>2ms) %s" % (stated_ms, drift or "none"))
+
+    # L8 THE SET THAT GOES TO CHATCUT READS A REAL LOUDNESS ON EVERY FILE.
+    #
+    # Legs L2-L3 above are about the PRODUCTION corpus, where four sounds are
+    # under BS.1770's 400ms block and -70.0 is the correct reading of an
+    # unmeasurable programme. That is not a defect in hype-harness; it is a
+    # defect ON CHATCUT'S CARD, because browse_assets prints that -70.0 to the
+    # agent choosing sounds and a card saying silent on an audible sound is a
+    # sound that does not show what it is.
+    #
+    # So the upload set is a SEPARATE artifact: the four short ones TAIL-padded
+    # to 500ms, the other nine byte copies. Tail only — apad appends, and their
+    # agent places by start time, so a head pad would move every hit by the pad.
+    #
+    # THE PRODUCTION CORPUS IS NOT TOUCHED, and that is deliberate rather than
+    # timid: hype-harness is its own repo and handler.py READS those mp3s on the
+    # render path. Padding in place would change what production places to fix a
+    # menu card. L2 and L3 still measure the corpus; this leg measures what ships.
+    up = os.path.join(HERE, "measured", "sfx_upload")
+    if os.path.isdir(up):
+        ups = sorted(f for f in os.listdir(up) if f.endswith(".mp3"))
+        short, floored, unreadable = [], [], []
+        for f in ups:
+            d, pk = measure(os.path.join(up, f))
+            if d is None:
+                unreadable.append(f); continue
+            if d < R128_WINDOW_MS:
+                short.append((f, round(d)))
+            i = integrated(os.path.join(up, f))
+            if i is None:
+                unreadable.append(f)
+            elif i <= FLOOR_LUFS:
+                floored.append((f.split(" - ")[0], i))
+        leg("L8 upload_set_reads_a_real_loudness",
+            len(ups) == 13 and not short and not floored and not unreadable,
+            "%d file(s); under %.0fms: %s; still at the floor: %s; unreadable: %s"
+            % (len(ups), R128_WINDOW_MS, short or "none", floored or "none",
+               unreadable or "none"))
+    else:
+        leg("L8 upload_set_reads_a_real_loudness", False,
+            "measured/sfx_upload is ABSENT — the set that ships is not here to check")
 
     # The record is an OUTPUT, not an input. Nothing above reads it.
     out = {"_what": "Derived every run from the mp3s in hype-harness by "

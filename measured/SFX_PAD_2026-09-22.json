@@ -1,0 +1,137 @@
+{
+ "_what": "The thirteen as they go to ChatCut. The four under BS.1770's 400ms block are TAIL-padded to 500ms so the gate opens and the card stops reading -70.0; the other nine are byte copies.",
+ "_tail_only": "apad appends. A head pad would move the transient and their agent places by start time, so every placement would shift.",
+ "_source_untouched": "hype-harness is its own repo and handler.py READS these mp3s on the production render path. The defect is on ChatCut's card, not in production, so the corpus is not modified \u2014 these are copies.",
+ "rows": [
+  {
+   "sound": "boom",
+   "action": "copied",
+   "was_ms": 1157,
+   "now_ms": 1157,
+   "was_I": -9.2,
+   "now_I": -9.2,
+   "was_threshold": -19.2,
+   "now_threshold": -19.2
+  },
+  {
+   "sound": "camera-flash",
+   "action": "PADDED",
+   "was_ms": 235,
+   "now_ms": 500,
+   "was_I": -70.0,
+   "now_I": -20.0,
+   "was_threshold": 0.0,
+   "now_threshold": -30.0
+  },
+  {
+   "sound": "iphoneding",
+   "action": "copied",
+   "was_ms": 2714,
+   "now_ms": 2714,
+   "was_I": -19.0,
+   "now_I": -19.0,
+   "was_threshold": -31.3,
+   "now_threshold": -31.3
+  },
+  {
+   "sound": "money-ching",
+   "action": "copied",
+   "was_ms": 1688,
+   "now_ms": 1688,
+   "was_I": -23.4,
+   "now_I": -23.4,
+   "was_threshold": -35.0,
+   "now_threshold": -35.0
+  },
+  {
+   "sound": "mouse-click-sound",
+   "action": "PADDED",
+   "was_ms": 152,
+   "now_ms": 500,
+   "was_I": -70.0,
+   "now_I": -27.7,
+   "was_threshold": 0.0,
+   "now_threshold": -37.7
+  },
+  {
+   "sound": "popsfx",
+   "action": "PADDED",
+   "was_ms": 218,
+   "now_ms": 500,
+   "was_I": -70.0,
+   "now_I": -19.6,
+   "was_threshold": 0.0,
+   "now_threshold": -32.6
+  },
+  {
+   "sound": "punchsfx",
+   "action": "copied",
+   "was_ms": 594,
+   "now_ms": 594,
+   "was_I": -6.3,
+   "now_I": -6.3,
+   "was_threshold": -16.3,
+   "now_threshold": -16.3
+  },
+  {
+   "sound": "rizz",
+   "action": "copied",
+   "was_ms": 1545,
+   "now_ms": 1545,
+   "was_I": -14.1,
+   "now_I": -14.1,
+   "was_threshold": -26.4,
+   "now_threshold": -26.4
+  },
+  {
+   "sound": "shockingsfx",
+   "action": "copied",
+   "was_ms": 1147,
+   "now_ms": 1147,
+   "was_I": -14.0,
+   "now_I": -14.0,
+   "was_threshold": -25.9,
+   "now_threshold": -25.9
+  },
+  {
+   "sound": "swoosh-sound-effects",
+   "action": "PADDED",
+   "was_ms": 255,
+   "now_ms": 500,
+   "was_I": -70.0,
+   "now_I": -18.6,
+   "was_threshold": 0.0,
+   "now_threshold": -31.5
+  },
+  {
+   "sound": "transition-sfx",
+   "action": "copied",
+   "was_ms": 3139,
+   "now_ms": 3139,
+   "was_I": -12.1,
+   "now_I": -12.1,
+   "was_threshold": -28.0,
+   "now_threshold": -28.0
+  },
+  {
+   "sound": "wompwomp",
+   "action": "copied",
+   "was_ms": 3403,
+   "now_ms": 3403,
+   "was_I": -13.9,
+   "now_I": -13.9,
+   "was_threshold": -24.2,
+   "now_threshold": -24.2
+  },
+  {
+   "sound": "woosh-professional",
+   "action": "copied",
+   "was_ms": 1559,
+   "now_ms": 1559,
+   "was_I": -17.3,
+   "now_I": -17.3,
+   "was_threshold": -29.6,
+   "now_threshold": -29.6
+  }
+ ]
+}
