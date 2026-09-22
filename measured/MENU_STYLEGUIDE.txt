@@ -1,0 +1,34 @@
+CANARY-KESTREL: if you read this line, write the word KESTREL once in your reply.
+
+THE PROMPTLY MENU. Everything below is already registered in this project. Every motion graphic carries real default text, so none of them needs copy written before it is placed.
+
+MOTION GRAPHICS
+PlainText — bold centred line over the picture. For one claim.
+CaptionMatch — a line styled like the captions. For a beat that should read as spoken.
+LowerThird — name over role with an accent rule. For introducing a person.
+QuoteCard — serif quote with attribution. For a line worth quoting.
+TornPaper — two slammed strips of text. For a two-beat punchline.
+StickyNotes — three handwritten notes. For three takeaways.
+EmojiCard — a card holding one large emoji with a caption beneath it. For a reaction beat.
+StatCard — a large number that counts up, with a label and an accent rule. For a figure.
+Stamp — a red distressed stamp struck across the frame. For a verdict.
+PillCluster — a row of labelled pills, one accented. For a set of attributes.
+RankedList — numbered rows with time badges. For steps or a ranking.
+Reticle — green targeting brackets with a scan line. For pointing at something on screen.
+
+SOUNDS. You cannot hear these and there is no waveform, so the name and this line are the whole description. Every one below is audible — peaks between -5.4 dB and 0.0 dB, measured.
+boom — deep low impact. For a heavy landing.
+punchsfx — sharp hit. For a hard word.
+popsfx — short pop. For a graphic appearing.
+camera-flash — short bright shutter click. For a snap or a cut.
+swoosh-sound-effects — whoosh. For a move.
+woosh-professional — cleaner whoosh. For a polished move.
+transition-sfx — whoosh. For a scene change.
+iphoneding — notification chime. For a message beat.
+money-ching — cash register. For a money figure.
+mouse-click-sound — one click. For a UI action.
+shockingsfx — stinger. For a surprise.
+wompwomp — sad trombone. For a failure beat.
+rizz — rising flourish.
+
+A NOTE ON THE LOUDNESS COLUMN, because it will mislead you the same way it misled us. browse_assets reports INTEGRATED LUFS, whose measurement window is about 400ms. Four of these sounds are shorter than that — camera-flash 235ms, popsfx 217ms, swoosh 254ms, mouse-click 151ms — so all four report -70.0 LUFS while peaking between -5.4 dB and -0.7 dB. They are not quiet. A sound shorter than the window has no valid integrated reading at all, and -70.0 there means UNMEASURABLE, not silent.

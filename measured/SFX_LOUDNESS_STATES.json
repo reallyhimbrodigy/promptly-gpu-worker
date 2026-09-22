@@ -1,83 +1,89 @@
 {
-  "_what": "Derived every run from the mp3s in hype-harness by smoke_sfx_loudness_states.py. An OUTPUT, never an input — no leg above reads this file, so it cannot go stale and be believed.",
+  "_what": "Derived every run from the mp3s in hype-harness by smoke_sfx_loudness_states.py. An OUTPUT, never an input -- no leg above reads this file, so it cannot go stale and be believed.",
   "_rule": "EBU R128 integrates over ~400ms. Below that there is no integrated reading and the meter reports its floor (-70.0 LUFS). The state is ABSENT_TOO_SHORT; a number there is a floor wearing a measurement's clothes.",
-  "_prior_record": "sfx_chatcut_assets.json in Builder 1's lane recorded these four correctly, with these peaks, days earlier. It was not consulted before a wrong number was published. That is why this derives rather than compares — two records needing an agreement check is the defect, not the cure.",
+  "_prior_record": "sfx_chatcut_assets.json in Builder 1's lane recorded these four correctly, with these peaks, days earlier. It was not consulted before a wrong number was published. That is why this derives rather than compares -- two records needing an agreement check is the defect, not the cure.",
   "_scope": "The THIRTEEN in lane_contract.live_set()['by_family']['sfx']. Fifteen mp3s sit in the directory; awkward-moment and imposter are not in the live set and are excluded, because the menu's peak-range claim is about the thirteen and measuring the wider set makes the claim read false.",
+  "_n_sounds": 13,
+  "_n_live_in_contract": 13,
+  "_n_excluded_on_disk": 2,
   "sounds": {
-    "awkward-moment.mp3": {
-      "duration_ms": 1404,
-      "peak_db": -8.3,
-      "integrated_state": "MEASURABLE"
-    },
     "boom.mp3": {
       "duration_ms": 1157,
       "peak_db": -0.8,
-      "integrated_state": "MEASURABLE"
+      "integrated_state": "MEASURABLE",
+      "loudness": "LOUD"
     },
     "camera-flash.mp3": {
       "duration_ms": 235,
       "peak_db": -0.8,
-      "integrated_state": "ABSENT_TOO_SHORT"
-    },
-    "imposter.mp3": {
-      "duration_ms": 4074,
-      "peak_db": -4.6,
-      "integrated_state": "MEASURABLE"
+      "integrated_state": "ABSENT_TOO_SHORT",
+      "loudness": "LOUD"
     },
     "iphoneding.mp3": {
       "duration_ms": 2714,
       "peak_db": -3.2,
-      "integrated_state": "MEASURABLE"
+      "integrated_state": "MEASURABLE",
+      "loudness": "LOUD"
     },
     "money-ching.mp3": {
       "duration_ms": 1688,
       "peak_db": -3.5,
-      "integrated_state": "MEASURABLE"
+      "integrated_state": "MEASURABLE",
+      "loudness": "LOUD"
     },
     "mouse-click-sound.mp3": {
       "duration_ms": 152,
       "peak_db": -4.5,
-      "integrated_state": "ABSENT_TOO_SHORT"
+      "integrated_state": "ABSENT_TOO_SHORT",
+      "loudness": "LOUD"
     },
     "popsfx.mp3": {
       "duration_ms": 218,
       "peak_db": -5.4,
-      "integrated_state": "ABSENT_TOO_SHORT"
+      "integrated_state": "ABSENT_TOO_SHORT",
+      "loudness": "LOUD"
     },
     "punchsfx.mp3": {
       "duration_ms": 594,
       "peak_db": 0.0,
-      "integrated_state": "MEASURABLE"
+      "integrated_state": "MEASURABLE",
+      "loudness": "LOUD"
     },
     "rizz.mp3": {
       "duration_ms": 1545,
       "peak_db": -2.3,
-      "integrated_state": "MEASURABLE"
+      "integrated_state": "MEASURABLE",
+      "loudness": "LOUD"
     },
     "shockingsfx.mp3": {
       "duration_ms": 1147,
       "peak_db": -0.2,
-      "integrated_state": "MEASURABLE"
+      "integrated_state": "MEASURABLE",
+      "loudness": "LOUD"
     },
     "swoosh-sound-effects.mp3": {
       "duration_ms": 255,
       "peak_db": -0.7,
-      "integrated_state": "ABSENT_TOO_SHORT"
+      "integrated_state": "ABSENT_TOO_SHORT",
+      "loudness": "LOUD"
     },
     "transition-sfx.mp3": {
       "duration_ms": 3139,
       "peak_db": 0.0,
-      "integrated_state": "MEASURABLE"
+      "integrated_state": "MEASURABLE",
+      "loudness": "LOUD"
     },
     "wompwomp.mp3": {
       "duration_ms": 3403,
       "peak_db": -3.4,
-      "integrated_state": "MEASURABLE"
+      "integrated_state": "MEASURABLE",
+      "loudness": "LOUD"
     },
     "woosh-professional.mp3": {
       "duration_ms": 1559,
       "peak_db": -2.3,
-      "integrated_state": "MEASURABLE"
+      "integrated_state": "MEASURABLE",
+      "loudness": "LOUD"
     }
   }
 }

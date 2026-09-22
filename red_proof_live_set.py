@@ -149,8 +149,41 @@ def run_smoke():
 
 
 def residue():
-    p = subprocess.run(["git", "status", "--porcelain",
-                        "lane_contract.py", "library_73.json", "port/bodies"],
+    """Porcelain over the mutated sources, PLUS the smoke's own temp fixtures.
+
+    smoke_live_set writes three untracked fixtures INTO THE TREE --
+    _smoke_live_set_twohome.json, _empty.json, _noscope.json -- and removes them
+    in `finally`. A SIGKILL between the write and the remove leaves them on
+    disk, where `git add -A` commits them; in-memory restore does not survive a
+    kill and no relocation reaches it, so only a tree check does. They were
+    outside this watch list, which is the same defect that let a mutant's
+    fifteen-sound record reach a commit from the sfx proof.
+
+    TWO LIMITS, both measured rather than assumed, because the first version of
+    this note claimed the watch was sufficient and it is not:
+
+    1. Porcelain cannot tell one dirty content from another. A file ALREADY
+       dirty at baseline can be rewritten entirely and the status string is
+       byte-identical, so the guard sees nothing. That is exactly how a mutant's
+       fifteen-sound record reached a commit from the sfx proof, and it is why
+       red_proof_sfx_loudness_states compares BYTES instead. It is sufficient
+       here only because these paths are committed and clean at baseline.
+    2. A smoke that leaks on EVERY run, baseline included, makes its own leak
+       the accepted baseline -- `base` is captured after the baseline run, so a
+       consistent leak is invisible to any residue check built this way.
+       VERIFIED: with the smoke's `finally: os.remove` removed, this proof
+       exits 0. Catching that is a TREE check's job at commit time, not a
+       residue check's inside a proof, and saying so beats widening this one
+       until it claims something it cannot do.
+
+    What it DOES catch, verified: a stray fixture already on disk when the
+    proof starts -- exit 2.
+    """
+    p = subprocess.run(["git", "status", "--porcelain", "--",
+                        "lane_contract.py", "library_73.json", "port/bodies",
+                        "_smoke_live_set_twohome.json",
+                        "_smoke_live_set_empty.json",
+                        "_smoke_live_set_noscope.json"],
                        cwd=HERE, capture_output=True, text=True)
     return p.stdout.strip()
 

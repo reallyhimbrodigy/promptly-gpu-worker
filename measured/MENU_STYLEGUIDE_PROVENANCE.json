@@ -1,0 +1,12 @@
+{
+  "_what": "The designSpec.styleGuide of Design Style ef4e49822f (\"Promptly menu\"), read VERBATIM off ChatCut. This is THE MENU their agent reads.",
+  "_why_it_is_here": "smoke_sfx_loudness_states L4 used to compare the corpus against two float literals typed into the check, which duplicated this sentence. Builder 1 read it cold and named it: the leg was called styleguide_peak_range_holds and never read the styleGuide, so editing the menu to say -3.0 would leave the menu wrong and the check green. The bounds are now PARSED out of this file and no number is typed in the check.",
+  "_the_gap_this_does_not_close": "Whether ChatCut's LIVE styleGuide still equals this file is a NETWORK read and is NOT what the gate checks. The gate proves the text we publish is true of the corpus. Re-read at publish time; provenance below is what makes the drift window visible instead of assumed.",
+  "design_style_id": "ef4e49822f",
+  "design_style_name": "Promptly menu",
+  "project_id": "6c0ca574-a975-4641-930d-cdc4a4648a15",
+  "read_from": "manage_design_style action=get",
+  "read_on": "2026-09-21",
+  "chars": 2458,
+  "sha256": "b928b7b987d7dc52bd9a710ce1c8a76a6bc050bc16ef53475dc4e48b67599c88"
+}
