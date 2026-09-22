@@ -54,6 +54,7 @@ SMOKES = [
     "smoke_dispatch_classifier",
     "smoke_what_landed",
     "smoke_bake_guard",
+    "smoke_no_mutating_import",
 ]
 N_EXPECTED = 2 * len(SMOKES)
 
