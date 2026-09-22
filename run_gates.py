@@ -51,6 +51,7 @@ SMOKES = [
     "smoke_run_gates",
     "smoke_brief_composer",
     "smoke_no_use_before_define",
+    "smoke_dispatch_classifier",
 ]
 N_EXPECTED = 2 * len(SMOKES)
 
