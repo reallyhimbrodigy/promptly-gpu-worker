@@ -409,9 +409,19 @@ var SectionDivider = ({
   numberColor,
   titleFontSize = 150,
   showRule = true,
-  showScrim = true,
+  // false, WAS true. THE REGISTERED DEFAULT REPLACES THIS ONE — a schema with
+  // no "unset" means `= true` in the signature never runs, which is the law that
+  // made 135 defaults wrong and drew 0 of 14 components. Builder 1's lane
+  // registers showScrim false as a BAKED PROPERTY DEFAULT, so what ships today
+  // has no scrim; this file still said true, so A CLEAN REGENERATION WOULD PUT
+  // A FULL-FRAME SCRIM BACK OVER THE PICTURE.
+  //
+  // His fix was invisible in source and mine is not in the generator, which is
+  // the same divergence from two directions. Putting it here means a bake
+  // REPRODUCES what is registered instead of reverting it.
+  showScrim = false,
   scrimColor = "rgba(0,0,0,0.55)",
-  showVignette = true,
+  showVignette = false,
   vignetteStrength = 0.6,
   textShadow = DEFAULT_TEXT_SHADOW,
   anchor,
