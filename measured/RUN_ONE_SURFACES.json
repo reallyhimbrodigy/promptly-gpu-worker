@@ -1,0 +1,117 @@
+{
+ "_what": "RUN ONE, dfa04728-91b4-4585-87dd-98b296ec0c61, captured from the three surfaces on 2026-09-22. Sampled from the run, not written for the test.",
+ "_surfaces": {
+  "items": "preview_timeline views=[timeline]",
+  "captions": "read_captions — captions are NOT items and preview_timeline cannot see them; it showed two video items and two empty tracks on a run where 24 cards landed",
+  "transitions": "inspect_item, deduped by id — transitions are invisible to preview_timeline and appear under Attached TWICE, once per endpoint",
+  "export": "the rendered file, read back with ffprobe/ebur128"
+ },
+ "timeline": {
+  "fps": 30,
+  "durationFrames": 608,
+  "canvas": [
+   1080,
+   1920
+  ]
+ },
+ "items": [
+  {
+   "id": "f0f7887e",
+   "type": "video",
+   "track": "V1",
+   "timeline": [
+    0,
+    159
+   ],
+   "source_us": [
+    0,
+    5300000
+   ]
+  },
+  {
+   "id": "0db0dadb",
+   "type": "video",
+   "track": "V1",
+   "timeline": [
+    159,
+    608
+   ],
+   "source_us": [
+    5320000,
+    20286667
+   ]
+  }
+ ],
+ "gaps": [
+  {
+   "track": "V2",
+   "range": [
+    0,
+    608
+   ]
+  },
+  {
+   "track": "A1",
+   "range": [
+    0,
+    608
+   ]
+  }
+ ],
+ "captions": {
+  "total": 24,
+  "preset": "story",
+  "label": "Story Yellow",
+  "geometry": {
+   "width": 918,
+   "height": 84,
+   "left": 81,
+   "top": 1414
+  },
+  "first_frame": 0,
+  "last_frame": 608
+ },
+ "transitions_inspected": [],
+ "export": {
+  "path": "brief1_approved_pool_zac_blueshirt.mp4",
+  "duration_s": 20.352,
+  "silence_ge_400ms": [
+   {
+    "start": 1.751,
+    "end": 2.174,
+    "dur": 0.4236
+   }
+  ],
+  "silence_all_spans": [
+   [
+    1.751,
+    2.174,
+    0.4236
+   ],
+   [
+    5.062,
+    5.36,
+    0.2977
+   ],
+   [
+    7.275,
+    7.63,
+    0.3547
+   ],
+   [
+    20.071,
+    20.352,
+    0.281
+   ]
+  ],
+  "_threshold": "-30dB, d>=0.25s; only the first span reaches 400ms"
+ },
+ "brief_asks": [
+  "cut dead air and fillers",
+  "captions",
+  "motion graphics",
+  "zooms",
+  "sound effects",
+  "transitions"
+ ]
+}

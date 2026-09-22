@@ -37,7 +37,27 @@ const Component = ({ item }) => {
   const accent = props.accentColor;
   const textColor = props.textColor;
   // THE REFERENCE SCALE, the same ladder the component sheet already uses.
-  const fontSize = size === "xlarge" ? 168 : size === "large" ? 128 : size === "small" ? 72 : 96;
+  const name = String(props.name);
+  const title = String(props.title);
+  // FIT LONGER COPY BY SHRINKING, NEVER BY GROWING. Measured by Builder 1
+  // at 2x the baked default: this component drew past its registered height
+  // with nothing stopping it, because it had no shrink at all while
+  // CaptionMatch, PlainText and QuoteCard all carry one.
+  //
+  // COMBINED LENGTH, because both fields share one stack and either can push
+  // the height. FIT_REF_CHARS is "ALEX RIVERA" + "FOUNDER, PROMPTLY" = 28.
+  //
+  // THE FLOOR IS 24, MATCHING THE OTHER THREE, AND THE FLOOR IS WHAT BOUNDS
+  // IT — stated rather than implied. 96 * sqrt(28/N) reaches 24 at N = 448
+  // characters, so below that the type shrinks and the box holds; past it the
+  // floor stops the shrink and the text wraps. 448 characters across a name and
+  // a role is not a case this component has; EmojiCard's floor of 14 bites at
+  // 86, which is why THAT one needed a hard max and this does not.
+  const FIT_REF_CHARS = 28;
+  const fitLen = Math.max(1, name.length + title.length);
+  const fit = Math.min(1, Math.sqrt(FIT_REF_CHARS / fitLen));
+  const nominalSize = size === "xlarge" ? 168 : size === "large" ? 128 : size === "small" ? 72 : 96;
+  const fontSize = Math.max(24, Math.round(nominalSize * fit));
   const justify = position === "top" ? "flex-start" : position === "bottom" ? "flex-end" : "center";
   const pad = Math.round(fontSize * 0.9);
   // THE FACE IS A font-TYPED PROPERTY, NOT A CSS STRING. Measured 2026-09-19:
@@ -56,8 +76,6 @@ const Component = ({ item }) => {
   // FRAME-1-IS-FINAL for readable text, so the words are legible on frame one.
   const t = Math.min(Math.max(frame / Math.max(1, Math.round(0.28 * fps)), 0), 1);
   const ease = 1 - Math.pow(1 - t, 3);
-  const name = String(props.name);
-  const title = String(props.title);
   const wipe = Math.round(ease * 100);
   if (!name) {
     // RENDERS NOTHING, NOT A PLACEHOLDER (Zac 2026-09-22). This returned the
