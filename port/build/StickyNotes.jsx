@@ -61,7 +61,23 @@ const Component = ({ item }) => {
   const props = (item && item.props) || {};
   const size = props.size;
   const position = props.position;
-  const accent = props.accentColor;
+  // accentColor DROPPED, NOT REWIRED (2026-09-22). Checked before deciding:
+  // across this body's whole history `accent` appeared EXACTLY TWICE — the
+  // binding, and the colour of the "NO NOTES" placeholder string. It has never
+  // tinted anything the viewer was meant to see. Removing the placeholder did
+  // not kill a dial; it revealed that the dial was only ever wired to the
+  // error message.
+  //
+  // So finding it a job would be inventing a decorative use to justify a
+  // property, and a dial that exists because it was already declared is worse
+  // than one that does not exist: it is REGISTERED and SETTABLE, so their agent
+  // can spend a choice on it and change nothing, with nothing saying so. That
+  // is "registered default is the value" from the other end.
+  //
+  // THE PROPERTY AND THE BINDING MUST GO TOGETHER. The contract refuses a read
+  // that is never used AND a declared property that is never read, so Builder 1
+  // removes accentColor from PORTED_PROPS in the same pass. Half of this change
+  // is a different contract violation from the half it fixes.
   // NO textColor HERE. Each note carries its own paper colour and the ink is fixed
   // dark so it stays legible on any of them. ChatCut refuses a property read into a
   // binding that is never used, so declaring one this component cannot honour is not
