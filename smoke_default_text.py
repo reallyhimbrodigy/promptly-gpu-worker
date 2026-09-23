@@ -23,6 +23,7 @@ A blanket rule would arrive as a wave of red on working components and be
 reverted the same day. Geometry is not copy; chrome is not a slot the user
 fills. L5 asserts that scoping rather than trusting it.
 """
+import glob
 import io
 import json
 import os
@@ -149,6 +150,64 @@ def main():
     leg("L7 chrome_keeps_its_default_and_copy_does_not",
         len(got) == 1 and got[0].startswith("line1Text="),
         "colour+coordinate allowed, one text default refused -> %s" % got)
+
+    # L8 NO ERROR STRING IS EVER DRAWN AS CONTENT — the other half of "an
+    # empty slot draws nothing", on the SOURCE rather than the registry.
+    #
+    # COMMENTS ARE STRIPPED FIRST, AND THAT IS THE WHOLE REASON THIS EXISTS.
+    # smoke_poster_frame_legible L1 (no_error_string_as_poster) was GREEN while
+    # EmojiCard returned the literal string NO STILL, and
+    # measured/REGISTERED_BODIES.json recorded why: the files it read carry
+    # "NO STILL" TWICE IN COMMENTS EXPLAINING THE FIX, so a string test on
+    # source cannot answer this question even in principle — it matches the
+    # prose about the repair and calls that a hit.
+    #
+    # Run on 2026-09-23 over 120 files it found TWO live ones: DeviceMockup
+    # and EvidenceCard, both rendering `NO STILL` at 44px white in the
+    # `if (!still)` branch. A plain grep reported FOUR, two of which were the
+    # comments saying it had been fixed.
+    def _strip_comments(src):
+        src = re.sub(r"/\*[\s\S]*?\*/", "", src)
+        return re.sub(r"(^|[^:])//[^\n]*", lambda m: m.group(1), src)
+
+    PLACEHOLDER = re.compile(
+        r"NO STILL|NO IMAGE|NO PHOTO|NO MEDIA|placeholder"
+        r"|Your (?:text|logo|image|photo)|Lorem", re.I)
+    files = sorted(glob.glob(os.path.join(HERE, "port", "bodies", "*.jsx"))
+                   + glob.glob(os.path.join(HERE, "port", "build", "*.jsx"))
+                   + glob.glob(os.path.join(HERE, "ported_mg", "*.jsx"))
+                   + glob.glob(os.path.join(HERE, "src", "remotion", "src",
+                                            "motion-graphics", "*", "*.tsx")))
+    drawn = []
+    for f in files:
+        body = _strip_comments(io.open(f, encoding="utf-8").read())
+        for m in PLACEHOLDER.finditer(body):
+            drawn.append("%s:%s" % (os.path.basename(f), m.group(0)))
+    # THE DENOMINATOR IS ASSERTED. A glob that stops matching returns zero
+    # files and this leg would pass over nothing — the cheapest false green
+    # available, and the one this whole family keeps writing down.
+    leg("L8 no_error_string_is_drawn_as_content",
+        len(files) >= 100 and not drawn,
+        "%d file(s) scanned, %d drawn placeholder(s)%s"
+        % (len(files), len(drawn), ("  <<< " + ", ".join(drawn[:6])) if drawn else ""))
+
+    # L9 A PICTURE SLOT IS EMPTY BY DEFAULT — and the answer to "can ChatCut's
+    # AI fill it" is in the TYPE LIST, which is the finding rather than the leg.
+    # ChatCut's registry offers exactly boolean / color / number / select /
+    # text. THERE IS NO IMAGE, ASSET OR MEDIA TYPE AT ALL, so every picture
+    # slot we have is a `text` field holding a URL: fillable only with an
+    # absolute external URL, never with a reference to an asset in the user's
+    # own project.
+    types = sorted({p["type"] for e in reg.values() for p in e["properties"]})
+    media = [(n, p["key"], p.get("defaultValue"))
+             for n, e in reg.items() for p in e["properties"]
+             if re.search(r"src|url|image|photo|logo|avatar|poster|thumb", p["key"], re.I)
+             and p["type"] == "text"]
+    bad_media = [m for m in media if isinstance(m[2], str) and m[2].strip()]
+    leg("L9 every_picture_slot_defaults_to_empty",
+        media and not bad_media and "image" not in types and "asset" not in types,
+        "%d picture slot(s), %d with a default; registry types = %s"
+        % (len(media), len(bad_media), types))
 
     print("%d/%d legs ok" % (NLEGS - len(FAILS), NLEGS))
     if FAILS:

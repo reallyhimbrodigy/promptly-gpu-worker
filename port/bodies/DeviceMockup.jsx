@@ -62,15 +62,20 @@ const Component = ({ item }) => {
     boxSizing: "border-box", padding: Math.round(width * 0.05),
     pointerEvents: "none" };
 
-  if (!still) {
-    return (
-      <div style={rootStyle}>
-        <div style={{ color: "#FFFFFF", fontSize: 44, fontFamily: "sans-serif" }}>
-          NO STILL
-        </div>
-      </div>
-    );
-  }
+  // AN EMPTY PICTURE SLOT DRAWS NOTHING. This branch rendered the words
+  // "NO STILL" at 44px white — an error message as the picture, on a user's
+  // video, in the component whose whole job is to show their screenshot. The
+  // component's internal state is never the viewer's content, and a missing
+  // still is not a thing to announce: it is a thing to not draw.
+  //
+  // THE SAME BRANCH WAS FIXED IN EmojiCard AND CaptionMatch AND SURVIVED HERE,
+  // because the check that hunts it (smoke_poster_frame_legible L1,
+  // no_error_string_as_poster) read port/bodies and those two files carry
+  // "NO STILL" TWICE IN COMMENTS EXPLAINING THE FIX. A string test on source
+  // cannot answer this question even in principle — it matches the prose about
+  // the repair. Recorded in measured/REGISTERED_BODIES.json at the time, and
+  // it is why the replacement strips comments before it reads.
+  if (!still) return null;
   return (
     <div style={rootStyle}>
       <div style={{ width: boxWidth, height: boxHeight, backgroundColor: bezelColor,

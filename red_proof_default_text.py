@@ -23,6 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SMOKE = os.path.join(HERE, "smoke_default_text.py")
 BAKE = os.path.join(HERE, "bake_registry.py")
 ART = os.path.join(HERE, "chatcut_registry_baked.json")
+BODY = os.path.join(HERE, "port", "bodies", "DeviceMockup.jsx")
 
 
 def _env():
@@ -97,6 +98,23 @@ MUTATIONS = [
      '.filter((s) => s.label !== undefined)',
      "L4 empty_draws_nothing_and_the_row_closes_up",
      None),
+    # ── AN INJECTED EMPTY STILL ──────────────────────────────────────────
+    # Zac's named mutant: put the error message back in the branch that runs
+    # when a picture slot is empty. This is a SOURCE mutation, aimed at the
+    # half of the rule the registry cannot see.
+    ("an_empty_still_draws_an_error_string", BODY,
+     "  if (!still) return null;",
+     '  if (!still) { return <div style={rootStyle}>NO STILL</div>; }',
+     "L8 no_error_string_is_drawn_as_content",
+     None),
+    # AND A PICTURE SLOT ACQUIRES A DEFAULT — the same defect as a text
+    # default, in the field where it would render as someone else's logo on
+    # every placement that left it alone.
+    ("a_picture_slot_gains_a_default", ART,
+     '"key": "logoUrl",\n     "label": "logoUrl",\n     "type": "text",\n     "defaultValue": ""',
+     '"key": "logoUrl",\n     "label": "logoUrl",\n     "type": "text",\n     "defaultValue": "https://promptly.video/logo.png"',
+     "L9 every_picture_slot_defaults_to_empty",
+     None),
 ]
 
 
@@ -118,7 +136,7 @@ def main():
         return 2
     print("baseline green.\n")
 
-    originals = {f: io.open(f, encoding="utf-8").read() for f in (BAKE, ART)}
+    originals = {f: io.open(f, encoding="utf-8").read() for f in (BAKE, ART, BODY)}
     red, faults, vacuous = 0, 0, []
     for name, src, old, new, phrase, pre in MUTATIONS:
         raw = originals[src]

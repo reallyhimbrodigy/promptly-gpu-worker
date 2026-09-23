@@ -67,15 +67,12 @@ const Component = ({ item }) => {
     boxSizing: "border-box", padding: Math.round(width * 0.06),
     pointerEvents: "none" };
 
-  if (!still) {
-    return (
-      <div style={rootStyle}>
-        <div style={{ color: "#FFFFFF", fontSize: 44, fontFamily: "sans-serif" }}>
-          NO STILL
-        </div>
-      </div>
-    );
-  }
+  // AN EMPTY PICTURE SLOT DRAWS NOTHING — see DeviceMockup, same branch, same
+  // 44px white error message rendered as the picture. TWO components carried
+  // it, not one: the comment-stripped scan found this after DeviceMockup was
+  // fixed, and a plain grep would have reported FOUR hits with two of them
+  // being the prose about the repair.
+  if (!still) return null;
   return (
     <div style={rootStyle}>
       <div style={{ width: cardWidth, backgroundColor: "#FFFFFF",
