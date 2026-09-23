@@ -186,7 +186,30 @@ var asText = (v) => typeof v === "string" ? v : v == null ? "" : String(v);
 
 // src/motion-graphics/StickyNotes/StickyNotes.tsx
 var STICKY_FIT_FLOOR = 0.35;
-var STICKY_FIT_CEIL = 2.6;
+// 1.0, WAS 2.6 — THE FIT MAY SHRINK AND MUST NEVER GROW (2026-09-23).
+//
+// MEASURED, not reasoned: at 2.6 a 15-character word fits its paper with
+// margin while a 5-character word and even a 2-character word run past both
+// edges. The shrink search is correct; the UPSCALE is what overflows, and the
+// shorter the word the larger the scale it is given and the worse it gets.
+//
+// WHY UPSCALING OVERFLOWS AT ALL. canvasMeasurer returns measureText().width,
+// which is the ADVANCE width — the pen travel — not the INK box. Caveat Brush
+// is a brush script whose strokes overhang their advances, so the ink is wider
+// than the number the fit is checking, by an amount proportional to font size.
+// At scale 1 that overhang is a few pixels inside a 272px paper; at 2.6 it is
+// the difference between fitting and hanging off the edge.
+//
+// THIS IS THE LOAD-BEARING HALF OF THE sqrt RULE CaptionMatch USES:
+// `Math.min(1, sqrt(REF/len))` — it clamps at 1 and only ever shrinks. A fit
+// that can grow is a fit that can exceed the box it was measured against on
+// the SHORTEST content, which is the opposite of where anyone looks for it.
+//
+// Measuring the ink box (actualBoundingBoxLeft/Right) would fix it at the root
+// and is the better long-term answer, but canvasMeasurer is SHARED with other
+// components and this failure only appears on upscale. Removing the upscale
+// removes the failure with no blast radius.
+var STICKY_FIT_CEIL = 1.0;
 function fitStickyNote(text, noteFontSize, fontFamily, noteSize, lineHeightEm = 1.1) {
   const font = { fontFamily, fontWeight: 400 };
   const inner = noteSize - 20 - 8;
@@ -461,7 +484,23 @@ var StickyNotes = ({
         color: "#1A1A1A",
         textAlign: "center",
         lineHeight: noteLineHeight,
-        fontStyle: i === 2 ? "italic" : "normal",
+        // ITALIC DROPPED FROM SLOT 3 (2026-09-23). A 5-character word ran
+        // past its paper's right edge while the same 5 characters fitted
+        // upright in slot 1, and the fit is already per-note — so the note
+        // was measured correctly and drawn wider than it was measured.
+        //
+        // WHY NO MEASURER CHANGE FIXES IT. caveatBrush is loaded
+        // `loadFont("normal", { weights: ["400"] })` — there is NO italic cut,
+        // so `fontStyle: italic` is SYNTHETIC OBLIQUE. Synthetic oblique keeps
+        // the ADVANCE WIDTHS identical and SHEARS the glyphs, so the ink
+        // escapes the advance box the measurer measured. Telling the measurer
+        // the style would return the same number; the fit would shrink
+        // nothing; the word would still overhang. The mismatch is not in the
+        // measurement, it is between an advance box and the ink inside it.
+        //
+        // And it was redundant: caveatBrush is already a casual brush script,
+        // so the slant was a synthetic slope on a face that has its own.
+        fontStyle: "normal",
         maxWidth: "100%",
         ...noteFit.floored ? CHARWRAP_FALLBACK_STYLE : {}
       }}

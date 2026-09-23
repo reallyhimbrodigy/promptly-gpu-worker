@@ -28,7 +28,16 @@ const STICKY_FIT_FLOOR = 0.35;
 // with room for ~2.6x. The walk now starts ABOVE 1 so short text GROWS to
 // own the note; the same two-axis constraints bind, so long text shrinks
 // exactly as before and can never escape.
-const STICKY_FIT_CEIL = 2.6;
+// 1.0, WAS 2.6 — THE FIT MAY SHRINK AND MUST NEVER GROW (2026-09-23).
+// MEASURED: at 2.6 a 15-character word fits its paper with margin while a
+// 5-character and even a 2-character word run past both edges. The shrink
+// search is correct; the UPSCALE overflows, and the shorter the word the
+// larger the scale it is given. canvasMeasurer returns measureText().width —
+// the ADVANCE width, not the INK box — and Caveat Brush's strokes overhang
+// their advances by an amount proportional to font size. This is the
+// load-bearing half of CaptionMatch's sqrt rule: Math.min(1, ...) clamps at 1
+// and only ever shrinks.
+const STICKY_FIT_CEIL = 1.0;
 
 function fitStickyNote(
   text: string,
@@ -364,7 +373,23 @@ export const StickyNotes: React.FC<StickyNotesProps> = ({
                     color: "#1A1A1A",
                     textAlign: "center",
                     lineHeight: noteLineHeight,
-                    fontStyle: i === 2 ? "italic" : "normal",
+                    // ITALIC DROPPED FROM SLOT 3 (2026-09-23). A 5-character word ran
+        // past its paper's right edge while the same 5 characters fitted
+        // upright in slot 1, and the fit is already per-note — so the note
+        // was measured correctly and drawn wider than it was measured.
+        //
+        // WHY NO MEASURER CHANGE FIXES IT. caveatBrush is loaded
+        // `loadFont("normal", { weights: ["400"] })` — there is NO italic cut,
+        // so `fontStyle: italic` is SYNTHETIC OBLIQUE. Synthetic oblique keeps
+        // the ADVANCE WIDTHS identical and SHEARS the glyphs, so the ink
+        // escapes the advance box the measurer measured. Telling the measurer
+        // the style would return the same number; the fit would shrink
+        // nothing; the word would still overhang. The mismatch is not in the
+        // measurement, it is between an advance box and the ink inside it.
+        //
+        // And it was redundant: caveatBrush is already a casual brush script,
+        // so the slant was a synthetic slope on a face that has its own.
+        fontStyle: "normal",
                     maxWidth: "100%",
                     ...(noteFit.floored ? CHARWRAP_FALLBACK_STYLE : {}),
                   }}
