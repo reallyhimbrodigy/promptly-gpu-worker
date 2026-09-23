@@ -2,7 +2,8 @@
 """Every asset on the menu has ONE line and that line is its name.
 
     <Name> — <what it is> for <when to use it>
-    plain words, no jargon, <= 90 characters, no commas, no newlines
+    plain words, no jargon, <= 90 characters, one line,
+    no commas in the thirteen AUDIO names
 
 THE LINE IS THE NAME because `asset.name` is the only per-asset free text a
 motion graphic has, and for an audio asset the filename at import is the only
@@ -56,12 +57,30 @@ def split_line(line):
     return None, None
 
 
-def check(line):
+AUDIO = "sounds"
+
+
+def check(line, group):
+    """-> list of rule violations. `group` is load-bearing, not decoration.
+
+    THE COMMA RULE IS AUDIO-ONLY and always was, even while it was written
+    wider. A comma in a SOUND FILENAME breaks the upload helper — it builds an
+    ffmpeg filter graph from the name and takes a comma as the separator — and
+    the failed import leaves an orphaned `status: processing` asset that counts
+    as an asset and never resolves. Nothing about a component or caption name
+    goes near that path, so forbidding commas there was a style rule wearing a
+    correctness rule's clothes, and the next person to hit it would have
+    loosened it by hand with no record of which half was real.
+
+    Scoped to match B1's `menu_name_ok`. TWO CHECKERS, ONE RULE — and the rule
+    is the SCOPE, which is why L2b drives the permissive direction on a fixture
+    instead of trusting that both of us read the same sentence the same way.
+    """
     errs = []
     if len(line) > MAX_LEN:
         errs.append("over %d chars (%d)" % (MAX_LEN, len(line)))
-    if "," in line:
-        errs.append("contains a comma")
+    if group == AUDIO and "," in line:
+        errs.append("contains a comma (audio names only)")
     # A NEWLINE IS THE ONE VIOLATION THAT IS INVISIBLE IN EVERY SURFACE THAT
     # SHOWS THE LINE. A comma is legible in a table and an over-long line is
     # legible against a ruler; an embedded \n renders as a line break in the
@@ -92,16 +111,30 @@ def main():
         counts == groups and len(allof) == 32, "%s = %d" % (counts, len(allof)))
 
     # L1 EVERY LINE OBEYS THE RULE.
-    bad = [(l, check(l)) for l in allof]
+    bad = [(l, check(l, g)) for g in groups for l in d[g]]
     bad = [(l, e) for l, e in bad if e]
     leg("L1 every_line_obeys_the_rule", not bad,
         "%d line(s) break it: %s" % (len(bad), [b[0][:28] for b in bad] or "none"))
 
     # L2 NO COMMAS, CALLED OUT SEPARATELY because it is a measured upload
     # failure rather than a style preference.
-    commas = [l for l in allof if "," in l]
-    leg("L2 no_commas_anywhere", not commas,
-        "%d with a comma (a comma breaks the upload helper)" % len(commas))
+    commas = [l for l in d[AUDIO] if "," in l]
+    leg("L2 no_commas_in_the_audio_names", not commas,
+        "%d of %d audio name(s) with a comma (a comma breaks the upload helper)"
+        % (len(commas), len(d[AUDIO])))
+
+    # L2b THE SCOPE IS THE RULE, SO THE SCOPE IS WHAT IS TESTED. Driven on a
+    # FIXTURE, not on the corpus: no component line carries a comma today, so a
+    # leg asking the corpus whether commas are tolerated there would pass on an
+    # empty population and assert nothing — the same vacuity that made four
+    # mutations worthless in one session. The fixture makes the permissive
+    # direction fail if the scope is ever widened back.
+    fixture = "Fixture — a line with a comma, deliberately, for proving the scope"
+    leg("L2b comma_rule_is_audio_only",
+        not check(fixture, "components") and bool(check(fixture, AUDIO)),
+        "same line: components=%s audio=%s"
+        % (check(fixture, "components") or "accepted",
+           check(fixture, AUDIO) or "accepted"))
 
     # L3 EVERY LINE SAYS WHEN TO USE IT, not just what it is. EmojiCard's old
     # line had the what and no when, which is the whole reason this leg exists.

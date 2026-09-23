@@ -82,7 +82,7 @@ DATA_MUTATIONS = [
      "L1 every_line_obeys_the_rule",
      lambda d: all(len(l) <= 90 for l in d["components"])),
     ("a_comma_enters_a_sound_name", _comma,
-     "L2 no_commas_anywhere",
+     "L2 no_commas_in_the_audio_names",
      lambda d: not any("," in l for l in d["sounds"])),
     # A NEWLINE IS INVISIBLE IN EVERY SURFACE THAT SHOWS THE LINE, which is
     # why it gets its own mutation rather than riding on the length leg: the
@@ -104,6 +104,18 @@ DATA_MUTATIONS = [
 # driven on a fixture inside the smoke, and the only thing that can break the
 # byte-identity rule is the comparison itself.
 CODE_MUTATIONS = [
+    # THE COMMA SCOPE WIDENS BACK to every line. This is the mutation that
+    # would normally be VACUOUS — widening or tightening a rule the corpus
+    # already satisfies changes bytes and no verdict, which is how four
+    # mutations died in one session. It bites here ONLY because L2b drives a
+    # fixture through the permissive half: without that leg, re-forbidding
+    # commas in component names would pass green on a corpus of component
+    # names that happen not to have any today.
+    ("comma_scope_widens_past_audio",
+     '    if group == AUDIO and "," in line:',
+     '    if "," in line:',
+     "L2b comma_rule_is_audio_only",
+     lambda s: 'if group == AUDIO and "," in line:' in s),
     ("byte_identity_becomes_fuzzy",
      "        return a is not None and b is not None and a == b",
      "        return a is not None and b is not None and a.strip() == b.strip()",

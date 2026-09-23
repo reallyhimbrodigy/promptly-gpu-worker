@@ -116,5 +116,24 @@
    },
    "note": "boxed words switch to Playfair Display 400 at 1.8x"
   }
+ },
+ "_font_availability": {
+  "checked_with": "ChatCut search_fonts, 2026-09-22",
+  "result": "ALL FOUR of our caption families exist verbatim in their catalogue — no substitution is needed and none is stated.",
+  "Montserrat": "present (also Montserrat Alternates, Montserrat Underline)",
+  "Inter": "present (also Inter Tight)",
+  "DM Sans": "present",
+  "Playfair Display": "present (also Playfair, Playfair Display SC)",
+  "_our_stack_is_not_a_family_name": "CAPTION_FONTS wraps each family as `<Family>, <Noto fallback>` for non-Latin coverage. ChatCut wants the CANONICAL FAMILY NAME verbatim, so the profiles below give the primary family alone. The Noto tail is ours and does not travel."
+ },
+ "_key_spelling": "THE VALUES ARE MEASURED; THE KEY NAMES ARE NOT MINE TO CHOOSE. B1 holds the styleProfile schema from the 27 presets with Story Yellow as the template, so these are field SEMANTICS and values, mapped onto that schema by him. Inventing key names is exactly how browse_library was read three times with three guessed keys, each miss recorded as measured-and-empty.",
+ "_one_line_names": {
+  "CleanCut": "CleanCut — plain white words for narration, explainers and text that must not steal focus",
+  "Cove": "Cove — words in a soft rounded box for busy shots, outdoor footage and low contrast",
+  "Gadzhi": "Gadzhi — one keyword lit in yellow on two-word lines for punchlines and key terms",
+  "Lumen": "Lumen — a bright band behind the line for hype, reveals and high-energy delivery",
+  "Prime": "Prime — two stacked lines in white and blue for setups, payoffs and question-answer beats",
+  "Pulse": "Pulse — the whole line fades in for calm delivery, storytelling and slow reveals",
+  "TwoTone": "TwoTone — every word outlined in a second colour for punchy, loud and meme-style beats"
  }
 }

@@ -3,27 +3,27 @@
  "_why": "The line IS the name, because asset.name is the only per-asset free text a motion graphic has and the only text at all an audio asset has. One definition; if a description field turns out to be read, the same bytes go there.",
  "_separator_note": "The twelve components and seven caption styles use an EM DASH. The thirteen sounds already shipped with a HYPHEN in their filenames. Both parse; changing the sounds means thirteen re-uploads. Flagged for Zac rather than normalised silently.",
  "components": [
-  "PlainText — one bold line over the picture for claims titles and hard points",
-  "CaptionMatch — a line styled like the captions for quotes asides and spoken beats",
-  "LowerThird — a name above a role for intros guests credits and first appearances",
-  "QuoteCard — a serif quote with a name under it for quotes advice and testimonials",
-  "TornPaper — two slammed strips of text for punchlines reversals and before and after",
-  "StickyNotes — three handwritten notes for tips checklists and quick takeaways",
-  "EmojiCard — a big emoji over a caption for reactions shock jokes and sudden pauses",
-  "StatCard — a big number that counts up for stats prices results and milestones",
-  "Stamp — a red distressed stamp struck across the frame for verdicts myths and fails",
-  "PillCluster — a row of small labelled pills for features tools tags and ingredients",
-  "RankedList — numbered rows with time badges for steps rankings recipes and routines",
+  "PlainText — one bold line over the picture for claims, titles and hard points",
+  "CaptionMatch — a line styled like the captions for quotes, asides and spoken beats",
+  "LowerThird — a name above a role for intros, guests, credits and first appearances",
+  "QuoteCard — a serif quote with a name under it for quotes, advice and testimonials",
+  "TornPaper — two slammed strips of text for punchlines, reversals and before-and-after",
+  "StickyNotes — exactly three handwritten notes for tips, checklists and takeaways",
+  "EmojiCard — a big emoji over a caption of 80 characters for reactions, shock and jokes",
+  "StatCard — a big number that counts up for stats, prices, results and milestones",
+  "Stamp — a red distressed stamp struck across the frame for verdicts, myths and fails",
+  "PillCluster — a row of up to 12 labelled pills for features, tools, tags and ingredients",
+  "RankedList — up to 5 numbered rows with time badges for steps, rankings and recipes",
   "Reticle — green targeting brackets with a scan line for pointing out detail on screen"
  ],
  "caption_styles": [
-  "CleanCut — plain white words for narration explainers and anything text should not steal",
-  "Cove — words in a soft rounded box for busy shots outdoor footage and low contrast",
-  "Gadzhi — one keyword lit in yellow for punchlines key terms and numbers worth landing",
-  "Lumen — a bright band behind the line for hype reveals and high energy delivery",
-  "Prime — two stacked lines in white and blue for setups payoffs and question answer beats",
-  "Pulse — the whole line fades in for calm delivery storytelling and slow reveals",
-  "TwoTone — every word outlined in a second colour for punchy loud and meme style beats"
+  "CleanCut — plain white words for narration, explainers and text that must not steal focus",
+  "Cove — words in a soft rounded box for busy shots, outdoor footage and low contrast",
+  "Gadzhi — one keyword lit in yellow on two-word lines for punchlines and key terms",
+  "Lumen — a bright band behind the line for hype, reveals and high-energy delivery",
+  "Prime — two stacked lines in white and blue for setups, payoffs and question-answer beats",
+  "Pulse — the whole line fades in for calm delivery, storytelling and slow reveals",
+  "TwoTone — every word outlined in a second colour for punchy, loud and meme-style beats"
  ],
  "sounds": [
   "boom - deep low impact for heavy landings reveals and big claims",
@@ -40,5 +40,13 @@
   "wompwomp - sad trombone for failures mistakes and letdowns",
   "rizz - rising flourish for flirty smug and confident beats"
  ],
- "_density_note": "Matched to ChatCut's own library descriptions, which name SEVERAL moments and not one ('for shock, reversals, exaggerated reactions, key captions, sudden pauses'). Theirs use commas; ours cannot, so the moments are joined with 'and'. A comma in a sound filename breaks the upload helper's ffmpeg filter graph and leaves an orphaned status:processing asset that never resolves."
+ "_density_note": "Matched to ChatCut's own library descriptions, which name SEVERAL moments and not one ('for shock, reversals, exaggerated reactions, key captions, sudden pauses'). Theirs use commas; ours cannot, so the moments are joined with 'and'. A comma in a sound filename breaks the upload helper's ffmpeg filter graph and leaves an orphaned status:processing asset that never resolves.",
+ "_comma_rule": "COMMAS ARE REFUSED IN THE THIRTEEN AUDIO NAMES ONLY, and permitted in the nineteen component and caption lines. The rule was never about style: a comma in a sound filename breaks the upload helper, which builds an ffmpeg filter graph from the name and takes a comma as the separator, and the failed import leaves an orphaned status:processing asset that counts and never resolves. Nothing about a component name goes near that path. Scoped to match B1's menu_name_ok — two checkers, one rule, and a leg that proves the scope rather than the wording.",
+ "_hard_constraints": {
+  "StickyNotes": "notes.slice(0, 3) — the fourth note is DROPPED, not shrunk",
+  "PillCluster": "tags.slice(0, 12)",
+  "RankedList": "items.slice(0, 5)",
+  "EmojiCard": "CAPTION_MAX_CHARS = 80 — truncated with an ellipsis",
+  "_none": "PlainText, CaptionMatch, StatCard, Reticle and Stamp carry no cap. Stamp only steps its font size down past 11 and 14 characters, which is graceful, not a limit — stating it as one would be inventing a constraint the body does not have."
+ }
 }
