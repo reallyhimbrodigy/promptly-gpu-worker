@@ -187,37 +187,39 @@ def user_slot(vibe, user_brief):
     return "an edit of this video"
 
 
-# THE TIER LINE. Two facts and nothing else, because a billing claim is the
-# worst thing to get loose: Probe A's control is that whatever the line says,
-# their agent restates as fact and acts on — it invented a usage for
-# CanaryProbe out of a name alone. "Unlimited exports" and "this is a paid
-# account" license different behaviour, and the difference is real money.
+# THE TIER LINE SAYS WHAT TO DO, NEVER WHAT THE ACCOUNT IS.
 #
-# WHAT IS SAID: the account is paid, so no plan limit will be hit and there is
-# nothing to ask about billing. WHAT IS NOT SAID: anything about export limits,
-# caps, or entitlements per tier — I have not read those surfaces, and a claim
-# I cannot source is a claim their agent will act on anyway.
+# MY FIRST VERSION OPENED "This is a paid account — you won't hit a plan
+# limit." Both halves are claims about an ACCOUNT, and every one of them is a
+# billing fact their agent will restate and act on. Ruled out entirely by Zac
+# 2026-09-23: no sentence may claim anything about an account, a plan, a limit
+# or exports. The goal is that every sentence their AI reads is TRUE, and a
+# claim about someone's plan is the class I am least able to keep true — it
+# changes without anything here changing, and I cannot see it change.
 #
-# THE SECOND HALF IS THE GUARD. Paid does not mean free: generation spends
-# credits at real rates (ChatCut's own docs, read 2026-09-23: music 0.18 per
-# song, sound effects 0.12 per generated second, voiceover 0.28-0.80 per 1,000
-# characters, Seedance 2.5 at 1080p about 2.2175 per second). An agent told
-# only "this is a paid account" can read that as permission to spend.
+# WHAT SURVIVES IS THE INSTRUCTION, which is the only part that was ever doing
+# work: whether to spend on generation. Same information for the agent, no
+# assertion about the account it is running in.
 TIER_LINES = {
-    "paid": ("This is a paid account — you won't hit a plan limit. Generated "
-             "video, avatars, voiceover and music spend credits, so only use "
-             "them if the brief asks."),
+    "paid": ("Only generate new images, video, voiceover or music if the user "
+             "asked for it."),
+    "free": "Don't generate new images, video, voiceover or music.",
 }
+
+# Words that would make the line a claim about the account rather than an
+# instruction about the edit. L15 refuses any of them, and the two Zac named
+# are the ones my own first draft used.
+ACCOUNT_CLAIMS = ("plan limit", "unlimited", "plan", "account", "export",
+                  "subscription", "tier", "upgrade", "billing", "quota",
+                  "no limit", "limitless")
 
 
 def tier_line(tier):
-    """-> the account-context sentence, or None.
+    """-> the generation instruction for this tier, or None.
 
-    UNKNOWN TIER SAYS NOTHING. A default of "paid" would make every
-    unconfigured caller assert a billing fact about somebody's account, and an
-    absent tier is not a paid one. Only a tier with a RULED sentence emits one;
-    free has none yet because none has been ruled, and writing one would be
-    inventing the billing claim this whole function exists to avoid.
+    UNKNOWN TIER SAYS NOTHING. A default would make every unconfigured caller
+    assert something about an account it knows nothing about — absent is not
+    paid, and it is not free either.
     """
     return TIER_LINES.get(str(tier or "").strip().lower())
 

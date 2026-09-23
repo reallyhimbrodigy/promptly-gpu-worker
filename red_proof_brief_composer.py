@@ -37,6 +37,30 @@ SMOKE = os.path.join(HERE, "smoke_brief_composer.py")
 WATCHED = ["brief_composer.py", "smoke_brief_composer.py"]
 
 MUTATIONS = [
+    # THE TWO ZAC NAMED, BY NAME. Both were in my own first draft, which is
+    # why they are mutations and not a style note: "This is a paid account —
+    # you won't hit a plan limit" shipped in the version I sent B1.
+    ("tier_line_claims_a_plan_limit", "brief_composer.py",
+     '    "paid": ("Only generate new images, video, voiceover or music if the user "\n'
+     '             "asked for it."),',
+     '    "paid": ("This is a paid account — you won\'t hit a plan limit. Only "\n'
+     '             "generate images, video, voiceover or music if the user asked."),',
+     "L15 no_tier_line_claims_anything_about_an_account",
+     lambda s: '"Only generate new images, video, voiceover or music if the user "' in s),
+    ("tier_line_claims_unlimited_exports", "brief_composer.py",
+     '    "free": "Don\'t generate new images, video, voiceover or music.",',
+     '    "free": "You have unlimited exports. Don\'t generate new images, video, '
+     'voiceover or music.",',
+     "L15 no_tier_line_claims_anything_about_an_account",
+     lambda s: '"free": "Don\'t generate new images, video, voiceover or music.",' in s),
+    # AND THE OTHER DIRECTION: the claims are stripped and the INSTRUCTION goes
+    # with them, leaving a line that asserts nothing and tells the agent
+    # nothing — worse than the claim it replaced.
+    ("tier_line_stops_instructing", "brief_composer.py",
+     '    "free": "Don\'t generate new images, video, voiceover or music.",',
+     '    "free": "Keep it simple.",',
+     "L16 every_tier_line_still_instructs",
+     lambda s: '"free": "Don\'t generate new images, video, voiceover or music.",' in s),
     # THE TIER DEFAULTS TO PAID — every unconfigured caller then asserts a
     # billing fact about an account it knows nothing about.
     ("tier_defaults_to_paid", "brief_composer.py",
@@ -45,20 +69,7 @@ MUTATIONS = [
      "L14 tier_line_only_for_a_ruled_tier",
      lambda s: "def compose(vibe, user_brief, tier=None):" in s),
     # THE LINE OVERCLAIMS. "Unlimited" is the specific word B1 named as the one
-    # that licenses different behaviour, and the difference is Zac's money.
-    ("tier_line_overclaims", "brief_composer.py",
-     '    "paid": ("This is a paid account — you won\'t hit a plan limit. Generated "',
-     '    "paid": ("This is a paid account with unlimited exports. Generated "',
-     "L15 tier_line_claims_only_what_was_ruled",
-     lambda s: "you won't hit a plan limit" in s),
     # THE CREDIT GUARD IS DROPPED, leaving "this is a paid account" alone —
-    # which an agent can read as permission to spend.
-    ("credit_guard_dropped", "brief_composer.py",
-     '             "video, avatars, voiceover and music spend credits, so only use "\n'
-     '             "them if the brief asks."),',
-     '             "video and audio are all available."),',
-     "L15 tier_line_claims_only_what_was_ruled",
-     lambda s: "spend credits, so only use " in s),
     # ZAC'S NAMED MUTANT: the placeholder comes back. It is the shape the
     # composer actually shipped with — a vibe-only submission wrote
     # "(none given)" into the brief slot — and it reads as a user who asked for

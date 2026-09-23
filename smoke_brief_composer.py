@@ -191,13 +191,14 @@ def main():
     # absent is not paid, which is the absent-as-a-value rule applied to a
     # claim rather than a measurement.
     paid = bc.compose("", "Cut it tight.", tier="paid")
+    free = bc.compose("", "Cut it tight.", tier="free")
     for t in (None, "", "free", "unknown", "pro", "PAID "):
         r = bc.compose("", "Cut it tight.", tier=t)
         expected = bool(bc.tier_line(t))
         got = bool(r["tier_line"])
         if expected != got:
             FAILS.append("L14 tier %r" % t)
-    unruled = [t for t in (None, "", "free", "unknown", "pro")
+    unruled = [t for t in (None, "", "unknown", "pro")
                if bc.compose("", "x", tier=t)["tier_line"]]
     # AND THE DEFAULT ITSELF, called with NO tier argument. Every check above
     # passes tier explicitly, so changing the parameter's default changes real
@@ -206,22 +207,39 @@ def main():
     # that must not assert one.
     omitted = bc.compose("", "x")["tier_line"]
     leg("L14 tier_line_only_for_a_ruled_tier",
-        bool(paid["tier_line"]) and not unruled and omitted is None,
+        bool(paid["tier_line"]) and bool(free["tier_line"])
+        and not unruled and omitted is None,
         "paid=emitted  unruled emitting: %s  omitted-arg emits: %r"
         % (unruled or "none", omitted))
 
-    # L15 IT DOES NOT CLAIM WHAT WAS NEVER READ. Export limits, caps and
-    # per-tier entitlements are surfaces I have not measured; a sourceless
-    # claim is one their agent will act on anyway. And "paid" alone reads as
-    # permission to spend, so the credit guard travels WITH it — the two halves
-    # are one sentence or neither.
-    line = paid["tier_line"]
-    overclaims = [w for w in ("unlimited", "no limit", "as many", "free of charge",
-                              "at no cost", "unmetered") if w in line.lower()]
-    leg("L15 tier_line_claims_only_what_was_ruled",
-        not overclaims and "spend credits" in line and "only use them if" in line,
-        "overclaims=%s  credit guard present=%s"
-        % (overclaims or "none", "spend credits" in line))
+    # L15 NO TIER LINE CLAIMS ANYTHING ABOUT AN ACCOUNT. Ruled by Zac
+    # 2026-09-23 after my first draft opened "This is a paid account — you
+    # won't hit a plan limit", which is two account claims in one clause.
+    #
+    # A CLAIM ABOUT A PLAN IS THE CLASS I AM LEAST ABLE TO KEEP TRUE. It goes
+    # stale without anything here changing and without anything here being able
+    # to see it change — and their agent restates whatever it reads as fact.
+    # The instruction ("only generate if asked") carries the same information
+    # for the agent and asserts nothing about the account it runs in.
+    #
+    # DRIVEN OVER EVERY RULED TIER, not just the one in the example above: a
+    # second tier added later is exactly where this would come back.
+    offenders = {}
+    for t, line in bc.TIER_LINES.items():
+        hits = [w for w in bc.ACCOUNT_CLAIMS if w in line.lower()]
+        if hits:
+            offenders[t] = hits
+    leg("L15 no_tier_line_claims_anything_about_an_account",
+        bool(bc.TIER_LINES) and not offenders,
+        "%d ruled tier(s), offending: %s" % (len(bc.TIER_LINES), offenders or "none"))
+
+    # L16 AND IT STILL SAYS WHAT TO DO. Stripping the account claims must not
+    # strip the instruction with them — a line that asserts nothing and
+    # instructs nothing is worse than the claim it replaced.
+    silent = [t for t, line in bc.TIER_LINES.items()
+              if "generate" not in line.lower()]
+    leg("L16 every_tier_line_still_instructs",
+        not silent, "tiers saying nothing about generation: %s" % (silent or "none"))
 
     # L9 THE BRIEF IS NEUTRAL ABOUT WHAT MAY BE USED. Ruled by Zac 2026-09-22,
     # first for sounds and then widened: components and caption styles too. "No
