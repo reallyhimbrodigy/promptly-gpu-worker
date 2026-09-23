@@ -38,9 +38,10 @@ RULED_COPY_BEARING = {
     "BarRace", "ChatThread", "DropBanner", "DropCard",
     "PillCluster", "PillMarquee", "PullQuote", "RankedList", "RecordingFrame",
     "StickyNotes", "Timeline", "TimelineRoadmap",
-    "caption:CleanCut", "caption:Cove", "caption:Gadzhi", "caption:Lumen",
-    "caption:Prime", "caption:Pulse", "caption:Quintessence", "caption:TwoTone",
-    "caption:TypewriterReveal",
+    # The nine caption:* blobs left this set on 2026-09-23 because they left
+    # the REGISTRY — nothing read their baked `pages`. The caption styles are
+    # ChatCut caption presets now, and their pages come from the caption
+    # program at render time.
 }
 
 # OUR BRAND ON SOMEONE ELSE'S VIDEO. EndCard bakes "@promptly" and

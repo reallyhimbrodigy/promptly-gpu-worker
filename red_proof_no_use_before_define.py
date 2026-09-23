@@ -56,7 +56,7 @@ MUTATIONS = [
     ("position_test_inverted", "check_use_before_define.mjs",
      "      if (useStart >= declStart) continue;",
      "      if (useStart <= declStart) continue;",
-     "L0 the_37_chatcut_accepted_all_pass",
+     "L0 every_chatcut_accepted_blob_passes",
      lambda s: "useStart >= declStart" in s),
     # A PARSE FAILURE READS AS CLEAN. The whole class walks through an
     # unparseable body, and the output looks identical to a pass.

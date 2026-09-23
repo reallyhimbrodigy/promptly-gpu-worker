@@ -28,7 +28,7 @@ MUTATIONS = [
     ("loss_allowed", "bake_registry.py",
      '    lost = sorted(component_keys(old_reg) - component_keys(new_reg))',
      '    lost = []',
-     "L2 the_real_bake_refuses_and_names_the_lost",
+     "L2 a_loss_refuses_and_names_what_is_lost",
      lambda s: "component_keys(old_reg) - component_keys(new_reg)" in s),
     # IT BECOMES AN EQUALITY GUARD, so a deliberate ADDITION is refused too and
     # the guard is deleted by the first person who adds a component.

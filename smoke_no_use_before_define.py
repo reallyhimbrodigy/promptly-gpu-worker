@@ -96,7 +96,13 @@ def main():
         n = extract_baked(tmp)
         files = sorted(os.path.join(tmp, f) for f in os.listdir(tmp) if f.endswith(".jsx"))
         rc, out = run(files)
-        leg("L0 the_37_chatcut_accepted_all_pass", n == 37 and rc == 0,
+        # WAS `n == 37`. The nine caption blobs were dropped from the registry
+        # on 2026-09-23 because nothing read their baked pages, so the negative
+        # population is 28 now. A COUNT is the wrong thing to pin here anyway:
+        # what makes this leg the one that caught Builder 1 twice is that EVERY
+        # blob ChatCut accepted passes, whatever the number. The floor stays,
+        # because a checker run over zero files exits 0 and asserts nothing.
+        leg("L0 every_chatcut_accepted_blob_passes", n >= 20 and rc == 0,
             "%d baked blob(s), checker exit=%d %s"
             % (n, rc, "" if rc == 0 else out.strip().splitlines()[-1:]))
 

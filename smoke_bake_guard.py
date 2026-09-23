@@ -39,22 +39,49 @@ def main():
     keys = bk.component_keys(cur)
 
     # L0 POPULATION FLOOR. Without this every leg below asserts over nothing.
+    #
+    # WAS `len(keys) == 37 and len(caps) == 9`. The nine caption blobs were
+    # dropped on 2026-09-23 — nothing read their baked pages — so a leg pinned
+    # to 37/9 was a leg defending a DECISION that had been correctly reversed,
+    # and it went red on the commit that reversed it. The floor is what it was
+    # always for: enough components that the legs below assert something.
     caps = sorted(k for k in keys if str(k).startswith("caption:"))
-    leg("L0 artifact_population", len(keys) == 37 and len(caps) == 9,
-        "%d component(s), %d caption style(s)" % (len(keys), len(caps)))
+    leg("L0 artifact_population", len(keys) >= 20 and not caps,
+        "%d component(s), %d caption blob(s) (expected 0 since 2026-09-23)"
+        % (len(keys), len(caps)))
 
     # L1 THE KEYS ARE NAMES, NOT POSITIONS. A counter renames everything on a
     # reorder and tells the reader nothing.
+    # `"caption:Lumen" in keys` was the witness that a COLON-BEARING key
+    # survives — the shape a counter would mangle. Lumen is gone, so the
+    # witness moved to any real component name, and the property it proves is
+    # unchanged: no key is a positional placeholder.
     leg("L1 keys_are_names_not_positions",
-        all(not str(k).startswith("<") for k in keys) and "caption:Lumen" in keys,
+        bool(keys) and all(not str(k).startswith("<") for k in keys)
+        and "StatCard" in keys,
         "sample: %s" % sorted(keys)[:3])
 
-    # L2 THE REAL LOSS REFUSES, AND NAMES THE NINE.
-    built = bk.build(verbose=False)
-    ok, why = bk.shrink_guard(built, ART)
-    named = sum(1 for c in caps if c in why)
-    leg("L2 the_real_bake_refuses_and_names_the_lost", not ok and named == 9,
-        "refused=%s, %d of 9 caption styles named in the message" % (not ok, named))
+    # L2 A LOSS REFUSES, AND NAMES WHAT IS LOST.
+    #
+    # DRIVEN, NOT OBSERVED. This used to run the REAL bake and assert it was
+    # refused, because the artifact held 37 while the bake produced 28. That
+    # made the leg depend on the build step being BROKEN: the day the artifact
+    # and the bake agreed — which is the day the nine were dropped, and a good
+    # day — the leg failed for the right reason and reported it as a defect.
+    #
+    # A check that needs the system to stay wrong is a check that will be
+    # deleted the moment it is fixed. So the loss is CONSTRUCTED: drop three
+    # real components from a copy and assert the guard refuses and names all
+    # three. Same property, no dependence on today's bake.
+    victims = sorted(keys)[:3]
+    shrunk = json.loads(json.dumps(cur))
+    for v in victims:
+        shrunk["components"].pop(v, None)
+    ok, why = bk.shrink_guard(shrunk, ART)
+    named = sum(1 for c in victims if c in why)
+    leg("L2 a_loss_refuses_and_names_what_is_lost",
+        not ok and named == len(victims),
+        "refused=%s, %d of %d named: %s" % (not ok, named, len(victims), victims))
 
     # L3 AN IDENTICAL WRITE IS ALLOWED.
     ok2, _ = bk.shrink_guard(cur, ART)
