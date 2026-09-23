@@ -1,0 +1,271 @@
+[
+ {
+  "file": "boom - deep low impact for heavy landings reveals and big claims.mp3",
+  "name": "boom",
+  "gain_db": -4.9,
+  "bound_by": "loudness",
+  "M_before": -8.6,
+  "M_after": -14.0,
+  "TP_before": -0.7,
+  "TP_after": -6.0,
+  "dur_before": 1.157,
+  "dur_after": 1.157,
+  "kbps": 128,
+  "gain_passes": [
+   -5.4,
+   -4.9
+  ],
+  "content_s": 1.157,
+  "window_dilution_db": 0.0,
+  "effective_M": -14.0,
+  "menu_line": "boom - deep low impact for heavy landings reveals and big claims"
+ },
+ {
+  "file": "camera-flash - bright shutter click for snaps cuts and freeze frames.mp3",
+  "name": "camera-flash",
+  "gain_db": -0.3,
+  "bound_by": "TRUE PEAK",
+  "M_before": -19.6,
+  "M_after": -20.2,
+  "TP_before": -0.7,
+  "TP_after": -1.2,
+  "dur_before": 0.5,
+  "dur_after": 0.5,
+  "kbps": 106,
+  "gain_passes": [
+   -0.3
+  ],
+  "content_s": 0.165,
+  "window_dilution_db": 3.9,
+  "effective_M": -16.3,
+  "menu_line": "camera-flash - bright shutter click for snaps cuts and freeze frames"
+ },
+ {
+  "file": "iphoneding - notification chime for messages alerts and reminders.mp3",
+  "name": "iphoneding",
+  "gain_db": -0.8,
+  "bound_by": "loudness",
+  "M_before": -12.8,
+  "M_after": -14.0,
+  "TP_before": -2.9,
+  "TP_after": -4.0,
+  "dur_before": 2.714,
+  "dur_after": 2.714,
+  "kbps": 128,
+  "gain_passes": [
+   -1.2,
+   -0.8
+  ],
+  "content_s": 2.551,
+  "window_dilution_db": 0.0,
+  "effective_M": -14.0,
+  "menu_line": "iphoneding - notification chime for messages alerts and reminders"
+ },
+ {
+  "file": "money-ching - cash register for prices revenue savings and money figures.mp3",
+  "name": "money-ching",
+  "gain_db": 2.4,
+  "bound_by": "TRUE PEAK",
+  "M_before": -20.6,
+  "M_after": -18.7,
+  "TP_before": -3.4,
+  "TP_after": -1.7,
+  "dur_before": 1.688,
+  "dur_after": 1.688,
+  "kbps": 128,
+  "gain_passes": [
+   2.4
+  ],
+  "content_s": 1.478,
+  "window_dilution_db": 0.0,
+  "effective_M": -18.7,
+  "menu_line": "money-ching - cash register for prices revenue savings and money figures"
+ },
+ {
+  "file": "mouse-click-sound - one click for UI actions taps and selections.mp3",
+  "name": "mouse-click-sound",
+  "gain_db": 2.9,
+  "bound_by": "TRUE PEAK",
+  "M_before": -25.4,
+  "M_after": -23.0,
+  "TP_before": -3.9,
+  "TP_after": -1.5,
+  "dur_before": 0.5,
+  "dur_after": 0.5,
+  "kbps": 96,
+  "gain_passes": [
+   2.9
+  ],
+  "content_s": 0.151,
+  "window_dilution_db": 4.2,
+  "effective_M": -18.8,
+  "menu_line": "mouse-click-sound - one click for UI actions taps and selections"
+ },
+ {
+  "file": "popsfx - short pop for graphics appearing captions and list items.mp3",
+  "name": "popsfx",
+  "gain_db": 4.3,
+  "bound_by": "TRUE PEAK",
+  "M_before": -19.6,
+  "M_after": -15.8,
+  "TP_before": -5.3,
+  "TP_after": -1.5,
+  "dur_before": 0.5,
+  "dur_after": 0.5,
+  "kbps": 96,
+  "gain_passes": [
+   4.3
+  ],
+  "content_s": 0.218,
+  "window_dilution_db": 2.6,
+  "effective_M": -13.2,
+  "menu_line": "popsfx - short pop for graphics appearing captions and list items"
+ },
+ {
+  "file": "punchsfx - sharp hit for hard words hits and quick emphasis.mp3",
+  "name": "punchsfx",
+  "gain_db": -8.5,
+  "bound_by": "loudness",
+  "M_before": -5.0,
+  "M_after": -14.0,
+  "TP_before": 1.5,
+  "TP_after": -7.5,
+  "dur_before": 0.594,
+  "dur_after": 0.594,
+  "kbps": 128,
+  "gain_passes": [
+   -9.0,
+   -8.5
+  ],
+  "content_s": 0.525,
+  "window_dilution_db": 0.0,
+  "effective_M": -14.0,
+  "menu_line": "punchsfx - sharp hit for hard words hits and quick emphasis"
+ },
+ {
+  "file": "rizz - rising flourish for flirty smug and confident beats.mp3",
+  "name": "rizz",
+  "gain_db": -4.3,
+  "bound_by": "loudness",
+  "M_before": -9.2,
+  "M_after": -14.0,
+  "TP_before": -2.3,
+  "TP_after": -7.1,
+  "dur_before": 1.545,
+  "dur_after": 1.545,
+  "kbps": 128,
+  "gain_passes": [
+   -4.8,
+   -4.3
+  ],
+  "content_s": 1.461,
+  "window_dilution_db": 0.0,
+  "effective_M": -14.0,
+  "menu_line": "rizz - rising flourish for flirty smug and confident beats"
+ },
+ {
+  "file": "shockingsfx - stinger for surprises twists and bad news.mp3",
+  "name": "shockingsfx",
+  "gain_db": -3.2,
+  "bound_by": "loudness",
+  "M_before": -10.3,
+  "M_after": -14.0,
+  "TP_before": -0.2,
+  "TP_after": -4.2,
+  "dur_before": 1.147,
+  "dur_after": 1.147,
+  "kbps": 128,
+  "gain_passes": [
+   -3.7,
+   -3.2
+  ],
+  "content_s": 1.147,
+  "window_dilution_db": 0.0,
+  "effective_M": -14.0,
+  "menu_line": "shockingsfx - stinger for surprises twists and bad news"
+ },
+ {
+  "file": "swoosh-sound-effects - whoosh for moves wipes and quick transitions.mp3",
+  "name": "swoosh-sound-effects",
+  "gain_db": -0.3,
+  "bound_by": "TRUE PEAK",
+  "M_before": -18.6,
+  "M_after": -19.3,
+  "TP_before": -0.7,
+  "TP_after": -1.4,
+  "dur_before": 0.5,
+  "dur_after": 0.5,
+  "kbps": 96,
+  "gain_passes": [
+   -0.3
+  ],
+  "content_s": 0.249,
+  "window_dilution_db": 2.1,
+  "effective_M": -17.2,
+  "menu_line": "swoosh-sound-effects - whoosh for moves wipes and quick transitions"
+ },
+ {
+  "file": "transition-sfx - whoosh for scene changes chapters and section breaks.mp3",
+  "name": "transition-sfx",
+  "gain_db": -3.9,
+  "bound_by": "loudness",
+  "M_before": -9.6,
+  "M_after": -14.0,
+  "TP_before": 0.6,
+  "TP_after": -3.9,
+  "dur_before": 3.139,
+  "dur_after": 3.139,
+  "kbps": 128,
+  "gain_passes": [
+   -4.4,
+   -3.9
+  ],
+  "content_s": 2.853,
+  "window_dilution_db": 0.0,
+  "effective_M": -14.0,
+  "menu_line": "transition-sfx - whoosh for scene changes chapters and section breaks"
+ },
+ {
+  "file": "wompwomp - sad trombone for failures mistakes and letdowns.mp3",
+  "name": "wompwomp",
+  "gain_db": -3.0,
+  "bound_by": "loudness",
+  "M_before": -10.5,
+  "M_after": -14.0,
+  "TP_before": -3.4,
+  "TP_after": -6.8,
+  "dur_before": 3.403,
+  "dur_after": 3.403,
+  "kbps": 128,
+  "gain_passes": [
+   -3.5,
+   -3.0
+  ],
+  "content_s": 3.403,
+  "window_dilution_db": 0.0,
+  "effective_M": -14.0,
+  "menu_line": "wompwomp - sad trombone for failures mistakes and letdowns"
+ },
+ {
+  "file": "woosh-professional - cleaner whoosh for polished moves and smooth transitions.mp3",
+  "name": "woosh-professional",
+  "gain_db": 1.25,
+  "bound_by": "TRUE PEAK",
+  "M_before": -15.0,
+  "M_after": -14.1,
+  "TP_before": -2.3,
+  "TP_after": -1.1,
+  "dur_before": 1.559,
+  "dur_after": 1.559,
+  "kbps": 128,
+  "gain_passes": [
+   1.0,
+   1.4,
+   1.25
+  ],
+  "content_s": 1.454,
+  "window_dilution_db": 0.0,
+  "effective_M": -14.1,
+  "menu_line": "woosh-professional - cleaner whoosh for polished moves and smooth transitions"
+ }
+]
