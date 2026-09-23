@@ -1,5 +1,5 @@
 {
- "_note": "SAMPLE PROPS FOR THE CATALOGUE STILLS ONLY. Not defaults, not a rubric \u2014 each one exists to make the component RENDER SOMETHING so the still shows what it looks like. An empty StatCard renders 48,138 bytes of nothing and exits 0, which is why the builder refuses a near-uniform frame.",
+ "_note": "SAMPLE PROPS FOR THE CATALOGUE STILLS ONLY. Not defaults, not a rubric — each one exists to make the component RENDER SOMETHING so the still shows what it looks like. An empty StatCard renders 48,138 bytes of nothing and exits 0, which is why the builder refuses a near-uniform frame.",
  "AnnotationArrow": {
   "startMs": 0,
   "durationMs": 3000,
@@ -111,16 +111,7 @@
   "durationMs": 3000,
   "kind": "cta",
   "title": "FOLLOW FOR MORE",
-  "lines": [
-   {
-    "text": "@promptly",
-    "icon": "at"
-   },
-   {
-    "text": "promptly.video",
-    "icon": "globe"
-   }
-  ],
+  "lines": [],
   "palette": {
    "bg": "#14141A",
    "fg": "#FEFCFD",
@@ -163,15 +154,7 @@
  "Notification": {
   "startMs": 0,
   "durationMs": 3000,
-  "notifications": [
-   {
-    "app": "apple-pay",
-    "appName": "Apple Pay",
-    "title": "Payment Received",
-    "body": "$249.00 from Kellan",
-    "timestamp": "now"
-   }
-  ]
+  "notifications": []
  },
  "PillCluster": {
   "startMs": 0,
@@ -438,5 +421,6 @@
    "likes": 1200,
    "views": 98000
   }
- }
+ },
+ "_emptied_2026_09_23": "EndCard.lines AND Notification.notifications ARE NOW EMPTY, and empty is the ruling that already existed. Baked content is a LITERAL — it is dropped from `properties`, so propertyOverrides cannot reach it and EVERY placement draws it verbatim. EndCard baked '@promptly' and 'promptly.video': our handle on a customer's video with no property to change it. Notification baked 'Payment Received' / '$249.00 from Kellan': a fabricated financial record naming a person, rendered as if real. Same family as the six placeholder strings that became empty roots on 2026-09-22 — 'RENDERS NOTHING, NOT A PLACEHOLDER', because a component's internal state is not the viewer's content. Both components GUARD empty (EndCard `lines.length ?`, Notification `if (items.length === 0) return null`), so this draws nothing rather than throwing. If either should be placeable, its copy is a ruling, not a default."
 }

@@ -58,6 +58,7 @@ SMOKES = [
     "smoke_menu_lines",
     "smoke_credit_prices",
     "smoke_sfx_levels",
+    "smoke_baked_copy",
 ]
 N_EXPECTED = 2 * len(SMOKES)
 
