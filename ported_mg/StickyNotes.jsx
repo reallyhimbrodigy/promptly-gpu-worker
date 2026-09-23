@@ -235,7 +235,13 @@ var StickyNotes = ({
   noteSize = 300,
   noteFontSize = 50,
   noteFontFamily = MG_FONTS.caveatBrush,
-  showFog = true,
+  // FOG OFF BY DEFAULT (2026-09-23). It paints a full-width band over the top
+  // half of the box starting at rgba(255,255,255,1) — FULLY OPAQUE WHITE — and
+  // in ChatCut's export that is a solid white band across the frame, not
+  // atmosphere. Same family as SectionDivider's scrim and vignette and
+  // Reticle's window plane: a decorative layer whose failure mode is an opaque
+  // rectangle over the user's video.
+  showFog = false,
   topOffset = "5%"
 }) => {
   const frame = useCurrentFrame();

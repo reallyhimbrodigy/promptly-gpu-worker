@@ -493,10 +493,40 @@ var ACCENT_HEIGHT_RATIO = 0.045;
 // number row. The bound is now 12 digits and that is stated rather than implied.
 var NUMBER_MIN = 150;
 var NUMBER_MAX = 470;
-var FULL_BLEED_FRAC = 1;
+// 0.92, WAS 1. At 1 the target is the ENTIRE canvas width with no margin, so
+// the row is one modelling error away from bleeding off both sides — and with
+// the digit em under-estimated it did. A margin turns a model error into a
+// slightly small number instead of a clipped one.
+var FULL_BLEED_FRAC = 0.92;
 var easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
 var DEFAULT_TEXT_SHADOW = "0 2px 8px rgba(0,0,0,0.85), 0 12px 40px rgba(0,0,0,0.6)";
-var antonCharEm = (c) => c === "," || c === "." ? 0.24 : c === " " ? 0.3 : 0.5;
+// GROUP THE DIGITS OURSELVES. toLocaleString() is an Intl call, and their
+// renderer answers it with UNGROUPED DIGITS — the export reads 20000000, not
+// 20,000,000. Intl degrades SILENTLY on a runtime built without full ICU data:
+// no error, no warning, just a number missing its separators on a component
+// whose entire job is money figures. This is the same class as the CSS their
+// renderer cannot draw, one layer down: an API we cannot verify from here, so
+// we stop depending on it.
+var groupDigits = (s) => {
+  var neg = s.charAt(0) === "-";
+  var body = neg ? s.slice(1) : s;
+  var dot = body.indexOf(".");
+  var whole = dot === -1 ? body : body.slice(0, dot);
+  var rest = dot === -1 ? "" : body.slice(dot);
+  var out = "";
+  for (var i = 0; i < whole.length; i += 1) {
+    if (i > 0 && (whole.length - i) % 3 === 0) out += ",";
+    out += whole.charAt(i);
+  }
+  return (neg ? "-" : "") + out + rest;
+};
+// 0.56, WAS 0.50, AND THE 0.50 WAS THE OVERFLOW. The row is sized by
+// numberSize = width * FULL_BLEED_FRAC / totalEm, so this constant IS the
+// width model — and an UNDER-estimate makes the font too big and runs the
+// number off both edges, which is exactly what the export shows. Anton's
+// digits advance wider than half an em; over-estimating is the safe
+// direction, because too small is legible and too big is clipped.
+var antonCharEm = (c) => c === "," || c === "." ? 0.28 : c === " " ? 0.3 : 0.56;
 var estWidthEm = (s) => s.split("").reduce((a, c) => a + antonCharEm(c), 0);
 var StatCard = ({
   startMs,
@@ -544,8 +574,8 @@ var StatCard = ({
   });
   const easedCount = easeOutCubic(countProgress);
   const currentValue = fromValue + (value - fromValue) * easedCount;
-  const display = decimals !== undefined ? currentValue.toFixed(decimals) : Math.round(currentValue).toLocaleString();
-  const finalDisplay = decimals !== undefined ? value.toFixed(decimals) : Math.round(value).toLocaleString();
+  const display = decimals !== undefined ? groupDigits(currentValue.toFixed(decimals)) : groupDigits(String(Math.round(currentValue)));
+  const finalDisplay = decimals !== undefined ? groupDigits(value.toFixed(decimals)) : groupDigits(String(Math.round(value)));
   const prefixMetrics = mgTextMetrics(prefix ?? "");
   const suffixMetrics = mgTextMetrics(suffix ?? "");
   const prefixFont = mgTextFont(prefix ?? "", "anton");
@@ -641,7 +671,10 @@ var StatCard = ({
       fontSize: numberSize,
       fontWeight: 400,
       letterSpacing: "-0.02em",
-      lineHeight: 1,
+      // 1.12, WAS 1. lineHeight 1 gives the glyph box exactly one em, and
+      // Anton's digits fill it — so the row's bottom edge cut the digits off
+      // in the export. The extra 12% is the descent the face needs.
+      lineHeight: 1.12,
       fontVariantNumeric: "tabular-nums"
     }}
   >

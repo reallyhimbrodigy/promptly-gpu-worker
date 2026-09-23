@@ -104,7 +104,8 @@
     "position": "bottom",
     "wordsPerPage": 4
    },
-   "_not_expressible": "The keyword also changes FACE (Playfair Display 400 italic) and SIZE (1.3x), and a shine word goes to 1.6x with a sweep. styleProfile varies COLOUR per word and nothing else, so the face swap and the shine do not travel. Stated rather than approximated with a second colour."
+   "_not_expressible": "The keyword also changes FACE (Playfair Display 400 italic) and SIZE (1.3x), and a shine word goes to 1.6x with a sweep. styleProfile varies COLOUR per word and nothing else, so the face swap and the shine do not travel. Stated rather than approximated with a second colour.",
+   "_status": "CUT — see measured/MENU_LINES.json _cut_presets"
   },
   "Prime": {
    "_line": "Prime — two stacked lines in white and blue for setups, payoffs and question-answer beats",
@@ -130,7 +131,8 @@
     "position": "bottom",
     "wordsPerPage": 3
    },
-   "_not_expressible": "line1Color #FFFFFF / line2Color #3BA5FF — styleProfile has ONE `color` and no per-line key, so both lines ship white. Mapping the blue onto highlightColor would light the SPOKEN word blue, which is a different thing that looks deliberate."
+   "_not_expressible": "line1Color #FFFFFF / line2Color #3BA5FF — styleProfile has ONE `color` and no per-line key, so both lines ship white. Mapping the blue onto highlightColor would light the SPOKEN word blue, which is a different thing that looks deliberate.",
+   "_status": "CUT — see measured/MENU_LINES.json _cut_presets"
   },
   "Pulse": {
    "_line": "Pulse — clean words with the spoken one in coral for calm delivery and slow reveals",
@@ -155,7 +157,7 @@
    "_not_expressible": "The keyword is also 1.25x with a glow off the highlight colour. No per-word scale key, so it ships as colour alone."
   },
   "TwoTone": {
-   "_line": "TwoTone — two thick outlined lines, the second in a warm accent, for loud punchy beats",
+   "_line": "TwoTone — bold uppercase white words with a thick dark outline for loud punchy beats",
    "baseline": "white-impact",
    "_why": "White + a real stroke + shadow + highlight-off + no background, which is TwoTone's whole structure. ITS OUTLINE IS UNIFORM, not per-word — every word carries the same 6px stroke — so it is NOT highlight-bearing and does not wait on the diff.",
    "styleProfile": {
@@ -175,9 +177,9 @@
     "sizePx": 110,
     "position": "center"
    },
-   "_not_expressible": "line 2 in accentColor #FFC53D — same one-`color` gap. The 6px stroke DOES travel; it is the accent line that does not."
+   "_not_expressible": "line 2 in accentColor #FFC53D has no per-line key in styleProfile, so ChatCut renders every line white. THE LINE WAS REWRITTEN TO MATCH WHAT RENDERS rather than what our component does: 'the second in a warm accent' was true of the Remotion body and false of the preset, which is the half B1 caught."
   }
  },
- "_status": "ALL SEVEN RELEASED. No style is held.",
+ "_status": "FIVE PRESETS LIVE: CleanCut, Cove, Gadzhi, Pulse, TwoTone. Prime and Lumen cut 2026-09-23 — their identity does not survive the mapping into styleProfile.",
  "_single_source": "THIS FILE IS THE ONLY SOURCE FOR ALL SEVEN — baseline, style, size, layout, pagination, line, and the not-expressible notes. B1 builds from it and nothing else."
 }

@@ -99,8 +99,20 @@ const Component = ({ item }) => {
       <div style={{ alignSelf: "flex-start", clipPath: "inset(0 " + (100 - wipe) + "% 0 0)" }}>
         <div style={{ backgroundColor: "rgba(12,12,14,0.9)", padding: Math.round(fontSize * 0.34),
                       borderBottom: Math.round(fontSize * 0.07) + "px solid " + accent }}>
+          {/* lineHeight 1.25, WAS 1.05. THE NAME WAS DRAWN OUTSIDE ITS OWN
+              BACKGROUND. The dark box sizes to this div's LINE BOX, and at
+              1.05 an 800-weight uppercase face's ink is taller than the line
+              box it sits in — so the caps spilled above the painted
+              background and the box's top edge ran through the middle of
+              "ALEX RIVERA", half on the box and half on the video.
+
+              Not a clipping bug: nothing was cut off. The text was outside
+              the thing meant to be behind it, which looks like clipping and
+              is fixed at the opposite end — make the box taller, not the
+              text smaller. Same family as StatCard's lineHeight 1, where the
+              line box cropped the digits instead. */}
           <div style={{ color: textColor, fontFamily: fontFamily, fontWeight: 800,
-                        fontSize: fontSize, lineHeight: 1.05 }}>{name}</div>
+                        fontSize: fontSize, lineHeight: 1.25 }}>{name}</div>
           {title ? (<div style={{ color: accent, fontFamily: fontFamily, fontWeight: 600,
                                   fontSize: Math.round(fontSize * 0.42),
                                   marginTop: Math.round(fontSize * 0.12) }}>{title}</div>) : null}

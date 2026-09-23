@@ -20,10 +20,8 @@
   "CleanCut — plain white words for narration, explainers and text that must not steal focus",
   "Cove — words that appear one at a time as they are spoken for narration and demos",
   "Gadzhi — uppercase words with the spoken one lit in yellow for punchlines and key terms",
-  "Lumen — soft white words with the spoken one in amber for hype, reveals and energy",
-  "Prime — two stacked lines in white and blue for setups, payoffs and question-answer beats",
   "Pulse — clean words with the spoken one in coral for calm delivery and slow reveals",
-  "TwoTone — two thick outlined lines, the second in a warm accent, for loud punchy beats"
+  "TwoTone — bold uppercase white words with a thick dark outline for loud punchy beats"
  ],
  "sounds": [
   "boom - deep low impact for heavy landings reveals and big claims",
@@ -48,5 +46,10 @@
   "RankedList": "items.slice(0, 5)",
   "EmojiCard": "CAPTION_MAX_CHARS = 80 — truncated with an ellipsis",
   "_none": "PlainText, CaptionMatch, StatCard, Reticle and Stamp carry no cap. Stamp only steps its font size down past 11 and 14 characters, which is graceful, not a limit — stating it as one would be inventing a constraint the body does not have."
+ },
+ "_cut_presets": {
+  "Prime": "CUT 2026-09-23. Its whole identity is TWO LINES IN TWO COLOURS — white line 1 over #3BA5FF line 2 — and styleProfile has ONE `color` with no per-line key. Applied, it renders as a single white line, which is CleanCut with a different size. The line describing it would have been true of our Remotion component and false of everything ChatCut draws.",
+  "Lumen": "CUT 2026-09-23. Its keyword changes FACE (Playfair Display italic) and SIZE (1.3x, 1.6x on a shine word); styleProfile varies COLOUR per word and nothing else. What survives the mapping is white Montserrat with an amber spoken word — which is Gadzhi in a different hue, so it was a duplicate of a preset that maps cleanly rather than a style of its own.",
+  "_rule": "A preset is kept only where the thing that MAKES it that preset survives into ChatCut's render. Both of these lost their identity in the mapping and would have shipped a true-sounding line describing a render nobody would ever see — the same defect as the three lines I had already written wrong this session, caught before shipping rather than after."
  }
 }

@@ -76,7 +76,7 @@ def _newline(d):
 DATA_MUTATIONS = [
     # name, apply, leg phrase, precondition over the UNMUTATED corpus
     ("a_component_line_goes_missing", _drop_a_component,
-     "L0 thirty_two_lines_one_per_asset",
+     "L0 thirty_lines_one_per_live_asset",
      lambda d: len(d["components"]) == 12),
     ("a_line_runs_past_ninety", _overlong,
      "L1 every_line_obeys_the_rule",

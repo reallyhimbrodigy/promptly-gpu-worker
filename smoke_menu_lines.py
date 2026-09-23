@@ -101,14 +101,25 @@ def check(line, group):
 
 def main():
     d = json.load(io.open(LINES, encoding="utf-8"))
-    groups = {"components": 12, "caption_styles": 7, "sounds": 13}
+    # THE POPULATION, NAMED NOT DISCOVERED, and it moved on 2026-09-23:
+    # caption styles 7 -> 5 because Prime and Lumen were CUT — the thing that
+    # makes each of them that preset (Prime's two line colours, Lumen's keyword
+    # face and size change) has no key in ChatCut's styleProfile, so each would
+    # have shipped a true-sounding line describing a render nobody would see.
+    #
+    # COMPONENTS STAY AT 12 even though six are deregistered from the run
+    # project pending their fixes. They are off the PROJECT, not off the MENU,
+    # and dropping them here would turn a temporary deregistration into a
+    # silently shorter menu — the subset-as-total failure, with the six worst
+    # components as the subset that vanishes.
+    groups = {"components": 12, "caption_styles": 5, "sounds": 13}
     allof = [l for g in groups for l in d[g]]
 
     # L0 THE POPULATION IS THE WHOLE MENU. A subset that happens to pass is the
     # subset-as-total failure.
     counts = {g: len(d[g]) for g in groups}
-    leg("L0 thirty_two_lines_one_per_asset",
-        counts == groups and len(allof) == 32, "%s = %d" % (counts, len(allof)))
+    leg("L0 thirty_lines_one_per_live_asset",
+        counts == groups and len(allof) == 30, "%s = %d" % (counts, len(allof)))
 
     # L1 EVERY LINE OBEYS THE RULE.
     bad = [(l, check(l, g)) for g in groups for l in d[g]]

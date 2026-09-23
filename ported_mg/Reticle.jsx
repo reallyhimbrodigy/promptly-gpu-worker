@@ -518,16 +518,21 @@ var Reticle = ({
        subject and the region reads as a window, not four floating
        corners. Releases with the exit defocus. */
   }
-          <div
-    aria-hidden
-    style={{
-      position: "absolute",
-      inset: 0,
-      borderRadius: 10,
-      boxShadow: `0 0 0 9999px rgba(0,0,0,${(0.26 * lockT * (1 - exitDefocus)).toFixed(3)})`,
-      pointerEvents: "none"
-    }}
-  />
+          {
+    /* THE WINDOW PLANE IS GONE (2026-09-23). It dimmed everything OUTSIDE the
+       region with a single node — `boxShadow: 0 0 0 9999px rgba(0,0,0,.26)` —
+       and the comment above called that a feature: "one node, no four-rect
+       math". THEIR RENDERER PAINTS THAT SPILL INSIDE THE ELEMENT, so the
+       window plane became a translucent grey slab filling the box, across the
+       subject's face, in ChatCut's own export.
+
+       Not reimplemented as four rects. It is DECORATION — the brackets and
+       the scanline are what make this a reticle — and this is the third
+       decorative layer this week to render as a defect (SectionDivider's
+       scrim and vignette, StickyNotes' fog). A layer that exists to add
+       atmosphere and can arrive as an opaque panel is not worth the
+       geometry to keep. */
+  }
 
           {
     /* Corner brackets */
@@ -623,9 +628,14 @@ var Reticle = ({
       gap: 12,
       padding: "12px 22px",
       borderRadius: 14,
-      background: "linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 50%), rgba(16,18,24,0.42)",
-      backdropFilter: "blur(18px) saturate(150%)",
-      WebkitBackdropFilter: "blur(18px) saturate(150%)",
+      // BACKDROP-FILTER IS NOT DRAWN BY THEIR RENDERER, and what it leaves is
+      // not nothing — it is this element's own fill, painted flat. At 42%
+      // opacity the "glass" tag becomes a translucent grey slab. It only
+      // draws when `label` is set, so it is not today's defect; it is today's
+      // defect waiting for the first caller who sets one. A solid fill
+      // renders the same everywhere, so the look is chosen rather than left
+      // to whatever each renderer happens to support.
+      background: "rgba(16,18,24,0.88)",
       border: "1.5px solid rgba(255,255,255,0.18)",
       boxShadow: "0 12px 30px rgba(0,0,0,0.42)",
       whiteSpace: "nowrap"
