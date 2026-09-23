@@ -47,6 +47,25 @@ def money_returns(d):
     return d, ["Notification"]
 
 
+def one_string_is_baked(d):
+    """ZAC'S NAMED MUTANT: a component bakes ONE string.
+
+    The ceiling is zero, so the smallest possible violation is the right
+    mutation — a single word that no placement can override. PullQuote is
+    EndCard.palette is baked and today carries only colours, so ONE WORD added
+    to it is the smallest possible violation of a ceiling of zero.
+
+    MY FIRST VERSION ADDED A SCALAR AND DID NOT BITE. `bake()` only inlines
+    lists and dicts — a scalar becomes a propertyOverride, which is SETTABLE,
+    so PullQuote.subtitle was correctly not baked copy. Real bytes, no verdict:
+    wrong population for the third time today, and the third different way in.
+    The string has to ride inside an ARRAY the component's __mapped reads.
+    """
+    d["EndCard"] = dict(d.get("EndCard") or {})
+    d["EndCard"]["palette"] = list(d["EndCard"].get("palette") or []) + ["BETA"]
+    return d, ["EndCard"]
+
+
 def new_component_gains_copy(d):
     """A STRUCTURAL baked payload acquires a word, so its component joins the set.
 
@@ -71,7 +90,9 @@ MUT = [
     ("a_fabricated_payment_returns", money_returns,
      "L3 no_money_amount_in_baked_copy"),
     ("a_component_quietly_gains_baked_copy", new_component_gains_copy,
-     "L0 baked_copy_population_is_pinned"),
+     "L0 no_component_carries_baked_copy"),
+    ("one_string_is_baked", one_string_is_baked,
+     "L0 no_component_carries_baked_copy"),
 ]
 
 

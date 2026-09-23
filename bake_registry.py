@@ -38,6 +38,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import derive_prop_types                                       # noqa: E402
 import build_chatcut_registry as B                             # noqa: E402
+import flatten_spec                                            # noqa: E402
 
 PORTED = os.path.join(HERE, "ported_mg")
 FIXTURES = os.path.join(HERE, "catalogue_props.json")
@@ -64,6 +65,95 @@ def bake_absent(code, props, keys):
         props = [p for p in props if p["key"] != key]
         done.append(key)
     return code, props, done
+
+
+def flatten(code, props, name, data):
+    """Turn a baked ARRAY into numbered scalar properties. -> (code, props, note).
+
+    THE ARRAY BECOMES N SLOTS AND THE COMPONENT REBUILDS IT. ChatCut still has
+    no array type — that is why the content was baked at all — but it has
+    scalar text properties, so `notes` becomes note1..note3 and the blob
+    assembles the array at render time from `props.note1`, `props.note2`,
+    `props.note3`.
+
+    AN EMPTY SLOT IS DROPPED, NOT DRAWN. `.filter()` removes it before the
+    component ever sees it, so the layout closes up: no gap, no placeholder,
+    no empty row. That is the whole difference between a five-row component
+    you can use for three rows and one that shows two blanks.
+
+    AND THE AUTO FIELDS ARE COMPUTED AFTER THE FILTER. RankedList's rank is
+    the DRAWN position, so filling rows 1, 3 and 4 draws 1, 2, 3 — if the
+    numbering did not close up with the layout, leaving a row blank would
+    produce a list that skips a number, which is worse than the gap.
+    """
+    import flatten_spec
+    spec = flatten_spec.FLATTEN.get(name)
+    if spec is None:
+        return code, props, None
+    # A COMPONENT CAN HAVE MORE THAN ONE STRUCTURED KEY. Two of the twelve do
+    # — ChatThread carries `header` beside `messages`, DropCard carries `steps`
+    # beside `points` — and the first version of this spec allowed one key per
+    # component, so it flattened one and left the other BAKED while reporting
+    # the component flattened. The survey is what caught it, not the spec.
+    if isinstance(spec, list):
+        notes = []
+        for one in spec:
+            code, props, note = _flatten_one(code, props, one)
+            notes.append("%s:%s" % (one["key"], note))
+        return code, props, " + ".join(notes)
+    return _flatten_one(code, props, spec)
+
+
+def _flatten_one(code, props, spec):
+    key = spec["key"]
+    needle = "    %s: props.%s,\n" % (key, key)
+    if needle not in code:
+        # WRONG POPULATION, SAID OUT LOUD. A spec entry whose component does
+        # not read that key through __mapped cannot be flattened, and a silent
+        # skip here would leave the array baked while the report said flattened.
+        return code, props, "NOT READ IN __mapped — nothing flattened"
+
+    fields = spec["fields"]
+    fixed = spec.get("fixed") or {}
+    auto = spec.get("auto") or {}
+    bare = fields[0][0] is None
+
+    if spec.get("object"):
+        # An object, not a list: one slot, fixed property names, and NO filter
+        # — dropping an empty header would remove the object the component
+        # destructures, which is a different thing from drawing no header.
+        parts = ["%s: props.%s" % (f, suf) for f, suf, _lab, _t in fields]
+        code = code.replace(needle, "    %s: { %s },\n" % (key, ", ".join(parts)))
+        props = [p for p in props if p["key"] != key]
+        for f, suf, lab, typ in fields:
+            props.append({"key": suf, "label": lab, "type": typ, "defaultValue": ""})
+        return code, props, "1 object x %d field(s)" % len(fields)
+
+    slots = []
+    for i in range(1, spec["n"] + 1):
+        if bare:
+            slots.append("props.%s" % (fields[0][1] % i))
+            continue
+        parts = ["%s: props.%s" % (f, suf % i) for f, suf, _lab, _t in fields]
+        for fk, vals in sorted(fixed.items()):
+            parts.append("%s: %s" % (fk, json.dumps(vals[(i - 1) % len(vals)])))
+        slots.append("{ %s }" % ", ".join(parts))
+
+    first = fields[0][1] if bare else fields[0][0]
+    empty = ("String(__x ?? \"\").trim() !== \"\"" if bare
+             else "String(__x.%s ?? \"\").trim() !== \"\"" % first)
+    expr = "[%s].filter((__x) => %s)" % (", ".join(slots), empty)
+    if auto:
+        adds = ", ".join("%s: %s" % (k, v) for k, v in sorted(auto.items()))
+        expr += ".map((__x, __i) => Object.assign({}, __x, { %s }))" % adds
+    code = code.replace(needle, "    %s: %s,\n" % (key, expr))
+
+    props = [p for p in props if p["key"] != key]
+    for i in range(1, spec["n"] + 1):
+        for _f, suf, lab, typ in fields:
+            props.append({"key": suf % i, "label": lab % i, "type": typ,
+                          "defaultValue": 0 if typ == "number" else ""})
+    return code, props, "%d slot(s) x %d field(s)" % (spec["n"], len(fields))
 
 
 def bake(code, props, data):
@@ -110,7 +200,27 @@ def build(verbose=True):
         # derive_prop_types could type them — `skipped` holds the ones it could
         # not, and those are exactly the ones that must be baked.
         data = dict(fx.get(n) or {})
+        # FLATTEN FIRST. bake() would inline the array as a literal and drop
+        # the property; flatten() takes the same key and turns it into numbered
+        # scalars instead. Whichever runs first owns the key, so the order is
+        # the whole ruling: no baked copy anywhere.
+        code, props, flat = flatten(code, props, n, data)
+        if flat:
+            _sp = flatten_spec.FLATTEN[n]
+            for _one in (_sp if isinstance(_sp, list) else [_sp]):
+                data.pop(_one["key"], None)
         code, props, baked, unbakeable = bake(code, props, data)
+        if flat:
+            # THE MARKER KEEPS THE KEY, as `key=FLATTENED(...)`. Dropping the
+            # key made the marker look like a key name to every reader of
+            # `baked` — the copy survey then called payload() on
+            # "FLATTENED(12 slot(s)...)", got None, and reported all twelve
+            # flattened components as unparsed-so-treat-as-copy. A format
+            # change in a list that other readers walk is a change to their
+            # input, and `key=` is the shape they already skip.
+            baked = ["%s=FLATTENED(%s)" % (
+                "+".join(o["key"] for o in (_sp if isinstance(_sp, list) else [_sp])),
+                flat)] + baked
         code, props, absent = bake_absent(
             code, props, [k for k, _ in (skipped or []) if k not in data])
         baked = baked + ["%s=undefined" % k for k in absent]
