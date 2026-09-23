@@ -8,6 +8,7 @@ already satisfies would change bytes and no verdict.
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -23,117 +24,65 @@ def _env():
     return e
 
 
-def rebake(names):
-    sys.path.insert(0, HERE)
-    import importlib
-    import bake_registry as B
-    importlib.reload(B)
-    fresh = B.build(verbose=False)["components"]
-    art = json.load(io.open(ART, encoding="utf-8"))
-    for n in names:
-        if n in fresh:
-            art["components"][n] = fresh[n]
-    io.open(ART, "w", encoding="utf-8").write(json.dumps(art, indent=1))
+# ── THE POPULATION MOVED, AND THE MUTATIONS MOVED WITH IT ────────────────
+#
+# Until 2026-09-23 these four mutations wrote a word into catalogue_props.json
+# and re-baked: EndCard.lines, Notification.notifications, EndCard.palette.
+# Every one of those payloads is now FLATTENED, so the fixture value is no
+# longer read by anything — `bake()` reports it unbakeable — and ALL FOUR WENT
+# VACUOUS IN THE SAME RUN. Byte-different fixtures, identical behaviour, and
+# the tally would have said 4/4 if the harness had not crashed on its own
+# VACUOUS return.
+#
+# That is not a harness bug to repair back to where it was. The defect class
+# itself has been eliminated: with nothing structurally baked anywhere, a
+# component CANNOT gain baked copy through a fixture any more. The only
+# remaining way it can appear is a hand-edit of the artifact — someone pastes
+# a literal back into a blob, or a bad merge restores one — so that is what
+# these now do. The mutation follows the defect; when the defect moves, a
+# mutation that stayed put is measuring nothing.
 
+def _mutate_artifact(art, comp, key, literal):
+    """Put a baked literal back into one component's blob, as a hand-edit would.
 
-def brand_returns(d):
-    d["EndCard"]["lines"] = [{"text": "@promptly", "kind": "handle"}]
-    return d, ["EndCard"]
-
-
-def money_returns(d):
-    d["Notification"]["notifications"] = [
-        {"app": "apple-pay", "title": "Payment Received", "body": "$249.00 from Kellan"}]
-    return d, ["Notification"]
-
-
-def one_string_is_baked(d):
-    """ZAC'S NAMED MUTANT: a component bakes ONE string.
-
-    The ceiling is zero, so the smallest possible violation is the right
-    mutation — a single word that no placement can override. PullQuote is
-    EndCard.palette is baked and today carries only colours, so ONE WORD added
-    to it is the smallest possible violation of a ceiling of zero.
-
-    MY FIRST VERSION ADDED A SCALAR AND DID NOT BITE. `bake()` only inlines
-    lists and dicts — a scalar becomes a propertyOverride, which is SETTABLE,
-    so PullQuote.subtitle was correctly not baked copy. Real bytes, no verdict:
-    wrong population for the third time today, and the third different way in.
-    The string has to ride inside an ARRAY the component's __mapped reads.
+    BOTH HALVES MOVE TOGETHER, because that is how a bake works and how a
+    regression would arrive: the __mapped read becomes a literal AND the
+    `baked` marker loses its `=FLATTENED(...)` suffix, which is what makes the
+    copy survey look at the key at all. Changing only one would produce a
+    mutant that is byte-different and invisible to the check — vacuous again,
+    one level down.
     """
-    d["EndCard"] = dict(d.get("EndCard") or {})
-    d["EndCard"]["palette"] = list(d["EndCard"].get("palette") or []) + ["BETA"]
-    return d, ["EndCard"]
-
-
-def _still_structurally_baked():
-    """-> (component, key) whose payload the bake still INLINES, or (None, None).
-
-    Read from the artifact rather than named in this file, because naming it
-    is what broke twice: `baked` entries carrying no `=` are the keys that
-    were genuinely inlined, and that set shrinks every time something is
-    flattened. Picking from it means the mutation follows the population
-    instead of pointing at where the population used to be.
-    """
-    import json
-    reg = json.load(io.open(ART, encoding="utf-8"))["components"]
-    for n in sorted(reg):
-        for k in (reg[n].get("baked") or []):
-            if "=" not in k:
-                return n, k
-    return None, None
-
-
-def new_component_gains_copy(d):
-    """A STRUCTURAL baked payload acquires a word, so its component joins the set.
-
-    MY FIRST VERSION ADDED A KEY TO Stamp'S FIXTURE AND DID NOT BITE. `bake()`
-    only bakes a key the component's own __mapped reads as `key: props.key`;
-    Stamp has no such mapping, so the value was `unbakeable` — a value with
-    nowhere to go — and the mutant changed real bytes and no verdict. Wrong
-    population, the eighth way a mutation stops mutating, and the second time
-    it has caught me today.
-
-    MY SECOND VERSION SAID: "TweetBubble.stats IS baked and is currently
-    structural (four numbers), so adding a label is both the realistic defect
-    and one the bake will carry." THAT SENTENCE IS NOW WRONG, and it is kept
-    here rather than replaced because being wrong is the evidence: on
-    2026-09-23 `stats` was flattened into statReplies/statReposts/statLikes/
-    statViews, the `stats: props.stats,` needle left the code, and this
-    mutation went vacuous IN EXACTLY THE WAY THE PARAGRAPH ABOVE IT DESCRIBES.
-    A note that is wrong is read as fact by the next person, including the
-    person who wrote it — twice, four hours apart, in the same function.
-
-    So the target is no longer named. It is READ from the artifact, so it
-    follows the shrinking population of genuinely-inlined keys instead of
-    pointing at where that population used to be.
-    """
-    n, k = _still_structurally_baked()
-    if n is None:
-        # NOT A PASS. Nothing is structurally baked any more, so this mutation
-        # has nothing to aim at — which is a VACUOUS result to be reported,
-        # never a green one.
-        return d, None
-    v = d.get(n, {}).get(k)
-    d[n] = dict(d.get(n) or {})
-    if isinstance(v, dict):
-        d[n][k] = dict(v)
-        d[n][k]["label"] = "Sponsored by Promptly"
-    elif isinstance(v, list):
-        d[n][k] = list(v) + ["Sponsored by Promptly"]
-    else:
-        return d, None
-    return d, [n]
+    e = art["components"][comp]
+    m = re.search(r"^(\s{4}%s: )(.+),$" % re.escape(key), e["code"], re.M)
+    if not m:
+        return False
+    e["code"] = e["code"][:m.start()] + m.group(1) + json.dumps(literal) + "," \
+        + e["code"][m.end():]
+    e["baked"] = [b for b in (e.get("baked") or [])
+                  if not b.startswith(key + "=")] + [key]
+    return True
 
 
 MUT = [
-    ("our_brand_returns_to_a_baked_line", brand_returns,
+    # OUR BRAND ON SOMEONE ELSE'S VIDEO.
+    ("our_brand_returns_to_a_baked_line",
+     ("EndCard", "lines", [{"text": "@promptly", "icon": None}]),
      "L2 no_brand_mark_in_baked_copy"),
-    ("a_fabricated_payment_returns", money_returns,
+    # A FABRICATED FINANCIAL RECORD naming a person.
+    ("a_fabricated_payment_returns",
+     ("Notification", "notifications",
+      [{"title": "Payment Received", "body": "$249.00 from Kellan",
+        "appName": "Apple Pay", "app": "apple-pay"}]),
      "L3 no_money_amount_in_baked_copy"),
-    ("a_component_quietly_gains_baked_copy", new_component_gains_copy,
+    # A COMPONENT QUIETLY GAINS BAKED COPY — the population leg, not a
+    # content leg, so the words are ordinary rather than brand or money.
+    ("a_component_quietly_gains_baked_copy",
+     ("PillCluster", "tags", ["FAST", "CHEAP", "GOOD"]),
      "L0 no_component_carries_baked_copy"),
-    ("one_string_is_baked", one_string_is_baked,
+    # ZAC'S NAMED MUTANT: the ceiling is zero, so the smallest possible
+    # violation is ONE WORD that no placement can override.
+    ("one_string_is_baked",
+     ("StickyNotes", "notes", [{"text": "BETA"}]),
      "L0 no_component_carries_baked_copy"),
 ]
 
@@ -155,28 +104,31 @@ def main():
         print(out[-700:])
         return 2
     print("baseline green.\n")
-    fix_raw = io.open(FIX, encoding="utf-8").read()
     art_raw = io.open(ART, encoding="utf-8").read()
-    red = 0
-    for name, apply_, phrase in MUT:
-        d, touched = apply_(json.loads(fix_raw))
-        io.open(FIX, "w", encoding="utf-8").write(json.dumps(d, indent=1, ensure_ascii=False))
+    red, faults = 0, 0
+    for name, (comp, key, literal), phrase in MUT:
+        art = json.loads(art_raw)
+        if not _mutate_artifact(art, comp, key, literal):
+            # VACUOUS, SAID OUT LOUD. The key is not in that component's
+            # __mapped any more, so the mutation edits nothing — which is a
+            # result to report, never a pass.
+            print("  %-42s VACUOUS   %s.%s is not read in __mapped" % (name, comp, key))
+            faults += 1
+            continue
+        io.open(ART, "w", encoding="utf-8").write(json.dumps(art, indent=1))
         try:
-            rebake(touched)
             rc2, out2 = run()
         finally:
-            io.open(FIX, "w", encoding="utf-8").write(fix_raw)
             io.open(ART, "w", encoding="utf-8").write(art_raw)
         ok = rc2 != 0 and failed(out2, phrase)
         red += 1 if ok else 0
         print("  %-42s %s   rc=%d leg_failed=%s"
               % (name, "RED " if ok else "NOT RED", rc2, failed(out2, phrase)))
-    if (io.open(FIX, encoding="utf-8").read() != fix_raw
-            or io.open(ART, encoding="utf-8").read() != art_raw):
+    if io.open(ART, encoding="utf-8").read() != art_raw:
         print("\nHARNESS FAILURE: residue left on disk")
         return 2
     print("\n%d/%d RED-proven" % (red, len(MUT)))
-    return 0 if (MUT and red == len(MUT)) else 1
+    return 0 if (MUT and red == len(MUT) and not faults) else 1
 
 
 if __name__ == "__main__":

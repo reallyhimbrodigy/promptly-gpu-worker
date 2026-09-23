@@ -79,6 +79,13 @@ interface BannerProps {
 }
 
 const NotificationBanner: React.FC<BannerProps> = ({ item, style }) => {
+  // AN UNKNOWN ICON KEY DRAWS NOTHING RATHER THAN CRASHING. `app` became a
+  // user-settable text property when notifications were flattened
+  // (2026-09-23), so it can now hold anything a placement types — and
+  // `<Icon />` with Icon undefined is a React crash, i.e. the whole render
+  // dies because a glyph name was misspelled. Absence, not a substitute
+  // icon: swapping in a default would draw the WRONG brand mark on a
+  // notification, which is worse than a missing one.
   const Icon = APP_ICONS[item.app];
   const timestamp = item.timestamp ?? "now";
   // appName/title/body are user/model text — script-routed face + emoji
@@ -115,7 +122,7 @@ const NotificationBanner: React.FC<BannerProps> = ({ item, style }) => {
           boxShadow: "inset 0 0 0 0.5px rgba(255,255,255,0.12)",
         }}
       >
-        <Icon size={style.iconSize} />
+        {Icon ? <Icon size={style.iconSize} /> : null}
       </div>
 
       <div

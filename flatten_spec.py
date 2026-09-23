@@ -52,8 +52,17 @@ FLATTEN = {
     },
     "PillCluster": {"key": "tags", "n": 12,
                     "fields": [(None, "pill%d", "Pill %d", "text")]},
-    "PillMarquee": {"key": "pills", "n": 12,
-                    "fields": [(None, "pill%d", "Pill %d", "text")]},
+    "PillMarquee": [{"key": "pills", "n": 12,
+                     "fields": [(None, "pill%d", "Pill %d", "text")]}, {
+        # The palette is a bare ARRAY of colours the body indexes modulo its
+        # length. Every slot keeps a default, so the array can never come back
+        # empty — `palette[i % 0]` is NaN, and the parameter default that used
+        # to catch that is unreachable once the mapping always supplies a value.
+        "key": "palette", "n": 3,
+        "fields": [(None, "paletteColor%d", "Palette colour %d", "color")],
+        "defaults": {"paletteColor1": "#C8551F", "paletteColor2": "#4F9DF7",
+                     "paletteColor3": "#36E27A"},
+    }],
     "PullQuote": {"key": "keywords", "n": 4,
                   "fields": [(None, "keyword%d", "Keyword %d", "text")]},
     "DropBanner": {"key": "points", "n": 4,
@@ -93,6 +102,56 @@ FLATTEN = {
         "fields": [("label", "step%dTitle", "Step %d title", "text"),
                    ("sublabel", "step%dBody", "Step %d body", "text")],
         "auto": {"index": "String(__i + 1).padStart(2, \"0\")"},
+    },
+    # ── THE LAST FOUR, 2026-09-23 ────────────────────────────────────────
+    # "flattened: n" was ambiguous and hid these: it meant BOTH "has no lists
+    # to flatten" and "has lists and has not been done". Four components were
+    # in the second group, and two of them were WORSE than baked copy — their
+    # payload had been emptied to remove our words, which took the CAPABILITY
+    # with it. EndCard.lines was `[]` and Notification.notifications was `[]`,
+    # so a placement could not give an end card its sign-off or a notification
+    # its text AT ALL. Removing our copy and removing the slot look identical
+    # in a copy survey; only the split tells them apart.
+    "AnnotationArrow": [{
+        # GEOMETRY, NOT COPY — and baked geometry is still baked. The arrow
+        # exists to point at a detail on screen, and the detail's position was
+        # a literal, so every arrow ever placed pointed at the same spot.
+        "key": "start", "n": 1, "object": True,
+        "fields": [("x", "startX", "Start X (0-1)", "number"),
+                   ("y", "startY", "Start Y (0-1)", "number")],
+        "defaults": {"startX": 0.25, "startY": 0.35},
+    }, {
+        "key": "end", "n": 1, "object": True,
+        "fields": [("x", "endX", "End X (0-1)", "number"),
+                   ("y", "endY", "End Y (0-1)", "number")],
+        "defaults": {"endX": 0.72, "endY": 0.62},
+    }],
+    "EndCard": [{
+        "key": "lines", "n": 4,
+        "fields": [("text", "line%dText", "Line %d", "text"),
+                   ("icon", "line%dIcon", "Line %d icon", "text")],
+    }, {
+        # The palette is CHROME. It keeps its values as defaults, because an
+        # empty colour is not a blank colour — it is an unpainted element.
+        "key": "palette", "n": 1, "object": True,
+        "fields": [("bg", "paletteBg", "Background", "color"),
+                   ("fg", "paletteFg", "Text colour", "color"),
+                   ("accent", "paletteAccent", "Accent colour", "color")],
+        "defaults": {"paletteBg": "#14141A", "paletteFg": "#FEFCFD",
+                     "paletteAccent": "#C8551F"},
+    }],
+    "Notification": {
+        # `title` IS FIRST BECAUSE THE FIRST FIELD DECIDES EMPTINESS. A
+        # notification with no title is not a notification, so the whole slot
+        # drops and the stack closes up. `timestamp` is deliberately NOT a
+        # field: the body reads `item.timestamp ?? "now"`, and adding a text
+        # property would make it "" — present and empty — which defeats the
+        # ?? and draws a blank where "now" belongs.
+        "key": "notifications", "n": 3,
+        "fields": [("title", "notif%dTitle", "Notification %d title", "text"),
+                   ("body", "notif%dBody", "Notification %d body", "text"),
+                   ("appName", "notif%dApp", "Notification %d app name", "text"),
+                   ("app", "notif%dIcon", "Notification %d icon key", "text")],
     },
     "TweetBubble": {
         # RULED 2026-09-23. `stats` was the LAST baked object in the registry

@@ -131,6 +131,25 @@ def main():
         len(fires) == 1 and fires[0].startswith("statLikes="),
         "injected statLikes='1.2K' -> %s" % (fires or "NOTHING — the detector is blind"))
 
+    # L7 A COLOUR OR A COORDINATE MAY KEEP ITS DEFAULT, AND A WORD MAY NOT.
+    # The first draft of the detector asked only whether the default was a
+    # non-empty string — and a colour default is a non-empty string, so it
+    # refused EndCard and PillMarquee for keeping "#14141A" on a palette slot.
+    # An empty colour is not a blank colour, it is an unpainted element, and
+    # an absent coordinate is the top-left corner rather than "nowhere". This
+    # leg pins the distinction so the rule cannot drift wide again, and pins
+    # it in BOTH directions so it cannot drift narrow either.
+    probe = [
+        {"key": "paletteBg", "type": "color", "defaultValue": "#14141A"},
+        {"key": "startX", "type": "number", "defaultValue": 0.25},
+        {"key": "line1Text", "type": "text", "defaultValue": "Follow for more"},
+        {"key": "line2Text", "type": "text", "defaultValue": ""},
+    ]
+    got = bk.default_text_offenders("EndCard", probe)
+    leg("L7 chrome_keeps_its_default_and_copy_does_not",
+        len(got) == 1 and got[0].startswith("line1Text="),
+        "colour+coordinate allowed, one text default refused -> %s" % got)
+
     print("%d/%d legs ok" % (NLEGS - len(FAILS), NLEGS))
     if FAILS:
         print("FAILED: %s" % ", ".join(FAILS))

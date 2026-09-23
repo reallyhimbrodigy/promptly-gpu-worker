@@ -125,8 +125,15 @@ def _flatten_one(code, props, spec):
         parts = ["%s: props.%s" % (f, suf) for f, suf, _lab, _t in fields]
         code = code.replace(needle, "    %s: { %s },\n" % (key, ", ".join(parts)))
         props = [p for p in props if p["key"] != key]
+        dflt = spec.get("defaults") or {}
         for f, suf, lab, typ in fields:
-            props.append({"key": suf, "label": lab, "type": typ, "defaultValue": ""})
+            # A COLOUR OR A COORDINATE IS NOT COPY, AND ITS EMPTY STATE IS NOT
+            # BLANK — it is BROKEN. An empty colour renders as nothing and an
+            # absent coordinate is the top-left corner, so these fields keep
+            # the value the component was built around. Text slots keep "",
+            # which is what smoke_default_text refuses a default ON.
+            props.append({"key": suf, "label": lab, "type": typ,
+                          "defaultValue": dflt.get(suf, 0 if typ == "number" else "")})
         return code, props, "1 object x %d field(s)" % len(fields)
 
     slots = []
@@ -149,10 +156,12 @@ def _flatten_one(code, props, spec):
     code = code.replace(needle, "    %s: %s,\n" % (key, expr))
 
     props = [p for p in props if p["key"] != key]
+    dflt = spec.get("defaults") or {}
     for i in range(1, spec["n"] + 1):
         for _f, suf, lab, typ in fields:
             props.append({"key": suf % i, "label": lab % i, "type": typ,
-                          "defaultValue": 0 if typ == "number" else ""})
+                          "defaultValue": dflt.get(suf % i,
+                                                   0 if typ == "number" else "")})
     return code, props, "%d slot(s) x %d field(s)" % (spec["n"], len(fields))
 
 
@@ -196,6 +205,15 @@ def default_text_offenders(name, props):
         "%s=%r" % (p["key"], p["defaultValue"])
         for p in props
         if p["key"] in keys
+        # TYPE text, NOT "the value happens to be a string". The first draft
+        # asked only whether the default was a non-empty str, and a COLOUR
+        # default is a non-empty str — so it refused EndCard and PillMarquee
+        # for keeping "#14141A" on a palette slot, which is chrome and not a
+        # word anyone reads. The rule is about COPY; `text` is the only type
+        # that carries copy. A check calibrated on the SHAPE of the value had
+        # learned the shape rather than the property, one day after that
+        # sentence was written down about a different check.
+        and p.get("type") == "text"
         and isinstance(p.get("defaultValue"), str)
         and p["defaultValue"].strip() != ""
     )
