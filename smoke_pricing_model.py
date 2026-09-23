@@ -68,6 +68,51 @@ def main():
     leg("L5 the_model_writes_nothing", not writes,
         "write-ish constructs in the model: %s" % (writes or "none"))
 
+    # L6 THE STORE'S CUT ONLY EVER REDUCES. A cut applied the wrong way round
+    # inflates every margin in the table and looks entirely plausible.
+    bad = [n for n, c in P.CHANNEL_CUT.items() if not (0 <= c < 1)
+           or P.net_of_cut(100.0, c) >= 100.0]
+    leg("L6 every_channel_cut_reduces_revenue", P.CHANNEL_CUT and not bad,
+        "%d channel(s), bad: %s" % (len(P.CHANNEL_CUT), bad or "none"))
+
+    # L7 THE FREE LOAD IS DIVIDED BY THE PAYERS, NOT BY THE FREE USERS. The
+    # question is what each SUBSCRIBER carries; dividing by 1,975 free users
+    # instead of 20 payers understates it by a factor of ~99 and still looks
+    # like a per-user number.
+    # DRIVEN THROUGH THE FUNCTION, not read off the constant. My first version
+    # asserted FREE_LOAD["free_videos_per_paying_subscriber"] — a value
+    # precomputed in the dict — so dividing by the 1,975 free users inside
+    # free_load_per_subscriber() changed the code and not the leg, and the
+    # mutation passed. A leg that reads a constant is testing arithmetic
+    # someone already did, not the arithmetic that runs.
+    f = P.FREE_LOAD
+    got = P.free_load_per_subscriber(1.0, 1.0)          # unit cost -> videos carried
+    expect = f["free_videos_30d"] / f["paid_users"]
+    leg("L7 free_load_is_per_paying_subscriber",
+        abs(got - expect) < 1e-9 and f["paid_users"] < f["free_users"],
+        "%.1f videos per payer from the function (= %d free / %d payers)"
+        % (got, f["free_videos_30d"], f["paid_users"]))
+
+    # L8 ZERO PAYING SUBSCRIBERS IS NOT ZERO LOAD. It is undefined, and a 0
+    # here would read as "the free tier costs nothing" at the exact moment it
+    # costs everything — absence rendered as a value, in the money table.
+    leg("L8 no_payers_is_not_free",
+        P.free_load_per_subscriber(1.0, 0.1225, free_videos=2429, paid_users=0)
+        == float("inf"),
+        "0 payers -> %r" % P.free_load_per_subscriber(1.0, 0.1225, 2429, 0))
+
+    # L9 true_margin SUBTRACTS ALL THREE. A margin missing any one of the cut,
+    # own usage or the free share is a number answering a question nobody
+    # asked — and it is the optimistic one every time.
+    r = P.true_margin("pro monthly", 1.0, 0.1225,
+                      P.CHANNEL_CUT["App Store, year 1 (30%)"], at_full_use=False)
+    ok = abs(r["margin"] - (r["net_of_cut"] - r["own_usage_cost"]
+                            - r["free_load_share"])) < 1e-9
+    leg("L9 true_margin_subtracts_cut_usage_and_free", ok and r["net_of_cut"] < r["list"],
+        "list %.2f -> net %.2f - own %.2f - free %.2f = %.2f"
+        % (r["list"], r["net_of_cut"], r["own_usage_cost"], r["free_load_share"],
+           r["margin"]))
+
     print("%d/%d legs ok" % (NLEGS - len(FAILS), NLEGS))
     if FAILS:
         print("FAILED: %s" % ", ".join(FAILS))

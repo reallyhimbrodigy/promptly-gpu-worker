@@ -54,6 +54,85 @@ OUR_PER_THEIRS = 10                  # the peg: 10 of ours = 1 of theirs
 COST_PER_RENDER_TODAY = 10           # what "1 video = 10 credits" asserts
 
 
+
+# ── APPLE'S CUT ───────────────────────────────────────────────────────────
+# NOT ONE NUMBER. The cut depends on the programme and on how long the
+# subscriber has been subscribed, and the difference between 30% and 15% is
+# larger than most of the margins below.
+#
+#   30%  standard App Store commission, year 1
+#   15%  Small Business Programme (under $1M/yr) AND year 2+ on any
+#        auto-renewing subscription
+#    3%  web checkout — no Apple at all, card processing only (~2.9% + 30c;
+#        30c on a $29.99 charge is another 1.0%, so ~3.9% all-in)
+#
+# WHICH ONE APPLIES TO US IS NOT SOMETHING I CAN READ FROM HERE. It is an
+# App Store Connect fact, and the model prints all three rather than picking.
+CHANNEL_CUT = {
+    "App Store, year 1 (30%)": 0.30,
+    "App Store, SMB or year 2+ (15%)": 0.15,
+    "web checkout (~3.9%)": 0.039,
+}
+
+# ── THE FREE TIER'S LOAD, MEASURED ────────────────────────────────────────
+# From video_jobs joined to profiles, 30 days to 2026-09-23, status completed:
+#
+#   free   1,975 users   2,429 videos   1.23 each
+#   paid      20 users     437 videos  21.85 each
+#
+# FREE IS 5.6x THE PAID TIER'S ENTIRE VOLUME. Every one of those 2,429 videos
+# costs whatever a finished edit costs, and is paid for by twenty subscribers
+# — 121 free videos carried per paying subscriber per month.
+#
+# TWO THINGS THIS WINDOW CANNOT TELL YOU, both stated rather than smoothed:
+#   * It PREDATES today's free cap change. Free was 3 videos a month for most
+#     of it and is 1 now. Every one of those 1,975 users rendered at least
+#     once, so under a 1-cap the same population produces at most 1,975 — a
+#     19% reduction, not the 67% the cap ratio suggests.
+#   * Paid users average 21.85 of their 50, so break-even AT FULL USE is the
+#     pessimistic bound and this is the realistic one. Both are reported,
+#     because the heavy users are the ones a full-use number is about.
+FREE_LOAD = {
+    "free_users": 1975, "free_videos_30d": 2429,
+    "paid_users": 20, "paid_videos_30d": 437, "paid_videos_per_user": 21.85,
+    "window": "30 days to 2026-09-23, status=completed",
+    "free_videos_per_paying_subscriber": 2429 / 20,
+}
+
+
+def net_of_cut(price, cut):
+    """What reaches us after the store takes its share."""
+    return price * (1.0 - cut)
+
+
+def free_load_per_subscriber(c, usd_per_credit, free_videos=None, paid_users=None):
+    """The free tier's monthly cost, divided across the people paying for it."""
+    fv = FREE_LOAD["free_videos_30d"] if free_videos is None else free_videos
+    pu = FREE_LOAD["paid_users"] if paid_users is None else paid_users
+    if pu <= 0:
+        return float("inf")
+    return (fv * c * usd_per_credit) / pu
+
+
+def true_margin(tier, c, usd_per_credit, cut, at_full_use=True):
+    """-> dict. Net of the store's cut, of own usage, and of the free tier.
+
+    THE THREE SUBTRACTIONS ARE THE WHOLE POINT. A tier that looks profitable
+    on list price can be underwater once the store takes 30%, and one that
+    survives that can still be underwater once it carries its share of 2,429
+    free videos a month. Reporting any of the three alone is a number that
+    answers a question nobody asked.
+    """
+    price, videos, _granted = TIERS[tier]
+    used = videos if at_full_use else FREE_LOAD["paid_videos_per_user"]
+    net = net_of_cut(price, cut)
+    own = used * c * usd_per_credit
+    free = free_load_per_subscriber(c, usd_per_credit)
+    return {"tier": tier, "list": price, "net_of_cut": net, "videos_used": used,
+            "own_usage_cost": own, "free_load_share": free,
+            "margin": net - own - free}
+
+
 def our_credits_per_video(chatcut_credits_per_edit):
     """The x10 rule applied to the real number."""
     return math.ceil(chatcut_credits_per_edit * OUR_PER_THEIRS)
@@ -135,6 +214,28 @@ if __name__ == "__main__":
         print("\n" + "=" * 78)
         print("WHERE EACH TIER GOES UNDERWATER — needs no measurement at all.")
         print("The highest ChatCut-credits-per-edit that still breaks even AT FULL USE.\n")
+        print("\n" + "=" * 78)
+        print("THE SAME QUESTION WITH THE STORE'S CUT AND THE FREE TIER SUBTRACTED.")
+        print("Free carries %.0f videos per paying subscriber per month (%d free videos,"
+              % (FREE_LOAD["free_videos_per_paying_subscriber"], FREE_LOAD["free_videos_30d"]))
+        print("%d paying subscribers, %s).\n" % (FREE_LOAD["paid_users"], FREE_LOAD["window"]))
+        upc2 = USD_PER_CREDIT["Plus 400/800 annual"]
+        for c2 in (0.5, 1.0, 2.0):
+            print("  at %.1f credits/edit, $%.4f/credit — margin per subscriber per month"
+                  % (c2, upc2))
+            print("    %-14s %9s %10s %10s %10s %9s"
+                  % ("tier", "list", "net", "own use", "free share", "margin"))
+            for t in ("pro monthly", "pro annual", "max monthly", "max yearly"):
+                r = true_margin(t, c2, upc2, CHANNEL_CUT["App Store, year 1 (30%)"],
+                                at_full_use=False)
+                print("    %-14s %9.2f %10.2f %10.2f %10.2f %9.2f%s"
+                      % (t, r["list"], r["net_of_cut"], r["own_usage_cost"],
+                         r["free_load_share"], r["margin"],
+                         "  UNDERWATER" if r["margin"] < 0 else ""))
+            print()
+        print("  own use is at the MEASURED 21.85 videos/subscriber, not the 50 allowance.")
+        print("  cut is the 30% year-1 App Store rate — the worst of the three channels.")
+        print("\n" + "=" * 78)
         print("  %-14s %9s %8s %s" % ("tier", "price", "videos", "max credits/edit at each credit price"))
         print("  %-14s %9s %8s %12s %12s %12s"
               % ("", "", "", "@0.1225", "@0.2100", "@0.2500"))

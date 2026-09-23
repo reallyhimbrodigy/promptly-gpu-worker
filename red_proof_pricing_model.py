@@ -17,6 +17,38 @@ def _env():
 
 
 MUTATIONS = [
+    # THE CUT APPLIED THE WRONG WAY ROUND. Inflates every margin in the
+    # table and reads entirely plausibly — a 30% cut becoming a 30% bonus.
+    ("cut_becomes_a_bonus",
+     "    return price * (1.0 - cut)",
+     "    return price * (1.0 + cut)",
+     "L6 every_channel_cut_reduces_revenue",
+     lambda s: "price * (1.0 - cut)" in s),
+    # THE FREE LOAD IS DIVIDED BY THE FREE USERS INSTEAD OF THE PAYERS.
+    # Understates it by ~99x and still looks like a per-user number.
+    ("free_load_divided_by_the_wrong_population",
+     '    return (fv * c * usd_per_credit) / pu',
+     '    return (fv * c * usd_per_credit) / FREE_LOAD["free_users"]',
+     "L7 free_load_is_per_paying_subscriber",
+     lambda s: "(fv * c * usd_per_credit) / pu" in s),
+    # ZERO PAYERS READS AS ZERO LOAD — the free tier costing nothing at the
+    # exact moment it costs everything.
+    ("no_payers_reads_as_no_cost",
+     "    if pu <= 0:\n        return float(\"inf\")",
+     "    if pu <= 0:\n        return 0.0",
+     "L8 no_payers_is_not_free",
+     lambda s: 'if pu <= 0:' in s),
+    # THE FREE SHARE IS DROPPED FROM THE MARGIN. Every tier turns profitable
+    # and nothing in the row says a subtraction went missing.
+    ("margin_forgets_the_free_tier",
+     '    return {"tier": tier, "list": price, "net_of_cut": net, "videos_used": used,\n'
+     '            "own_usage_cost": own, "free_load_share": free,\n'
+     '            "margin": net - own - free}',
+     '    return {"tier": tier, "list": price, "net_of_cut": net, "videos_used": used,\n'
+     '            "own_usage_cost": own, "free_load_share": free,\n'
+     '            "margin": net - own}',
+     "L9 true_margin_subtracts_cut_usage_and_free",
+     lambda s: '"margin": net - own - free}' in s),
     # THE PEG DRIFTS FROM WHAT WE CHARGE. Every number in the model would then
     # be quoted against a currency we do not use, and each one looks fine.
     ("peg_drifts_from_credit_prices",
