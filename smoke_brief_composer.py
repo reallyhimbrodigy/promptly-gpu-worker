@@ -181,6 +181,48 @@ def main():
         and "Where they didn't say" in r["instruction"],
         "first line: %s" % first[:66])
 
+    # L14 THE TIER LINE IS EMITTED ONLY FOR A RULED TIER, AND CLAIMS ONLY WHAT
+    # WAS RULED. A billing claim is the worst thing to get loose: their agent
+    # restates whatever the line says as fact and acts on it, and "unlimited
+    # exports" licenses different behaviour from "this is a paid account".
+    #
+    # AN UNKNOWN TIER MUST SAY NOTHING. A default of "paid" would make every
+    # unconfigured caller assert a billing fact about somebody's account —
+    # absent is not paid, which is the absent-as-a-value rule applied to a
+    # claim rather than a measurement.
+    paid = bc.compose("", "Cut it tight.", tier="paid")
+    for t in (None, "", "free", "unknown", "pro", "PAID "):
+        r = bc.compose("", "Cut it tight.", tier=t)
+        expected = bool(bc.tier_line(t))
+        got = bool(r["tier_line"])
+        if expected != got:
+            FAILS.append("L14 tier %r" % t)
+    unruled = [t for t in (None, "", "free", "unknown", "pro")
+               if bc.compose("", "x", tier=t)["tier_line"]]
+    # AND THE DEFAULT ITSELF, called with NO tier argument. Every check above
+    # passes tier explicitly, so changing the parameter's default changes real
+    # bytes and no verdict — the wrong-population vacuity, caught by its own
+    # mutation. A caller that never learned about tiers is exactly the caller
+    # that must not assert one.
+    omitted = bc.compose("", "x")["tier_line"]
+    leg("L14 tier_line_only_for_a_ruled_tier",
+        bool(paid["tier_line"]) and not unruled and omitted is None,
+        "paid=emitted  unruled emitting: %s  omitted-arg emits: %r"
+        % (unruled or "none", omitted))
+
+    # L15 IT DOES NOT CLAIM WHAT WAS NEVER READ. Export limits, caps and
+    # per-tier entitlements are surfaces I have not measured; a sourceless
+    # claim is one their agent will act on anyway. And "paid" alone reads as
+    # permission to spend, so the credit guard travels WITH it — the two halves
+    # are one sentence or neither.
+    line = paid["tier_line"]
+    overclaims = [w for w in ("unlimited", "no limit", "as many", "free of charge",
+                              "at no cost", "unmetered") if w in line.lower()]
+    leg("L15 tier_line_claims_only_what_was_ruled",
+        not overclaims and "spend credits" in line and "only use them if" in line,
+        "overclaims=%s  credit guard present=%s"
+        % (overclaims or "none", "spend credits" in line))
+
     # L9 THE BRIEF IS NEUTRAL ABOUT WHAT MAY BE USED. Ruled by Zac 2026-09-22,
     # first for sounds and then widened: components and caption styles too. "No
     # favorite or better option — as simple as possible for them."

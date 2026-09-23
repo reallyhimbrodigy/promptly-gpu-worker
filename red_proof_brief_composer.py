@@ -37,6 +37,28 @@ SMOKE = os.path.join(HERE, "smoke_brief_composer.py")
 WATCHED = ["brief_composer.py", "smoke_brief_composer.py"]
 
 MUTATIONS = [
+    # THE TIER DEFAULTS TO PAID — every unconfigured caller then asserts a
+    # billing fact about an account it knows nothing about.
+    ("tier_defaults_to_paid", "brief_composer.py",
+     "def compose(vibe, user_brief, tier=None):",
+     'def compose(vibe, user_brief, tier="paid"):',
+     "L14 tier_line_only_for_a_ruled_tier",
+     lambda s: "def compose(vibe, user_brief, tier=None):" in s),
+    # THE LINE OVERCLAIMS. "Unlimited" is the specific word B1 named as the one
+    # that licenses different behaviour, and the difference is Zac's money.
+    ("tier_line_overclaims", "brief_composer.py",
+     '    "paid": ("This is a paid account — you won\'t hit a plan limit. Generated "',
+     '    "paid": ("This is a paid account with unlimited exports. Generated "',
+     "L15 tier_line_claims_only_what_was_ruled",
+     lambda s: "you won't hit a plan limit" in s),
+    # THE CREDIT GUARD IS DROPPED, leaving "this is a paid account" alone —
+    # which an agent can read as permission to spend.
+    ("credit_guard_dropped", "brief_composer.py",
+     '             "video, avatars, voiceover and music spend credits, so only use "\n'
+     '             "them if the brief asks."),',
+     '             "video and audio are all available."),',
+     "L15 tier_line_claims_only_what_was_ruled",
+     lambda s: "spend credits, so only use " in s),
     # ZAC'S NAMED MUTANT: the placeholder comes back. It is the shape the
     # composer actually shipped with — a vibe-only submission wrote
     # "(none given)" into the brief slot — and it reads as a user who asked for

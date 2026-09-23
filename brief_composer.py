@@ -187,7 +187,42 @@ def user_slot(vibe, user_brief):
     return "an edit of this video"
 
 
-def compose(vibe, user_brief):
+# THE TIER LINE. Two facts and nothing else, because a billing claim is the
+# worst thing to get loose: Probe A's control is that whatever the line says,
+# their agent restates as fact and acts on — it invented a usage for
+# CanaryProbe out of a name alone. "Unlimited exports" and "this is a paid
+# account" license different behaviour, and the difference is real money.
+#
+# WHAT IS SAID: the account is paid, so no plan limit will be hit and there is
+# nothing to ask about billing. WHAT IS NOT SAID: anything about export limits,
+# caps, or entitlements per tier — I have not read those surfaces, and a claim
+# I cannot source is a claim their agent will act on anyway.
+#
+# THE SECOND HALF IS THE GUARD. Paid does not mean free: generation spends
+# credits at real rates (ChatCut's own docs, read 2026-09-23: music 0.18 per
+# song, sound effects 0.12 per generated second, voiceover 0.28-0.80 per 1,000
+# characters, Seedance 2.5 at 1080p about 2.2175 per second). An agent told
+# only "this is a paid account" can read that as permission to spend.
+TIER_LINES = {
+    "paid": ("This is a paid account — you won't hit a plan limit. Generated "
+             "video, avatars, voiceover and music spend credits, so only use "
+             "them if the brief asks."),
+}
+
+
+def tier_line(tier):
+    """-> the account-context sentence, or None.
+
+    UNKNOWN TIER SAYS NOTHING. A default of "paid" would make every
+    unconfigured caller assert a billing fact about somebody's account, and an
+    absent tier is not a paid one. Only a tier with a RULED sentence emits one;
+    free has none yet because none has been ruled, and writing one would be
+    inventing the billing claim this whole function exists to avoid.
+    """
+    return TIER_LINES.get(str(tier or "").strip().lower())
+
+
+def compose(vibe, user_brief, tier=None):
     """-> dict. The instruction is ONE message; everything else is the record."""
     states = classify(user_brief)
     kept = [k for k, _f, _s in DEFAULTS if states[k][0] != "SUPPRESSED"]
@@ -207,6 +242,13 @@ def compose(vibe, user_brief):
         if sentence is None or states[key][0] == "SUPPRESSED":
             continue
         lines.append("  - " + sentence)
+    tl = tier_line(tier)
+    if tl:
+        # AFTER the defaults and BEFORE the invitation to ask: it is account
+        # CONTEXT, not a thing to do to the video, and putting it among the
+        # defaults would read as an instruction.
+        lines.append("")
+        lines.append(tl)
     lines.append("")
     # Not "do not ask questions". The opposite.
     lines.append("If anything is unclear or needs a decision only the user can "
@@ -215,6 +257,7 @@ def compose(vibe, user_brief):
         "composer_version": COMPOSER_VERSION,
         "instruction": "\n".join(lines),
         "user_slot": user_slot(vibe, user_brief),
+        "tier_line": tl,
         "suppressed": sorted(k for k, (s, _) in states.items() if s == "SUPPRESSED"),
         "ambiguous_kept": sorted(k for k, (s, _) in states.items() if s == "AMBIGUOUS_KEPT"),
         "kept": kept,
