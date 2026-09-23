@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Every credit we charge covers ChatCut's real charge, at every row."""
+import io
 import math
 import os
 import sys
@@ -79,6 +80,27 @@ def main():
         and all(len(v[2]) > 0 for v in cp.CHATCUT_RATES.values()),
         "%s read %s; %d row(s) carry the page's own words"
         % (cp.SOURCE, cp.READ_ON, len(cp.CHATCUT_RATES)))
+
+    # L8 THE EXPORT MATCHES THE SOURCE. content-studio reads a JSON copy of
+    # this table so the contract's `label` and `credits` have ONE definition
+    # across two codebases. One copy is not available — the server is
+    # JavaScript — so it is two copies WITH a check, and this is the check.
+    # Without it the two drift the first time a rate moves, and the drift is
+    # a price quoted to a user that is not the price we charge.
+    import json as _json
+    exp = os.path.join(HERE, "measured", "CREDIT_PRICES_EXPORT.json")
+    if not os.path.exists(exp):
+        leg("L8 export_matches_the_source", False, "export missing: %s" % exp)
+    else:
+        e = _json.load(io.open(exp, encoding="utf-8"))
+        got = {(r["feature"], r["model"], r["resolution"]): r["our_per_unit"]
+               for r in e["rates"]}
+        want = {k: cp.our_price(*k)[0] for k in cp.CHATCUT_RATES}
+        drift = sorted(k for k in set(got) | set(want) if got.get(k) != want.get(k))
+        leg("L8 export_matches_the_source",
+            not drift and e["our_per_theirs"] == cp.OUR_PER_THEIRS
+            and len(got) == len(want),
+            "%d row(s), %d drifted: %s" % (len(want), len(drift), drift[:3] or "none"))
 
     print("%d/%d legs ok" % (NLEGS - len(FAILS), NLEGS))
     if FAILS:

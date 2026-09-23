@@ -167,9 +167,21 @@ def classify(user_brief):
 # anything about an account, a plan, a limit or exports.
 #
 # What survives is the only part that was doing work — whether to spend.
+# THE FREE LINE CHANGED 2026-09-23, BECAUSE IT CONTRADICTED THE PRICES WE
+# PUBLISH. A free user holds 10 credits and an image costs 5, so the old line
+# — "Don't generate new images, video, voiceover or music" — told their agent
+# to refuse the one thing the balance was sized for. Two surfaces of ours
+# disagreeing about what a free account may do is worse than either answer,
+# and the credits are the half that takes money.
+#
+# Zac's rule is the separating one, and it is about COST, not tier prestige:
+# AI video, avatar and voiceover are Pro-only. Images, music and sound effects
+# are not. So the free line names what may be spent and what may not, and the
+# paid line stays a spend-only-if-asked instruction.
 TIER_LINES = {
     "paid": "Only generate new images, video, voiceover or music if asked.",
-    "free": "Don't generate new images, video, voiceover or music.",
+    "free": "Only generate new images, music or sound effects if asked. "
+            "Don't generate video or voiceover.",
 }
 
 # Words that would make the line a claim about the account rather than an

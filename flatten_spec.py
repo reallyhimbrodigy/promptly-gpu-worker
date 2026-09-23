@@ -94,6 +94,30 @@ FLATTEN = {
                    ("sublabel", "step%dBody", "Step %d body", "text")],
         "auto": {"index": "String(__i + 1).padStart(2, \"0\")"},
     },
+    "TweetBubble": {
+        # RULED 2026-09-23. `stats` was the LAST baked object in the registry
+        # and the one smoke_baked_copy could not see: its four values are
+        # NUMBERS, so `words()` — which needs two letters to call something
+        # copy — walked straight past 128 / 412 / 1200 / 98000. Every
+        # TweetBubble ever placed drew the same fabricated engagement counts,
+        # under a check reading a ceiling of zero. A count is content too.
+        #
+        # AN OBJECT, NOT A LIST: one slot, four named fields, and NO filter
+        # here. The component destructures `stats.replies` and friends, so the
+        # object must exist even when every field is blank — dropping it would
+        # be a crash, not an empty row. The filter that closes the row up lives
+        # IN THE COMPONENT, on the labels, which is the only place that can
+        # tell "no replies" from "no stats row at all".
+        #
+        # TEXT, NOT NUMBER, ON ALL FOUR. A number property has no empty state:
+        # unset arrives as 0 and draws "0", which is absence rendered as a
+        # value in a field a viewer reads as a fact.
+        "key": "stats", "n": 1, "object": True,
+        "fields": [("replies", "statReplies", "Replies", "text"),
+                   ("reposts", "statReposts", "Reposts", "text"),
+                   ("likes", "statLikes", "Likes", "text"),
+                   ("views", "statViews", "Views", "text")],
+    },
     "RecordingFrame": {
         "key": "annotations", "n": 4,
         "fields": [("label", "note%dLabel", "Note %d label", "text"),

@@ -59,6 +59,7 @@ SMOKES = [
     "smoke_credit_prices",
     "smoke_sfx_levels",
     "smoke_baked_copy",
+    "smoke_default_text",
     "smoke_pricing_model",
     "smoke_two_trees_agree",
 ]

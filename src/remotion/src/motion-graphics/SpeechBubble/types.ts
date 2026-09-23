@@ -30,7 +30,16 @@ export interface TweetBubbleProps extends BaseProps {
   timestamp?: string;
   verified?: boolean;
   text: string;
-  stats: { replies: number; reposts: number; likes: number; views: number };
+  // FLATTENED 2026-09-23. Four TEXT properties, not a baked object: empty
+  // draws nothing and the row closes up. `string` is in the union because a
+  // text property's empty state is "" — a number has no empty state, and 0
+  // would draw "0" on every placement that left the field alone.
+  stats: {
+    replies?: number | string;
+    reposts?: number | string;
+    likes?: number | string;
+    views?: number | string;
+  };
   darkMode?: boolean;
 }
 

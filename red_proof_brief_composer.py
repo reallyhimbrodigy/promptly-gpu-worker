@@ -74,11 +74,21 @@ MUTATIONS = [
      "L15 no_tier_line_claims_anything_about_an_account",
      lambda s: '"paid": "Only generate new images' in s),
     # THE CLAIMS ARE STRIPPED AND THE INSTRUCTION GOES WITH THEM.
+    # RE-AIMED 2026-09-23 when the free line changed to stop contradicting the
+    # prices. The anchor guard caught it — `anchor 0x`, which is the mutation
+    # saying the target moved rather than quietly editing nothing.
+    # RE-AIMED 2026-09-23 when the free line changed to stop contradicting the
+    # prices. The anchor guard caught the orphan — `anchor 0x`, the mutation
+    # saying its target moved rather than quietly editing nothing. The anchor
+    # is the WHOLE two-line entry, because that is what the leg reads; half of
+    # an implicitly-concatenated literal is a mutant that does not parse, which
+    # exits non-zero for a reason that has nothing to do with the property.
     ("tier_line_stops_instructing",
-     '    "free": "Don\'t generate new images, video, voiceover or music.",',
+     '    "free": "Only generate new images, music or sound effects if asked. "\n'
+     '            "Don\'t generate video or voiceover.",',
      '    "free": "Keep it simple.",',
      "L16 every_tier_line_still_instructs",
-     lambda s: '"free": "Don\'t generate new images' in s),
+     lambda s: '"free": "Only generate new images, music or sound effects' in s),
 ]
 
 

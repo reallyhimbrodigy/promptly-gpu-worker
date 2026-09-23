@@ -156,6 +156,50 @@ def _flatten_one(code, props, spec):
     return code, props, "%d slot(s) x %d field(s)" % (spec["n"], len(fields))
 
 
+
+# THE KEYS FLATTEN CREATES, per component — the population the DEFAULT_TEXT
+# refusal is aimed at, and nothing else.
+def flattened_keys(name):
+    spec = flatten_spec.FLATTEN.get(name)
+    if not spec:
+        return set()
+    out = set()
+    for one in (spec if isinstance(spec, list) else [spec]):
+        for _f, suf, _lab, _t in one["fields"]:
+            if one.get("object"):
+                out.add(suf)
+            else:
+                for i in range(1, one["n"] + 1):
+                    out.add(suf % i)
+    return out
+
+
+# DEFAULT_TEXT — a content slot may not carry a default.
+#
+# This is the one way the flattening silently un-does itself. A baked literal
+# is at least GREPPABLE: `{"replies": 128}` sits in the blob and a survey finds
+# it. A DEFAULT does not. It is a well-formed property, it appears in
+# `properties` like every other, the component reads it correctly — and because
+# the registered default IS the value on every placement that does not override
+# it (measured: 135 defaults wrong, 0 of 14 components drew), "1.2K" in
+# statLikes puts our number on every TweetBubble exactly as firmly as the baked
+# object did, with nothing left in the code to find it by.
+#
+# SCOPED TO THE KEYS FLATTEN CREATED, DELIBERATELY. Fourteen components carry
+# a non-empty text default today — textShadow's rgba(), StickyNotes' "5%",
+# StepDivider's "STEP" — and a blanket rule would arrive as a wave of red on
+# working components and be reverted the same day for being right about
+# nothing. Geometry is not copy, and a slot the user fills is not chrome.
+def default_text_offenders(name, props):
+    keys = flattened_keys(name)
+    return sorted(
+        "%s=%r" % (p["key"], p["defaultValue"])
+        for p in props
+        if p["key"] in keys
+        and isinstance(p.get("defaultValue"), str)
+        and p["defaultValue"].strip() != ""
+    )
+
 def bake(code, props, data):
     """Replace `KEY: props.KEY,` in __mapped with a literal; drop the decl.
 
@@ -221,6 +265,15 @@ def build(verbose=True):
             baked = ["%s=FLATTENED(%s)" % (
                 "+".join(o["key"] for o in (_sp if isinstance(_sp, list) else [_sp])),
                 flat)] + baked
+        _dt = default_text_offenders(n, props)
+        if _dt:
+            refused[n] = {"reason": "DEFAULT_TEXT",
+                          "detail": "a flattened content slot carries a "
+                                    "default, which draws on every placement "
+                                    "that does not override it: "
+                                    + ", ".join(_dt)}
+            continue
+
         code, props, absent = bake_absent(
             code, props, [k for k, _ in (skipped or []) if k not in data])
         baked = baked + ["%s=undefined" % k for k in absent]

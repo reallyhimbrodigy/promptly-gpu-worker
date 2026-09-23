@@ -17,6 +17,27 @@ import {
 import { Avatar, composeBubbleTransform, formatCount } from "./shared";
 import type { TweetBubbleProps } from "./types";
 
+// FLATTENED 2026-09-23 (ruled by Zac). `stats` was the last baked object in
+// the registry: every TweetBubble ever placed drew 128 / 412 / 1.2K / 98K,
+// because a baked value is a LITERAL with no declared property behind it and
+// propertyOverrides cannot reach it. It is now four text properties —
+// statReplies / statReposts / statLikes / statViews.
+//
+// TEXT AND NOT NUMBER, DELIBERATELY. A number property has no empty state: an
+// unset one arrives as 0 and draws "0", which is absence rendered as a value
+// in the field most likely to be believed. A text property's empty state is
+// "", and "" is the whole point — it draws nothing and the row closes up.
+//
+// AND A TYPED STRING PASSES THROUGH UNCHANGED. "1.2K" is what the user wrote;
+// abbreviating it again would be the component editing the user's copy.
+function statLabel(v: number | string | undefined | null): string {
+  if (v === undefined || v === null) return "";
+  if (typeof v === "string") return v.trim();
+  if (typeof v !== "number" || !isFinite(v)) return "";
+  return formatCount(v);
+}
+
+
 
 const THEME = {
   light: {
@@ -90,6 +111,14 @@ export const TweetBubble: React.FC<TweetBubbleProps> = ({
   );
 
   const theme = darkMode ? THEME.dark : THEME.light;
+
+  // How many stats survive the filter below — the row keeps today's
+
+  // space-between at four and left-packs with a real gap under it.
+
+  const __shownStats = [stats.replies, stats.reposts, stats.likes,
+
+    stats.views].filter((v) => statLabel(v) !== "").length;
 
   const handleLine = timestamp ? `${handle} · ${timestamp}` : handle;
 
@@ -209,32 +238,28 @@ export const TweetBubble: React.FC<TweetBubbleProps> = ({
           style={{
             display: "flex",
             flexDirection: "row",
-            justifyContent: "space-between",
+            justifyContent: __shownStats >= 4 ? "space-between" : "flex-start",
+            gap: 48,
             alignItems: "center",
             marginTop: 20,
             paddingRight: 16,
           }}
         >
-          <InteractionItem
-            icon={<ReplyIcon size={22} color={theme.muted} />}
-            label={formatCount(stats.replies)}
-            color={theme.muted}
-          />
-          <InteractionItem
-            icon={<RepostIcon size={22} color={theme.muted} />}
-            label={formatCount(stats.reposts)}
-            color={theme.muted}
-          />
-          <InteractionItem
-            icon={<HeartIcon size={22} color={theme.muted} />}
-            label={formatCount(stats.likes)}
-            color={theme.muted}
-          />
-          <InteractionItem
-            icon={<ViewsIcon size={22} color={theme.muted} />}
-            label={formatCount(stats.views)}
-            color={theme.muted}
-          />
+          {[
+            { icon: <ReplyIcon size={22} color={theme.muted} />, label: statLabel(stats.replies) },
+            { icon: <RepostIcon size={22} color={theme.muted} />, label: statLabel(stats.reposts) },
+            { icon: <HeartIcon size={22} color={theme.muted} />, label: statLabel(stats.likes) },
+            { icon: <ViewsIcon size={22} color={theme.muted} />, label: statLabel(stats.views) },
+          ]
+            .filter((s) => s.label !== "")
+            .map((s, i) => (
+              <InteractionItem
+                key={i}
+                icon={s.icon}
+                label={s.label}
+                color={theme.muted}
+              />
+            ))}
         </div>
       </div>
       </div>

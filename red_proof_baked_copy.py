@@ -66,6 +66,24 @@ def one_string_is_baked(d):
     return d, ["EndCard"]
 
 
+def _still_structurally_baked():
+    """-> (component, key) whose payload the bake still INLINES, or (None, None).
+
+    Read from the artifact rather than named in this file, because naming it
+    is what broke twice: `baked` entries carrying no `=` are the keys that
+    were genuinely inlined, and that set shrinks every time something is
+    flattened. Picking from it means the mutation follows the population
+    instead of pointing at where the population used to be.
+    """
+    import json
+    reg = json.load(io.open(ART, encoding="utf-8"))["components"]
+    for n in sorted(reg):
+        for k in (reg[n].get("baked") or []):
+            if "=" not in k:
+                return n, k
+    return None, None
+
+
 def new_component_gains_copy(d):
     """A STRUCTURAL baked payload acquires a word, so its component joins the set.
 
@@ -76,12 +94,36 @@ def new_component_gains_copy(d):
     population, the eighth way a mutation stops mutating, and the second time
     it has caught me today.
 
-    TweetBubble.stats IS baked and is currently structural (four numbers), so
-    adding a label is both the realistic defect and one the bake will carry.
+    MY SECOND VERSION SAID: "TweetBubble.stats IS baked and is currently
+    structural (four numbers), so adding a label is both the realistic defect
+    and one the bake will carry." THAT SENTENCE IS NOW WRONG, and it is kept
+    here rather than replaced because being wrong is the evidence: on
+    2026-09-23 `stats` was flattened into statReplies/statReposts/statLikes/
+    statViews, the `stats: props.stats,` needle left the code, and this
+    mutation went vacuous IN EXACTLY THE WAY THE PARAGRAPH ABOVE IT DESCRIBES.
+    A note that is wrong is read as fact by the next person, including the
+    person who wrote it — twice, four hours apart, in the same function.
+
+    So the target is no longer named. It is READ from the artifact, so it
+    follows the shrinking population of genuinely-inlined keys instead of
+    pointing at where that population used to be.
     """
-    d["TweetBubble"]["stats"] = dict(d["TweetBubble"]["stats"])
-    d["TweetBubble"]["stats"]["label"] = "Sponsored by Promptly"
-    return d, ["TweetBubble"]
+    n, k = _still_structurally_baked()
+    if n is None:
+        # NOT A PASS. Nothing is structurally baked any more, so this mutation
+        # has nothing to aim at — which is a VACUOUS result to be reported,
+        # never a green one.
+        return d, None
+    v = d.get(n, {}).get(k)
+    d[n] = dict(d.get(n) or {})
+    if isinstance(v, dict):
+        d[n][k] = dict(v)
+        d[n][k]["label"] = "Sponsored by Promptly"
+    elif isinstance(v, list):
+        d[n][k] = list(v) + ["Sponsored by Promptly"]
+    else:
+        return d, None
+    return d, [n]
 
 
 MUT = [
