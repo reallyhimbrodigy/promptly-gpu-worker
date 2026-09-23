@@ -17,6 +17,35 @@ def _env():
 
 
 MUTATIONS = [
+    # CONVERTING MAKES IT WORSE. free_videos_each multiplies instead of
+    # divides, so a higher rate raises the load — inverted, and invisible in
+    # a table of plausible numbers.
+    ("converting_raises_the_load",
+     "    return float(\"inf\") if n <= 0 else fv / n",
+     "    return float(\"inf\") if n <= 0 else fv * n",
+     "L10 more_subscribers_means_less_load_each",
+     lambda s: "else fv / n" in s),
+    # THE RATE IS MEASURED AGAINST EVERY PROFILE EVER CREATED. 24/22,594 is
+    # 0.11%, the same fact two orders of magnitude from the one anyone means.
+    ("conversion_measured_against_all_profiles",
+     "ACTIVE_POPULATION = 1995",
+     "ACTIVE_POPULATION = 22594",
+     "L11 conversion_is_against_the_active_population",
+     lambda s: "ACTIVE_POPULATION = 1995" in s),
+    # THE BASE SWAPS TO THE 20 WITH VIDEOS. Every margin improves, and the 9
+    # subscribers who rendered nothing — and pay the same — vanish.
+    ("base_swaps_to_the_ones_with_videos",
+     '    "rc_proxy_active": 24, "mirror_active": 29,',
+     '    "rc_proxy_active": 20, "mirror_active": 29,',
+     "L12 subscriber_base_is_the_rc_proxy",
+     lambda s: '"rc_proxy_active": 24,' in s),
+    # A ROOT THAT DOES NOT EXIST IS REPORTED AS A BIG NUMBER. UNDECIDABLE
+    # folded into "merely difficult", in the column Zac will read first.
+    ("no_break_even_reported_as_a_rate",
+     "    if headroom <= 0:\n        return None",
+     "    if headroom <= 0:\n        return 9.99",
+     "L13 no_break_even_is_none_not_a_number",
+     lambda s: "if headroom <= 0:" in s),
     # THE CUT APPLIED THE WRONG WAY ROUND. Inflates every margin in the
     # table and reads entirely plausibly — a 30% cut becoming a 30% bonus.
     ("cut_becomes_a_bonus",

@@ -113,6 +113,50 @@ def main():
         % (r["list"], r["net_of_cut"], r["own_usage_cost"], r["free_load_share"],
            r["margin"]))
 
+    # L10 A HIGHER CONVERSION RATE MUST LOWER THE LOAD PER SUBSCRIBER. Free
+    # volume is held constant, so more payers share the same 2,429 videos.
+    # A model where converting made it worse would be inverted, and the sign
+    # is invisible in a table of plausible numbers.
+    loads = [P.free_videos_each(r) for r in P.CONVERSION_SWEEP]
+    leg("L10 more_subscribers_means_less_load_each",
+        all(a > b for a, b in zip(loads, loads[1:])),
+        "%s" % ["%.1f" % x for x in loads])
+
+    # L11 THE CONVERSION DENOMINATOR IS THE ACTIVE POPULATION. Against all
+    # 22,594 profiles the same 24 subscribers read 0.11%; against the 1,995
+    # who rendered they read 1.2%. Two orders of magnitude, one fact, and
+    # only one of them is the rate anyone means by "~1%".
+    cur = P.current_conversion()
+    leg("L11 conversion_is_against_the_active_population",
+        0.005 < cur < 0.03 and P.ACTIVE_POPULATION < P.PROFILES_TOTAL / 5,
+        "%.2f%% on %d active (%.2f%% if measured on all %d profiles)"
+        % (cur * 100, P.ACTIVE_POPULATION,
+           P.SUBSCRIBER_BASE["rc_proxy_active"] / P.PROFILES_TOTAL * 100,
+           P.PROFILES_TOTAL))
+
+    # L12 THE BASE IS THE RC PROXY, NOT THE ONES WITH VIDEOS. Zac's ruling,
+    # and the difference is 9 subscribers who rendered nothing and pay the
+    # same. Asserted so a later edit cannot quietly swap in the smaller base
+    # and make every margin look better.
+    b = P.SUBSCRIBER_BASE
+    leg("L12 subscriber_base_is_the_rc_proxy",
+        b["rc_proxy_active"] == 24 and b["rendered_in_30d"] < b["rc_proxy_active"]
+        <= b["mirror_active"],
+        "rc_proxy %d, mirror %d, rendered %d, comped %d"
+        % (b["rc_proxy_active"], b["mirror_active"], b["rendered_in_30d"], b["comped"]))
+
+    # L13 A TIER THAT CANNOT COVER ITS OWN USAGE HAS NO BREAK-EVEN RATE, and
+    # must say so rather than return a number. A root that does not exist
+    # reported as a large percentage is the third state folded into the
+    # second — UNDECIDABLE printed as merely difficult.
+    huge = P.break_even_conversion("pro annual", 60.0, 0.25,
+                                   P.CHANNEL_CUT["App Store, year 1 (30%)"])
+    fine = P.break_even_conversion("pro annual", 1.0, 0.1225,
+                                   P.CHANNEL_CUT["App Store, year 1 (30%)"])
+    leg("L13 no_break_even_is_none_not_a_number",
+        huge is None and fine is not None and 0 < fine < 1,
+        "unaffordable -> %r, affordable -> %.1f%%" % (huge, fine * 100))
+
     print("%d/%d legs ok" % (NLEGS - len(FAILS), NLEGS))
     if FAILS:
         print("FAILED: %s" % ", ".join(FAILS))
