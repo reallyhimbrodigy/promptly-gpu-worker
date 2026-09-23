@@ -261,12 +261,25 @@ export function contractCheck(code) {
   // anywhere fired on all 28 of them: a pattern tight enough to reject a
   // CORRECT implementation, in the gate written to stop exactly that. The
   // root is proven by the div leg above and nothing else is needed.
+  // COMMENTS ARE NOT CODE. Every pattern below scans the blob as TEXT, so a
+  // comment explaining a fix matches it. RankedList was refused for "blocked
+  // global name survives: document" by a comment that said "paint order stays
+  // document order" — a correct component refused for its own explanation.
+  // FOURTH instance in one session (the NO STILL scan, the currentColor grep,
+  // the zIndex A/B, and now the contract itself), so the strip is shared
+  // rather than added case by case.
+  //
+  // It strips comments ONLY for the identifier scans. The structural legs
+  // above still read the real text, because a comment cannot satisfy them.
+  const codeNoComments = code
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/[^\n]*/g, (m, p1) => p1);
   if (!/const props = \(item && item\.props\)/.test(code)) v.push("no `props` identifier");
-  if (/\bcreateContext\b/.test(code)) v.push("createContext survives");
-  if (/\bloadFont\b/.test(code)) v.push("loadFont survives");
-  if (/\bvoid\s/.test(code)) v.push("the void operator survives");
+  if (/\bcreateContext\b/.test(codeNoComments)) v.push("createContext survives");
+  if (/\bloadFont\b/.test(codeNoComments)) v.push("loadFont survives");
+  if (/\bvoid\s/.test(codeNoComments)) v.push("the void operator survives");
   for (const g of ["window", "document", "globalThis", "eval", "localStorage"])
-    if (new RegExp("\\b" + g + "\\b").test(code))
+    if (new RegExp("\\b" + g + "\\b").test(codeNoComments))
       v.push(`blocked global name survives: ${g}`);
   return v;
 }

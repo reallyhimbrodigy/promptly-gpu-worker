@@ -410,13 +410,20 @@ var RankedList = ({
     style={{
       width,
       display: "flex",
-      flexDirection: "column",
-      gap: ROW_GAP,
+      // PAINT ORDER WITHOUT zIndex. ChatCut ignores zIndex and paints in
+            // document order, and these rows are in NORMAL FLOW, so simply
+            // reordering the source would move row 1 to the bottom of the frame.
+            // column-reverse separates the two: the LAST child in the source renders at
+            // the TOP, while paint order stays source order — so iterating
+            // in reverse puts row 0 last in the source (painted on top, which is
+            // what `zIndex: isTop ? 2 : 1` said) and first on screen.
+            flexDirection: "column-reverse",
+            gap: ROW_GAP,
       opacity: exitOpacity,
       transform: `translateY(${exitY.toFixed(2)}px)`
     }}
   >
-          {rendered.map((item, i) => {
+          {rendered.map((item, i) => ({ item, i })).reverse().map(({ item, i }) => {
     const isTop = i === 0 && highlightTop;
     const seq = order === "bottomUp" ? N - 1 - i : i;
     const act = START + seq * STAGGER;
@@ -476,7 +483,6 @@ var RankedList = ({
         rotate: `${rowTilt.toFixed(1)}deg`,
         transformOrigin: "left center",
         minHeight: rankFS * 0.98,
-        zIndex: isTop ? 2 : 1
       }}
     >
                 {
@@ -498,7 +504,6 @@ var RankedList = ({
         rotate: `${(i % 2 === 0 ? 1 : -1) * 2.4}deg`,
         transformOrigin: "left bottom",
         textShadow: rankShadow,
-        zIndex: 1
       }}
     >
                   {item.rank ?? String(i + 1)}
@@ -511,7 +516,7 @@ var RankedList = ({
       style={{
         position: "relative",
         marginLeft: rankFS * 0.52,
-        zIndex: 2,
+
         display: "flex",
         flexDirection: "column",
         paddingTop: 10

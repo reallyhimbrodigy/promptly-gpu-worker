@@ -1,8 +1,15 @@
 [
  {
-  "type": "TimelineRoadmap",
+  "type": "PillCluster",
   "verdict": "IDENTICAL",
-  "zIndexCount": 4,
+  "zIndexCount": 1,
+  "controlOk": true,
+  "diffFrames": []
+ },
+ {
+  "type": "RankedList",
+  "verdict": "IDENTICAL",
+  "zIndexCount": 3,
   "controlOk": true,
   "diffFrames": []
  }

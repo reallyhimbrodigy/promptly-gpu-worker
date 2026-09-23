@@ -161,7 +161,15 @@ export const PillCluster: React.FC<PillClusterProps> = ({
             transformOrigin: "center",
           }}
         >
-          {rendered.map((tag, i) => {
+          {/* PAINT ORDER WITHOUT so
+              DOM order costs nothing in layout and only paint order moves.
+              Sorted by delayRank, which is exactly what `zIndex: 1 +
+              delayRank[i]` said — a pill entering later sits on top of one
+              that entered earlier. `i` stays the logical index so every
+              position and timing calculation is untouched. */}
+            {rendered.map((tag, i) => ({ tag, i }))
+              .sort((a, b) => delayRank[a.i] - delayRank[b.i])
+              .map(({ tag, i }) => {
             const act = START + delayRank[i] * STAGGER;
             // Corpus law 2: the corpus color-codes exactly ONE word per
             // beat ("aggressive red on the pain word, back to white on the
@@ -234,7 +242,7 @@ export const PillCluster: React.FC<PillClusterProps> = ({
                   position: "absolute",
                   left: px,
                   top: py,
-                  zIndex: 1 + delayRank[i],
+
                   transform: `translate(${floatX.toFixed(2)}px, ${(floatY + dropY).toFixed(2)}px) scale(${(pop * pulse).toFixed(4)}) rotate(${rot.toFixed(2)}deg)`,
                   transformOrigin: "center",
                   opacity: popO,

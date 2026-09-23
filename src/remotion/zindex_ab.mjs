@@ -44,11 +44,23 @@ const srcFor = (t) => path.join(__dirname, "src", "motion-graphics", t, `${t}.ts
 
 // STRIP, NOT REORDER. This mutation asks ONLY "did zIndex matter" — it must
 // not also change the DOM, or the answer describes two changes at once.
+// COMMENTS ARE NOT CODE, AND COUNTING MATCHES IS NOT READING WHERE THEY LAND.
+// The fix comments written for these very components say the word "zIndex", so
+// the first version counted them, found them still present after the strip,
+// and reported HARNESS FAILURE on two correctly-fixed components. Third time
+// in one session: the NO STILL scan, the currentColor grep, and now this. A
+// check that reads source cannot tell code from prose unless it is told to.
+function codeOnly(src) {
+  return src.replace(/\/\*[\s\S]*?\*\//g, "")
+            .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+            .replace(/(^|[^:])\/\/[^\n]*/g, (m, p1) => p1);
+}
+
 function stripZIndex(src) {
-  const before = (src.match(/zIndex\s*:/g) || []).length;
+  const before = (codeOnly(src).match(/zIndex\s*:/g) || []).length;
   const out = src.replace(/^\s*zIndex\s*:\s*[^,\n]+,?\s*$/gm, "")
                  .replace(/zIndex\s*:\s*[^,}\n]+,\s*/g, "");
-  const after = (out.match(/zIndex\s*:/g) || []).length;
+  const after = (codeOnly(out).match(/zIndex\s*:/g) || []).length;
   return { out, before, after };
 }
 

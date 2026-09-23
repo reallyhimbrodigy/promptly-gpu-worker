@@ -483,7 +483,15 @@ var PillCluster = ({
       transformOrigin: "center"
     }}
   >
-          {rendered.map((tag, i) => {
+          {/* PAINT ORDER WITHOUT so
+              DOM order costs nothing in layout and only paint order moves.
+              Sorted by delayRank, which is exactly what `zIndex: 1 +
+              delayRank[i]` said — a pill entering later sits on top of one
+              that entered earlier. `i` stays the logical index so every
+              position and timing calculation is untouched. */}
+            {rendered.map((tag, i) => ({ tag, i }))
+              .sort((a, b) => delayRank[a.i] - delayRank[b.i])
+              .map(({ tag, i }) => {
     const act = START + delayRank[i] * STAGGER;
     const isAccent = accentEvery > 0 && i === Math.min(accentEvery - 1, N - 1);
     const pop = interpolate2(
@@ -528,7 +536,7 @@ var PillCluster = ({
         position: "absolute",
         left: px,
         top: py,
-        zIndex: 1 + delayRank[i],
+
         transform: `translate(${floatX.toFixed(2)}px, ${(floatY + dropY).toFixed(2)}px) scale(${(pop * pulse).toFixed(4)}) rotate(${rot.toFixed(2)}deg)`,
         transformOrigin: "center",
         opacity: popO,
