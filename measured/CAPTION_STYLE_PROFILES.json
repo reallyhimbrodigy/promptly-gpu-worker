@@ -2,13 +2,13 @@
  "_schema_source": "edit_captions action=template with no templatePreset, 2026-09-22, catalog=all. The KEY NAMES BELOW ARE THEIRS, read from that response — not guessed. 26 presets came back, not 27; if a 27th exists it is outside the 'all' catalog and the count should be re-read rather than reconciled by hand.",
  "_styleProfile_excludes": "Their own message: 'Style profiles exclude font size, position, and visual row capacity.' So our fontSize and position values are NOT styleProfile fields and must not be merged in as if they were — size goes through the track style as sizePx (stored as fontSizeRatio = sizePx / min(w,h)), position through layout/anchor. Our maxWordsPerLine is a THIRD profile: paginationProfile.wordsPerPage.",
  "_merge_rule": "action=style MERGES, it does not replace. Each profile below names the built-in it should be applied OVER — template <preset> first, then style — chosen as the nearest of the 26 so the merge has the least to override. B1's first Gadzhi frame carried a purple box from an earlier probe, which is what a merge onto whatever was there last looks like.",
- "_THE_HIGHLIGHT_FINDING": "THEIR HIGHLIGHT IS TEMPORAL; OURS IS LEXICAL. hasActiveHighlight + highlightUnit:'word' lights the word being SPOKEN, walking through the line with the playhead. Gadzhi, Lumen and Pulse light a word from a KEYWORD LIST — a fixed choice, the same word every frame. There is no keyword-list concept anywhere in styleProfile, so this is not a missing key that B1's diff will find: setting hasActiveHighlight true with our highlightColor produces a KARAOKE highlight, which is a different look from ours and will render plausibly enough that a still frame cannot tell them apart. That is why those three are held rather than sent — the mapping would look right and be wrong, which is the one failure a frame diff cannot catch.",
+ "_THE_HIGHLIGHT_FINDING": "THEIR HIGHLIGHT IS TEMPORAL AND OURS WAS LEXICAL, and THEIRS IS WHAT SHIPS (Zac, 2026-09-22). hasActiveHighlight + highlightUnit 'word' lights the word being SPOKEN, walking the line with the playhead; Gadzhi, Lumen and Pulse lit a word from a fixed keyword list. There is no keyword concept in styleProfile. The three LINES were rewritten to describe the spoken-word highlight, because a line that still said 'one keyword lit' would be describing a render nobody will ever see — and whatever is not in the line their AI invents.",
  "_NOT_EXPRESSIBLE": {
   "Prime": "line1Color/line2Color — styleProfile has ONE `color`, no per-line colour.",
   "TwoTone": "topColor/accentColor — same gap: the second line's accent has no key.",
   "_consequence": "Both render as a single-colour line unless B1's schema has a per-line key the catalog response does not show. Stated rather than mapped onto highlightColor, which would paint the wrong thing and look deliberate."
  },
- "SEND_NOW": {
+ "PROFILES": {
   "CleanCut": {
    "_line": "CleanCut — plain white words for narration, explainers and text that must not steal focus",
    "baseline": "plain",
@@ -53,7 +53,58 @@
     "position": "bottom",
     "wordsPerPage": 4
    },
-   "_depends_on": "per-word reveal from token times — unspoken words are opacity 0"
+   "_depends_on": "per-word reveal from token times — unspoken words are opacity 0",
+   "_not_expressible": "boxedWords (Playfair italic at 1.8x with a dot) is unreachable — it needs a word list, and there is no word-list concept. Default Cove has none set, so nothing is lost today."
+  },
+  "Gadzhi": {
+   "_line": "Gadzhi — uppercase words with the spoken one lit in yellow for punchlines and key terms",
+   "baseline": "dogme",
+   "_why": "uppercase + highlight-word + shadow + no background + no stroke is Gadzhi's exact structure; Story Yellow adds a stroke and a highlight block it does not have.",
+   "styleProfile": {
+    "fontFamily": "Montserrat",
+    "fontWeight": "700",
+    "color": "#FFFFFF",
+    "textTransform": "uppercase",
+    "letterSpacing": 0.02,
+    "hasBackground": false,
+    "hasStroke": false,
+    "strokeWidth": 0,
+    "hasShadow": true,
+    "highlightColor": "#F5C518",
+    "highlightUnit": "word",
+    "hasActiveHighlight": true
+   },
+   "_outside_styleProfile": {
+    "sizePx": 90,
+    "position": "bottom",
+    "wordsPerPage": 2
+   },
+   "_not_expressible": "Our keyword highlight was LEXICAL — a fixed word list. dogme's is TEMPORAL and that is what ships: the yellow walks the line with the playhead. The line was rewritten to say so rather than left describing a keyword."
+  },
+  "Lumen": {
+   "_line": "Lumen — soft white words with the spoken one in amber for hype, reveals and energy",
+   "baseline": "netflix",
+   "_why": "highlight-word + shadow + NO background + no stroke + no uppercase. Corrected off `studio`: studio carries a normalBackground and LUMEN HAS NO BACKGROUND AT ALL — `bandLuma` is a MEASUREMENT of the video behind the caption, fed to keywordContrastShadow to step contrast up, not a band that gets painted. I had read a measured input as a drawn element.",
+   "styleProfile": {
+    "fontFamily": "Montserrat",
+    "fontWeight": "600",
+    "color": "#FFFFFF",
+    "letterSpacing": 0.01,
+    "textTransform": "none",
+    "hasBackground": false,
+    "hasStroke": false,
+    "strokeWidth": 0,
+    "hasShadow": true,
+    "highlightColor": "#D4A24C",
+    "highlightUnit": "word",
+    "hasActiveHighlight": true
+   },
+   "_outside_styleProfile": {
+    "sizePx": 70,
+    "position": "bottom",
+    "wordsPerPage": 4
+   },
+   "_not_expressible": "The keyword also changes FACE (Playfair Display 400 italic) and SIZE (1.3x), and a shine word goes to 1.6x with a sweep. styleProfile varies COLOUR per word and nothing else, so the face swap and the shine do not travel. Stated rather than approximated with a second colour."
   },
   "Prime": {
    "_line": "Prime — two stacked lines in white and blue for setups, payoffs and question-answer beats",
@@ -79,7 +130,29 @@
     "position": "bottom",
     "wordsPerPage": 3
    },
-   "_not_expressible": "line2 in #3BA5FF — one `color` only"
+   "_not_expressible": "line1Color #FFFFFF / line2Color #3BA5FF — styleProfile has ONE `color` and no per-line key, so both lines ship white. Mapping the blue onto highlightColor would light the SPOKEN word blue, which is a different thing that looks deliberate."
+  },
+  "Pulse": {
+   "_line": "Pulse — clean words with the spoken one in coral for calm delivery and slow reveals",
+   "baseline": "story",
+   "_why": "Story Yellow is already DM Sans with highlight-word and a shadow — the same family as ours, so only the weight, the highlight colour and the 1px stroke need overriding.",
+   "styleProfile": {
+    "fontFamily": "DM Sans",
+    "fontWeight": "700",
+    "color": "#FFFFFF",
+    "letterSpacing": -0.02,
+    "hasBackground": false,
+    "hasStroke": false,
+    "strokeWidth": 0,
+    "highlightColor": "#FF6B4A",
+    "highlightUnit": "word",
+    "hasActiveHighlight": true
+   },
+   "_outside_styleProfile": {
+    "sizePx": 80,
+    "position": "bottom"
+   },
+   "_not_expressible": "The keyword is also 1.25x with a glow off the highlight colour. No per-word scale key, so it ships as colour alone."
   },
   "TwoTone": {
    "_line": "TwoTone — two thick outlined lines, the second in a warm accent, for loud punchy beats",
@@ -102,78 +175,9 @@
     "sizePx": 110,
     "position": "center"
    },
-   "_not_expressible": "line2 in #FFC53D — one `color` only"
+   "_not_expressible": "line 2 in accentColor #FFC53D — same one-`color` gap. The 6px stroke DOES travel; it is the accent line that does not."
   }
  },
- "HELD_ON_THE_DIFF": {
-  "Gadzhi": {
-   "_line": "Gadzhi — one keyword lit in yellow on two-word lines for punchlines and key terms",
-   "baseline": "dogme",
-   "_why": "uppercase + highlight-word + shadow + no background + no stroke is Gadzhi's exact structure; Story Yellow adds a stroke and a highlight block it does not have.",
-   "styleProfile": {
-    "fontFamily": "Montserrat",
-    "fontWeight": "700",
-    "color": "#FFFFFF",
-    "textTransform": "uppercase",
-    "letterSpacing": 0.02,
-    "hasBackground": false,
-    "hasStroke": false,
-    "strokeWidth": 0,
-    "hasShadow": true,
-    "highlightColor": "#F5C518",
-    "highlightUnit": "word",
-    "hasActiveHighlight": true
-   },
-   "_outside_styleProfile": {
-    "sizePx": 90,
-    "position": "bottom",
-    "wordsPerPage": 2
-   },
-   "_held_because": "highlightUnit word lights the SPOKEN word; ours lights a chosen keyword"
-  },
-  "Lumen": {
-   "_line": "Lumen — a bright band behind the line for hype, reveals and high-energy delivery",
-   "baseline": "studio",
-   "_why": "background + highlight-word, no stroke, no shadow — the band behind the line is normalBackground.",
-   "styleProfile": {
-    "fontFamily": "Montserrat",
-    "fontWeight": "600",
-    "color": "#FFFFFF",
-    "letterSpacing": 0.01,
-    "hasBackground": true,
-    "hasStroke": false,
-    "highlightColor": "#D4A24C",
-    "highlightUnit": "word",
-    "hasActiveHighlight": true
-   },
-   "_outside_styleProfile": {
-    "sizePx": 70,
-    "position": "bottom",
-    "wordsPerPage": 4
-   },
-   "_held_because": "same keyword-vs-spoken gap; the keyword also changes FACE (Playfair 400) and SIZE (1.3x), neither of which styleProfile can vary per word"
-  },
-  "Pulse": {
-   "_line": "Pulse — the whole line fades in for calm delivery, storytelling and slow reveals",
-   "baseline": "story",
-   "_why": "Story Yellow is already DM Sans with highlight-word and a shadow — the same family as ours, so only the weight, the highlight colour and the 1px stroke need overriding.",
-   "styleProfile": {
-    "fontFamily": "DM Sans",
-    "fontWeight": "700",
-    "color": "#FFFFFF",
-    "letterSpacing": -0.02,
-    "hasBackground": false,
-    "hasStroke": false,
-    "strokeWidth": 0,
-    "highlightColor": "#FF6B4A",
-    "highlightUnit": "word",
-    "hasActiveHighlight": true
-   },
-   "_outside_styleProfile": {
-    "sizePx": 80,
-    "position": "bottom"
-   },
-   "_held_because": "same keyword-vs-spoken gap; the keyword is also 1.25x with a glow"
-  }
- }
+ "_status": "ALL SEVEN RELEASED. No style is held.",
+ "_single_source": "THIS FILE IS THE ONLY SOURCE FOR ALL SEVEN — baseline, style, size, layout, pagination, line, and the not-expressible notes. B1 builds from it and nothing else."
 }
