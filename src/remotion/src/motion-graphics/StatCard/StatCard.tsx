@@ -47,6 +47,20 @@ const antonCharEm = (c: string): number =>
 const estWidthEm = (s: string): number =>
   s.split("").reduce((a, c) => a + antonCharEm(c), 0);
 
+const groupDigits = (s: string): string => {
+  const neg = s.charAt(0) === "-";
+  const body = neg ? s.slice(1) : s;
+  const dot = body.indexOf(".");
+  const whole = dot === -1 ? body : body.slice(0, dot);
+  const rest = dot === -1 ? "" : body.slice(dot);
+  let out = "";
+  for (let i = 0; i < whole.length; i += 1) {
+    if (i > 0 && (whole.length - i) % 3 === 0) out += ",";
+    out += whole.charAt(i);
+  }
+  return (neg ? "-" : "") + out + rest;
+};
+
 export const StatCard: React.FC<StatCardProps> = ({
   startMs,
   durationMs,
@@ -106,12 +120,12 @@ export const StatCard: React.FC<StatCardProps> = ({
   const display =
     decimals !== undefined
       ? currentValue.toFixed(decimals)
-      : Math.round(currentValue).toLocaleString();
+      : groupDigits(String(Math.round(currentValue)));
 
   // FULL-BLEED SIZING (§4). Size the number to the FINAL string's width so the
   // envelope is stable while the count grows into it — the figure never jumps.
   const finalDisplay =
-    decimals !== undefined ? value.toFixed(decimals) : Math.round(value).toLocaleString();
+    decimals !== undefined ? groupDigits(value.toFixed(decimals)) : groupDigits(String(Math.round(value)));
   // Font census (2026-08-26): label + prefix/suffix are user/model text —
   // routed stacks (+ emoji tail); the digits stay chrome (bare Anton). The
   // affix width estimate keeps 0.5em/char for latin; non-latin uses the

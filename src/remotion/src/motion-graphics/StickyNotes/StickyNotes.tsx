@@ -89,7 +89,11 @@ export const StickyNotes: React.FC<StickyNotesProps> = ({
   noteSize = 300,
   noteFontSize = 50,
   noteFontFamily = MG_FONTS.caveatBrush,
-  showFog = true,
+  // FOG OFF BY DEFAULT (2026-09-23) — a full-width band over the top half
+  // starting at rgba(255,255,255,1), which is a solid white rectangle across
+  // the frame in an export, not atmosphere. Fixed in ported_mg first; THIS
+  // tree is what our own pipeline renders and it still had it.
+  showFog = false,
   topOffset = "5%",
 }) => {
   const frame = useCurrentFrame();

@@ -203,16 +203,10 @@ export const Reticle: React.FC<ReticleProps> = ({
               no four-rect math), so the HUD occludes the footage around the
               subject and the region reads as a window, not four floating
               corners. Releases with the exit defocus. */}
-          <div
-            aria-hidden
-            style={{
-              position: "absolute",
-              inset: 0,
-              borderRadius: 10,
-              boxShadow: `0 0 0 9999px rgba(0,0,0,${(0.26 * lockT * (1 - exitDefocus)).toFixed(3)})`,
-              pointerEvents: "none",
-            }}
-          />
+      {/* WINDOW PLANE REMOVED 2026-09-23 — a 9999px-spread box-shadow,
+          which ChatCut's renderer paints INSIDE the element as a grey
+          slab over the subject. Removed in ported_mg first; this tree
+          is what OUR pipeline renders and it still had it. */}
 
           {/* Corner brackets */}
           <div style={{ position: "absolute", inset: 0, opacity: bracketsOpacity }}>
@@ -296,11 +290,22 @@ export const Reticle: React.FC<ReticleProps> = ({
           {label ? (
             <div
               style={{
-                position: "absolute",
-                left: -thickness / 2,
-                top: 0,
-                transform: `translateY(calc(-100% - 14px)) scale(${tagScale.toFixed(4)})`,
-                transformOrigin: "bottom left",
+      position: "absolute",
+      // INSIDE THE REGION, NOT ABOVE IT (2026-09-23). The tag was at top:0
+      // with `translateY(calc(-100% - 14px))`, which puts it ENTIRELY ABOVE
+      // the bracket region — its own height plus 14px clear of the top edge.
+      // In our renderer that is fine, and a local frame shows "REC" sitting
+      // over the box. In CHATCUT THE REGISTERED BOX IS A CLIP BOX, so
+      // everything above the region's top edge is cut, and the label never
+      // appears on any frame of its life. inspect_item shows the override
+      // arriving because it DOES arrive; it is drawn and then cropped.
+      //
+      // `armLength + 14` clears the corner bracket, so the tag sits under the
+      // top-left arm rather than on it.
+      left: 14,
+      top: armLength + 14,
+      transform: `scale(${tagScale.toFixed(4)})`,
+      transformOrigin: "top left",
                 opacity: tagOpacity,
                 display: "inline-flex",
                 alignItems: "center",

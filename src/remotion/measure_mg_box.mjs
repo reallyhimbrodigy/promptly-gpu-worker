@@ -44,6 +44,12 @@ if (baked) {
   const m = entry.code.match(new RegExp(`${baked}:\\s*(\\[[\\s\\S]*?\\]),\\n`));
   if (m) props[baked] = JSON.parse(m[1]);
 }
+// OVERRIDES, so a box can be measured for the placement being asked about
+// rather than for the defaults. Reticle's `label` defaults to "" and the tag
+// is guarded on it, so the default box is the box of a component with its tag
+// switched off — measuring that and calling it Reticle's box is measuring a
+// different component.
+if (process.env.PROPS_JSON) Object.assign(props, JSON.parse(process.env.PROPS_JSON));
 console.log(`${TYPE}: ${Object.keys(props).length} registered props` +
   (baked && props[baked] ? `, ${props[baked].length} baked ${baked}` : ""));
 

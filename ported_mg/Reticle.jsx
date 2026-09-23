@@ -618,10 +618,21 @@ var Reticle = ({
           {label ? <div
     style={{
       position: "absolute",
-      left: -thickness / 2,
-      top: 0,
-      transform: `translateY(calc(-100% - 14px)) scale(${tagScale.toFixed(4)})`,
-      transformOrigin: "bottom left",
+      // INSIDE THE REGION, NOT ABOVE IT (2026-09-23). The tag was at top:0
+      // with `translateY(calc(-100% - 14px))`, which puts it ENTIRELY ABOVE
+      // the bracket region — its own height plus 14px clear of the top edge.
+      // In our renderer that is fine, and a local frame shows "REC" sitting
+      // over the box. In CHATCUT THE REGISTERED BOX IS A CLIP BOX, so
+      // everything above the region's top edge is cut, and the label never
+      // appears on any frame of its life. inspect_item shows the override
+      // arriving because it DOES arrive; it is drawn and then cropped.
+      //
+      // `armLength + 14` clears the corner bracket, so the tag sits under the
+      // top-left arm rather than on it.
+      left: 14,
+      top: armLength + 14,
+      transform: `scale(${tagScale.toFixed(4)})`,
+      transformOrigin: "top left",
       opacity: tagOpacity,
       display: "inline-flex",
       alignItems: "center",

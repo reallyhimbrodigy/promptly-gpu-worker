@@ -1,0 +1,14 @@
+import { bundle } from "@remotion/bundler";
+import { renderStill, selectComposition } from "@remotion/renderer";
+import path from "node:path"; import fs from "node:fs";
+const reg = JSON.parse(fs.readFileSync("../../chatcut_registry_baked.json","utf8"));
+const TYPE = process.argv[2], FRAME = Number(process.argv[3]||40);
+const props = {};
+for (const p of reg.components[TYPE].properties) props[p.key] = p.defaultValue;
+if (process.env.PROPS_JSON) Object.assign(props, JSON.parse(process.env.PROPS_JSON));
+const serveUrl = await bundle({ entryPoint: path.join(process.cwd(),"src","index.ts") });
+const inputProps = { type: TYPE, props, motionBlur: false };
+const composition = await selectComposition({ serveUrl, id: "MGCraftProbe", inputProps });
+const out = path.join(process.cwd(), `_${TYPE}_f${FRAME}.png`);
+await renderStill({ composition, serveUrl, output: out, frame: FRAME, inputProps, chromiumOptions:{gl:"angle"} });
+console.log("wrote", out);

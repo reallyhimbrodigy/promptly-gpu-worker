@@ -60,6 +60,7 @@ SMOKES = [
     "smoke_sfx_levels",
     "smoke_baked_copy",
     "smoke_pricing_model",
+    "smoke_two_trees_agree",
 ]
 N_EXPECTED = 2 * len(SMOKES)
 
