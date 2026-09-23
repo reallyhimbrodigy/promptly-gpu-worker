@@ -51,5 +51,32 @@
   "Prime": "CUT 2026-09-23. Its whole identity is TWO LINES IN TWO COLOURS — white line 1 over #3BA5FF line 2 — and styleProfile has ONE `color` with no per-line key. Applied, it renders as a single white line, which is CleanCut with a different size. The line describing it would have been true of our Remotion component and false of everything ChatCut draws.",
   "Lumen": "CUT 2026-09-23. Its keyword changes FACE (Playfair Display italic) and SIZE (1.3x, 1.6x on a shine word); styleProfile varies COLOUR per word and nothing else. What survives the mapping is white Montserrat with an amber spoken word — which is Gadzhi in a different hue, so it was a duplicate of a preset that maps cleanly rather than a style of its own.",
   "_rule": "A preset is kept only where the thing that MAKES it that preset survives into ChatCut's render. Both of these lost their identity in the mapping and would have shipped a true-sounding line describing a render nobody would ever see — the same defect as the three lines I had already written wrong this session, caught before shipping rather than after."
- }
+ },
+ "catalogue": [
+  "AnnotationArrow — a hand-drawn arrow for pointing at a detail on screen",
+  "BarRace — bars that grow and reorder for comparing numbers over time",
+  "ChatThread — a phone message thread for conversations, replies and receipts",
+  "DropBanner — a banner of short points for feature lists and announcements",
+  "DropCard — a card of titled points for launches, drops and release notes",
+  "EditorialQuote — a magazine-style pull quote for statements worth setting apart",
+  "EndCard — a closing card for sign-offs, handles and calls to action",
+  "IMessageBubble — a single blue message bubble for a text worth showing",
+  "InstagramComment — one comment with a handle for reactions and social proof",
+  "MouseDrag — a cursor that moves and clicks for showing a click or a drag",
+  "NamePlate — a compact name tag for labelling a person, place or object",
+  "Notification — a phone notification card for alerts, sales and messages",
+  "PillMarquee — a scrolling row of pills for features, benefits and tags",
+  "ProgressBar — a bar filling toward a total for progress, goals and targets",
+  "PullQuote — a large quote with a lit keyword for a line worth dwelling on",
+  "RecordingFrame — a recording overlay with corner readouts for screen captures",
+  "SectionDivider — a full-width title card for chapters and section breaks",
+  "StepDivider — a numbered step marker for tutorials, recipes and how-tos",
+  "TikTokComment — one comment in TikTok's style for reactions and replies",
+  "Timeline — titled steps down the frame for processes, stories and roadmaps",
+  "TimelineRoadmap — a compact step list for plans, roadmaps and sequences",
+  "TweetBubble — a tweet card with engagement counts for quotes and reactions"
+ ],
+ "_catalogue_note": "22 catalogue components, not 16. The baked registry holds 28; six of the live twelve are in it (StickyNotes, StatCard, Stamp, PillCluster, RankedList, Reticle) and the other six are port/build frame compositions that were never in it. 28 - 6 = 22. Reported as measured rather than fitted to 16: a count I cannot reproduce is a count one of us is wrong about, and silently agreeing hides which.",
+ "_catalogue_baked_copy": "ZERO across all 22, surveyed from the registry.",
+ "_catalogue_gap": "TweetBubble.stats is still baked and still viewer-visible: replies 128, reposts 412, likes 1200, views 98000. The copy survey excludes it because it has no alphabetic content, but a viewer READS those numbers and no placement can change them. Same class as the copy, one type down."
 }
