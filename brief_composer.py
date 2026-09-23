@@ -58,14 +58,27 @@ DEFAULTS = [
     ("zooms",       "zooms",
      "Zoom on moments of emphasis."),
     ("sfx",         "sound effects",
-     "Place sound effects from the project's registered sounds."),
+     # RULED BY ZAC 2026-09-22: their agent chooses FREELY between our thirteen
+     # and their own library. The old wording — "from the project's registered
+     # sounds" — was a pool restriction nobody had ruled, written in when the
+     # thirteen were the only sounds that existed. A sentence that narrows the
+     # menu is the opposite of the whole programme: the point of the 32 lines is
+     # that every sound is SEEN, not that no other sound may be used.
+     "Place sound effects where the moment wants one — the project's sounds or "
+     "your own library."),
     ("transitions", "transitions",
      "Put transitions on scene changes."),
     ("aspect",      "aspect ratio",
      "Keep the source aspect ratio."),
     ("registered",  "registered components",
-     "Use only the components, sounds and caption styles already registered in "
-     "this project."),
+     # SOUNDS COME OUT OF THE "ONLY" AND ARE NAMED AS FREE, rather than merely
+     # dropped. Deleting the word "sounds" from this sentence would leave the
+     # restriction unstated and the freedom unstated too, and an unstated
+     # freedom is indistinguishable from an oversight — the same reason a
+     # suppression is reported with its evidence instead of silently applied.
+     "Use only the components and caption styles already registered in this "
+     "project. Sounds are not restricted — choose freely between the project's "
+     "sounds and your own library."),
 ]
 
 # Words that name each family in a user's own vocabulary. Deliberately WIDE for

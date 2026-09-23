@@ -37,6 +37,24 @@ SMOKE = os.path.join(HERE, "smoke_brief_composer.py")
 WATCHED = ["brief_composer.py", "smoke_brief_composer.py"]
 
 MUTATIONS = [
+    # THE SOUND POOL RESTRICTION, RESTORED — exactly the sentence that shipped
+    # until Zac ruled it out. It is the mutation most likely to reappear by
+    # accident, because "from the project's registered sounds" reads as
+    # precision rather than as a narrowing of the menu.
+    ("sound_pool_restriction_returns", "brief_composer.py",
+     '     "Place sound effects where the moment wants one — the project\'s sounds or "\n'
+     '     "your own library."),',
+     '     "Place sound effects from the project\'s registered sounds."),',
+     "L9 sounds_not_restricted_to_the_project_pool",
+     lambda s: "the project's sounds or " in s),
+    # THE SECOND SPELLING, RESTORED. Two different sentences said the same
+    # thing, so a proof that only restores one leaves the other untested — and
+    # a needle aimed at either phrasing would have missed the other.
+    ("only_clause_reabsorbs_sounds", "brief_composer.py",
+     '     "Use only the components and caption styles already registered in this "',
+     '     "Use only the components, sounds and caption styles registered in this "',
+     "L9 sounds_not_restricted_to_the_project_pool",
+     lambda s: "components and caption styles already registered" in s),
     # THE ONLY-IS-A-BAN DEFECT, restored. Adding `only` to the negation set is
     # the single most plausible "improvement" anyone would make here.
     ("only_becomes_a_ban", "brief_composer.py",

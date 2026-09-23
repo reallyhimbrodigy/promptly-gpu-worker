@@ -68,6 +68,11 @@ def _unknown_component(d):
     return d
 
 
+def _newline(d):
+    d["caption_styles"][0] = d["caption_styles"][0].replace(" — ", " —\n", 1)
+    return d
+
+
 DATA_MUTATIONS = [
     # name, apply, leg phrase, precondition over the UNMUTATED corpus
     ("a_component_line_goes_missing", _drop_a_component,
@@ -79,6 +84,12 @@ DATA_MUTATIONS = [
     ("a_comma_enters_a_sound_name", _comma,
      "L2 no_commas_anywhere",
      lambda d: not any("," in l for l in d["sounds"])),
+    # A NEWLINE IS INVISIBLE IN EVERY SURFACE THAT SHOWS THE LINE, which is
+    # why it gets its own mutation rather than riding on the length leg: the
+    # mutant is the same characters in the same order and still breaks the name.
+    ("a_newline_hides_inside_a_line", _newline,
+     "L1 every_line_obeys_the_rule",
+     lambda d: not any("\n" in l for l in d["caption_styles"])),
     ("a_line_says_what_and_not_when", _no_when,
      "L3 every_line_says_when_to_use_it",
      lambda d: " for " in d["components"][6]),

@@ -10,6 +10,7 @@ thing that makes L3-L5 mean anything: a matcher tested on sentences I wrote
 would pass by construction, because I would write the sentences it handles.
 """
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -116,6 +117,51 @@ def main():
     leg("L8 suppression_carries_its_evidence",
         bool(ban["suppressed"]) and all(ban["evidence"].get(k) for k in ban["suppressed"]),
         "evidence=%s" % {k: ban["evidence"].get(k) for k in ban["suppressed"]})
+
+    # L9 NOTHING RESTRICTS SOUNDS TO THE PROJECT POOL. Ruled by Zac 2026-09-22:
+    # their agent chooses freely between our thirteen and their own library.
+    #
+    # CLASSIFY EVERY SENTENCE THAT MENTIONS SOUND, rather than grepping for the
+    # one phrasing that was there when the rule was written. The clause it
+    # replaced said "from the project's registered sounds" and a second one said
+    # "use only the components, sounds and caption styles already registered" —
+    # two different spellings of the same restriction in one instruction, and a
+    # needle aimed at either would have missed the other. A check keyed to
+    # wording has learned the wording, which is the eighth time that has been
+    # written down in this repo.
+    #
+    # The freeing sentence also mentions sounds, so the classes must be told
+    # apart rather than counted: FREES is checked FIRST because it is the
+    # sentence that contains both "sounds" and the word "restricted".
+    def _sound_sentences(text):
+        out = []
+        for raw in re.split(r"(?<=[.!?])\s+|\n", text):
+            s2 = raw.strip()
+            if not s2 or not re.search(r"\bsounds?\b|\bsound ?effects?\b|\bsfx\b",
+                                       s2, re.I):
+                continue
+            low = s2.lower()
+            if ("not restricted" in low or "choose freely" in low
+                    or "your own library" in low):
+                out.append(("FREES", s2))
+            elif re.search(r"\bonly\b|\brestrict|\bregistered sounds\b"
+                           r"|from the project's registered", low):
+                out.append(("RESTRICTS", s2))
+            else:
+                out.append(("NEUTRAL", s2))
+        return out
+
+    rows = _sound_sentences(plain["instruction"])
+    restricts = [t for k, t in rows if k == "RESTRICTS"]
+    frees = [t for k, t in rows if k == "FREES"]
+    # THE POPULATION IS ASSERTED. A leg over an empty set passes and asserts
+    # nothing — if the instruction ever stops mentioning sound at all, this
+    # must go red rather than quietly succeed.
+    leg("L9 sounds_not_restricted_to_the_project_pool",
+        bool(rows) and not restricts and bool(frees),
+        "%d sound sentence(s): %d RESTRICTS %d FREES%s"
+        % (len(rows), len(restricts), len(frees),
+           ("  <<< " + restricts[0][:60]) if restricts else ""))
 
     print("%d/%d legs ok" % (NLEGS - len(FAILS), NLEGS))
     if FAILS:

@@ -2,7 +2,7 @@
 """Every asset on the menu has ONE line and that line is its name.
 
     <Name> — <what it is> for <when to use it>
-    plain words, no jargon, <= 90 characters, no commas
+    plain words, no jargon, <= 90 characters, no commas, no newlines
 
 THE LINE IS THE NAME because `asset.name` is the only per-asset free text a
 motion graphic has, and for an audio asset the filename at import is the only
@@ -62,6 +62,13 @@ def check(line):
         errs.append("over %d chars (%d)" % (MAX_LEN, len(line)))
     if "," in line:
         errs.append("contains a comma")
+    # A NEWLINE IS THE ONE VIOLATION THAT IS INVISIBLE IN EVERY SURFACE THAT
+    # SHOWS THE LINE. A comma is legible in a table and an over-long line is
+    # legible against a ruler; an embedded \n renders as a line break in the
+    # asset list and as nothing at all in a JSON dump read by eye, and it
+    # truncates the name at the break wherever the consumer is single-line.
+    if any(c in line for c in ("\n", "\r", "\t")):
+        errs.append("contains a newline or tab")
     name, rest = split_line(line)
     if name is None:
         errs.append("no separator")

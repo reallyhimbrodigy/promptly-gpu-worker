@@ -1,0 +1,120 @@
+{
+ "_what": "The styleProfile equivalent for our seven LIVE caption styles, read from src/remotion/src/captions/<Style>/<Style>.tsx — the defaults in each exported component's own signature, which is what renders when ChatCut supplies nothing. Not transcribed from the types.ts doc comments: a stale comment is read as fact by the next person, including the person who wrote it.",
+ "_canvas": {
+  "reference": "1080x1920",
+  "note": "fontSize values are px at this canvas; every style then applies its own shrink-to-fit"
+ },
+ "_safe_area": {
+  "top": 270,
+  "bottom": 420,
+  "sides": 80,
+  "sidesSafe": 200,
+  "source": "shared/captionPosition.ts CAPTION_PADDING — TikTok safe area; bottom 420 clears the caption/progress/nav drawer and sidesSafe 200 clears the right action rail"
+ },
+ "_first_to_test": "Gadzhi",
+ "_why_gadzhi_first": "It is our closest analogue to Story Yellow — one keyword lit in yellow on plain white — so a field-by-field comparison against that template is meaningful and any mismatch is about the SCHEMA rather than about a style with no counterpart. A style with no counterpart would make a schema failure and a design difference look the same.",
+ "styles": {
+  "Gadzhi": {
+   "font": "Montserrat",
+   "weight": 700,
+   "fontSize": 90,
+   "case": "uppercase",
+   "letterSpacing": "0.02em",
+   "textColor": "#FFFFFF",
+   "highlightColor": "#F5C518",
+   "stroke": null,
+   "textShadow": "legibility anchor + 0 2px 8px rgba(0,0,0,0.5) + 0 4px 20px rgba(0,0,0,0.3)",
+   "position": "bottom",
+   "maxWordsPerLine": 2,
+   "wordGap": 14,
+   "boxWidth": "min(canvas*0.85, canvas-160)"
+  },
+  "CleanCut": {
+   "font": "Inter",
+   "weight": 800,
+   "fontSize": 100,
+   "case": "as written",
+   "letterSpacing": "-0.02em",
+   "textColor": "#FFFFFF",
+   "highlightColor": null,
+   "stroke": null,
+   "textShadow": "0 4px 22px rgba(0,0,0,0.6) + 0 2px 6px rgba(0,0,0,0.55) + 0 0 1px rgba(0,0,0,0.5)",
+   "position": "center"
+  },
+  "TwoTone": {
+   "font": "Montserrat",
+   "weight": 900,
+   "fontSize": 110,
+   "case": "uppercase",
+   "letterSpacing": "-0.02em",
+   "textColor": "#FFFFFF",
+   "highlightColor": "#FFC53D",
+   "stroke": {
+    "width": 6,
+    "color": "#101014"
+   },
+   "position": "center",
+   "note": "the only style with a real stroke"
+  },
+  "Lumen": {
+   "font": "Montserrat",
+   "weight": 600,
+   "fontSize": 70,
+   "case": "as written",
+   "letterSpacing": "0.01em",
+   "textColor": "#FFFFFF",
+   "highlightColor": "#D4A24C",
+   "stroke": null,
+   "position": "bottom",
+   "maxWordsPerLine": 4,
+   "wordGap": 14,
+   "note": "keyword switches to Playfair Display 400 at 1.3x; a shine word at 1.6x"
+  },
+  "Prime": {
+   "font": "Inter",
+   "weight": "600 line1 / 800 line2",
+   "fontSize": "52 line1 / 66 line2",
+   "case": "lowercase",
+   "letterSpacing": "0.01em",
+   "textColor": "#FFFFFF line1 / #3BA5FF line2",
+   "highlightColor": "#5ED4E8",
+   "stroke": null,
+   "position": "bottom",
+   "maxWordsPerLine": 3,
+   "lineGap": 12,
+   "textShadow": "0 2px 8px rgba(0,0,0,0.7) + 0 0 4px rgba(0,0,0,0.4)",
+   "note": "special words switch to Playfair Display"
+  },
+  "Pulse": {
+   "font": "DM Sans",
+   "weight": 700,
+   "fontSize": 80,
+   "case": "as written",
+   "letterSpacing": "-0.02em",
+   "textColor": "#FFFFFF",
+   "highlightColor": "#FF6B4A",
+   "stroke": null,
+   "position": "bottom",
+   "note": "keyword at 1.25x with a glow off the highlight colour; recoloured off blue deliberately because Prime owns blue"
+  },
+  "Cove": {
+   "font": "Montserrat",
+   "weight": 700,
+   "fontSize": 76,
+   "case": "as written",
+   "letterSpacing": null,
+   "textColor": "#FFFFFF",
+   "highlightColor": "#F0E8DD (unspoken-word tint)",
+   "stroke": null,
+   "position": "bottom",
+   "maxWordsPerLine": 4,
+   "lineGap": 14,
+   "wordGap": 14,
+   "boxPadding": {
+    "x": 14,
+    "y": 8
+   },
+   "note": "boxed words switch to Playfair Display 400 at 1.8x"
+  }
+ }
+}
