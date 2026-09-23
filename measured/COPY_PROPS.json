@@ -1,0 +1,176 @@
+{
+ "PlainText": {
+  "body_from": "port/build",
+  "copy_props": [
+   "text"
+  ],
+  "copy_derived_or_baked": [],
+  "copy": [
+   "text"
+  ],
+  "item_fields": [],
+  "rendered_but_not_a_prop": []
+ },
+ "CaptionMatch": {
+  "body_from": "port/build",
+  "copy_props": [
+   "text"
+  ],
+  "copy_derived_or_baked": [],
+  "copy": [
+   "text"
+  ],
+  "item_fields": [],
+  "rendered_but_not_a_prop": []
+ },
+ "LowerThird": {
+  "body_from": "port/build",
+  "copy_props": [
+   "name",
+   "title"
+  ],
+  "copy_derived_or_baked": [],
+  "copy": [
+   "name",
+   "title"
+  ],
+  "item_fields": [],
+  "rendered_but_not_a_prop": []
+ },
+ "QuoteCard": {
+  "body_from": "port/build",
+  "copy_props": [
+   "attribution",
+   "quote"
+  ],
+  "copy_derived_or_baked": [],
+  "copy": [
+   "attribution",
+   "quote"
+  ],
+  "item_fields": [],
+  "rendered_but_not_a_prop": []
+ },
+ "TornPaper": {
+  "body_from": "port/build",
+  "copy_props": [
+   "bottomText",
+   "topText"
+  ],
+  "copy_derived_or_baked": [],
+  "copy": [
+   "bottomText",
+   "topText"
+  ],
+  "item_fields": [],
+  "rendered_but_not_a_prop": []
+ },
+ "StickyNotes": {
+  "body_from": "baked registry",
+  "copy_props": [],
+  "copy_derived_or_baked": [],
+  "copy": [],
+  "item_fields": [
+   "note.text"
+  ],
+  "rendered_but_not_a_prop": []
+ },
+ "EmojiCard": {
+  "body_from": "port/build",
+  "copy_props": [
+   "emoji"
+  ],
+  "copy_derived_or_baked": [
+   "captionText"
+  ],
+  "copy": [
+   "captionText",
+   "emoji"
+  ],
+  "item_fields": [],
+  "rendered_but_not_a_prop": []
+ },
+ "StatCard": {
+  "body_from": "baked registry",
+  "copy_props": [
+   "label",
+   "prefix",
+   "suffix"
+  ],
+  "copy_derived_or_baked": [
+   "display"
+  ],
+  "copy": [
+   "display",
+   "label",
+   "prefix",
+   "suffix"
+  ],
+  "item_fields": [],
+  "rendered_but_not_a_prop": [
+   "children"
+  ]
+ },
+ "Stamp": {
+  "body_from": "baked registry",
+  "copy_props": [
+   "mark",
+   "subtextBottom",
+   "subtextTop",
+   "text"
+  ],
+  "copy_derived_or_baked": [
+   "markInk",
+   "stampFont"
+  ],
+  "copy": [
+   "mark",
+   "markInk",
+   "stampFont",
+   "subtextBottom",
+   "subtextTop",
+   "text"
+  ],
+  "item_fields": [],
+  "rendered_but_not_a_prop": [
+   "badge",
+   "children"
+  ]
+ },
+ "PillCluster": {
+  "body_from": "baked registry",
+  "copy_props": [],
+  "copy_derived_or_baked": [],
+  "copy": [],
+  "item_fields": [],
+  "rendered_but_not_a_prop": [
+   "tag"
+  ]
+ },
+ "RankedList": {
+  "body_from": "baked registry",
+  "copy_props": [],
+  "copy_derived_or_baked": [],
+  "copy": [],
+  "item_fields": [
+   "item.label",
+   "item.rank",
+   "item.value"
+  ],
+  "rendered_but_not_a_prop": [
+   "i"
+  ]
+ },
+ "Reticle": {
+  "body_from": "baked registry",
+  "copy_props": [
+   "label"
+  ],
+  "copy_derived_or_baked": [],
+  "copy": [
+   "label"
+  ],
+  "item_fields": [],
+  "rendered_but_not_a_prop": []
+ }
+}
