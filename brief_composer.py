@@ -52,9 +52,11 @@ DEFAULTS = [
     ("captions",    "captions",
      "Add captions for the whole video."),
     ("graphics",    "motion graphics",
-     "Place motion graphics from the project's registered components where they "
-     "fit — every one carries real default text, so none needs copy written "
-     "before it is placed."),
+     # "from the project's registered components" was a RESTRICTS sentence in
+     # the same shape as the sound one, and the trailing clause about default
+     # text was a reassurance nobody asked for. Neutrality and brevity point the
+     # same way here: the shortest true sentence restricts nothing.
+     "Place motion graphics where they fit."),
     ("zooms",       "zooms",
      "Zoom on moments of emphasis."),
     ("sfx",         "sound effects",
@@ -64,21 +66,20 @@ DEFAULTS = [
      # thirteen were the only sounds that existed. A sentence that narrows the
      # menu is the opposite of the whole programme: the point of the 32 lines is
      # that every sound is SEEN, not that no other sound may be used.
-     "Place sound effects where the moment wants one — the project's sounds or "
-     "your own library."),
+     "Place sound effects where the moment wants one."),
     ("transitions", "transitions",
      "Put transitions on scene changes."),
     ("aspect",      "aspect ratio",
      "Keep the source aspect ratio."),
-    ("registered",  "registered components",
-     # SOUNDS COME OUT OF THE "ONLY" AND ARE NAMED AS FREE, rather than merely
-     # dropped. Deleting the word "sounds" from this sentence would leave the
-     # restriction unstated and the freedom unstated too, and an unstated
-     # freedom is indistinguishable from an oversight — the same reason a
-     # suppression is reported with its evidence instead of silently applied.
-     "Use only the components and caption styles already registered in this "
-     "project. Sounds are not restricted — choose freely between the project's "
-     "sounds and your own library."),
+    ("open",        "what may be used",
+     # ONE SENTENCE FOR ALL FOUR FAMILIES, replacing the "use only the
+     # components and caption styles already registered" clause. Ruled by Zac
+     # 2026-09-22: neutrality extends past sounds — no favourite, no better
+     # option, as simple as possible for them. The freedom is STATED rather
+     # than left implicit, because an unstated freedom is indistinguishable
+     # from an oversight and their agent has no way to tell which it met.
+     "Components, caption styles and sound effects are open — choose freely "
+     "between the project's and your own."),
 ]
 
 # Words that name each family in a user's own vocabulary. Deliberately WIDE for
@@ -92,7 +93,12 @@ FAMILY_WORDS = {
     "sfx":         r"sound ?effects?|sfx|sounds?",
     "transitions": r"transitions?",
     "aspect":      r"aspect ratio|vertical|horizontal|square|9:16|16:9",
-    "registered":  r"registered components?",
+    # "open" is the neutrality sentence. Its family words are deliberately the
+    # ones a user reaches for when they want to LIMIT what may be used — if they
+    # say "only use my own graphics", the sentence telling their agent
+    # everything is open must be the one that drops.
+    "open":        r"registered|own (?:graphics|components?|sounds?|library)"
+                   r"|your library|my library",
 }
 
 NEGATION = r"(?:no|not|don't|do not|never|without|skip|avoid|leave out|omit)"

@@ -118,50 +118,93 @@ def main():
         bool(ban["suppressed"]) and all(ban["evidence"].get(k) for k in ban["suppressed"]),
         "evidence=%s" % {k: ban["evidence"].get(k) for k in ban["suppressed"]})
 
-    # L9 NOTHING RESTRICTS SOUNDS TO THE PROJECT POOL. Ruled by Zac 2026-09-22:
-    # their agent chooses freely between our thirteen and their own library.
+    # L9 THE BRIEF IS NEUTRAL ABOUT WHAT MAY BE USED. Ruled by Zac 2026-09-22,
+    # first for sounds and then widened: components and caption styles too. "No
+    # favorite or better option — as simple as possible for them."
     #
-    # CLASSIFY EVERY SENTENCE THAT MENTIONS SOUND, rather than grepping for the
-    # one phrasing that was there when the rule was written. The clause it
-    # replaced said "from the project's registered sounds" and a second one said
-    # "use only the components, sounds and caption styles already registered" —
-    # two different spellings of the same restriction in one instruction, and a
-    # needle aimed at either would have missed the other. A check keyed to
-    # wording has learned the wording, which is the eighth time that has been
-    # written down in this repo.
+    # FOUR CLASSES, NOT TWO, and PREFERS is the one worth having. A restriction
+    # announces itself; a PREFERENCE does not, and it steers just as hard. "Use
+    # the project's own graphics where possible" forbids nothing and will still
+    # produce a run that never touches their library — and it reads as helpful
+    # guidance in review, which is how it would survive a reader looking only
+    # for the word "only".
     #
-    # The freeing sentence also mentions sounds, so the classes must be told
-    # apart rather than counted: FREES is checked FIRST because it is the
-    # sentence that contains both "sounds" and the word "restricted".
-    def _sound_sentences(text):
+    # CLASSIFY EVERY SENTENCE THAT MENTIONS ANY OF THE FOUR FAMILIES, rather
+    # than grepping for the phrasing that happened to be there when the rule was
+    # written. The clause this replaced said "use only the components, sounds
+    # and caption styles already registered" while ANOTHER said "from the
+    # project's registered components" — two spellings in one instruction, and a
+    # needle aimed at either would have missed the other.
+    #
+    # FREES is tested FIRST because the neutrality sentence itself mentions all
+    # three families and the word "own"; the classes must be told apart rather
+    # than counted.
+    FAMILY = (r"\bcomponents?\b|\bmotion graphics?\b|\bgraphics?\b|\boverlays?\b"
+              r"|\bcaptions?\b|\bcaption styles?\b|\bsubtitles?\b"
+              r"|\bsounds?\b|\bsound ?effects?\b|\bsfx\b")
+    PREFERS = (r"\bprefer\b|\bpreferr?ed\b|\bfavou?r\b|\bfavou?rite\b|\bbest\b"
+               r"|\bbetter\b|\bideally\b|\brecommend|\bwhere possible\b"
+               r"|\bwhen possible\b|\bwherever possible\b|\bdefault to\b"
+               r"|\bstick to\b|\bprimarily\b|\brather than\b|\binstead of\b"
+               r"|\blean on\b|\bstart with\b")
+    RESTRICTS = (r"\bonly\b|\brestrict|\bmust use\b|\blimited to\b|\bconfined to\b"
+                 r"|\bregistered sounds\b|from the project's registered")
+
+    def _family_sentences(text):
         out = []
         for raw in re.split(r"(?<=[.!?])\s+|\n", text):
-            s2 = raw.strip()
-            if not s2 or not re.search(r"\bsounds?\b|\bsound ?effects?\b|\bsfx\b",
-                                       s2, re.I):
+            s2 = raw.strip().lstrip("- ").strip()
+            if not s2 or not re.search(FAMILY, s2, re.I):
                 continue
             low = s2.lower()
             if ("not restricted" in low or "choose freely" in low
-                    or "your own library" in low):
+                    or "are open" in low):
                 out.append(("FREES", s2))
-            elif re.search(r"\bonly\b|\brestrict|\bregistered sounds\b"
-                           r"|from the project's registered", low):
+            elif re.search(RESTRICTS, low):
                 out.append(("RESTRICTS", s2))
+            elif re.search(PREFERS, low):
+                out.append(("PREFERS", s2))
             else:
                 out.append(("NEUTRAL", s2))
         return out
 
-    rows = _sound_sentences(plain["instruction"])
+    rows = _family_sentences(plain["instruction"])
     restricts = [t for k, t in rows if k == "RESTRICTS"]
+    prefers = [t for k, t in rows if k == "PREFERS"]
     frees = [t for k, t in rows if k == "FREES"]
-    # THE POPULATION IS ASSERTED. A leg over an empty set passes and asserts
-    # nothing — if the instruction ever stops mentioning sound at all, this
+    # THE POPULATION IS ASSERTED. A leg over an empty set passes and says
+    # nothing — if the instruction ever stops naming these families at all, this
     # must go red rather than quietly succeed.
-    leg("L9 sounds_not_restricted_to_the_project_pool",
-        bool(rows) and not restricts and bool(frees),
-        "%d sound sentence(s): %d RESTRICTS %d FREES%s"
-        % (len(rows), len(restricts), len(frees),
-           ("  <<< " + restricts[0][:60]) if restricts else ""))
+    leg("L9 brief_is_neutral_about_what_may_be_used",
+        bool(rows) and not restricts and not prefers and bool(frees),
+        "%d family sentence(s): %d RESTRICTS %d PREFERS %d FREES%s"
+        % (len(rows), len(restricts), len(prefers), len(frees),
+           ("  <<< " + (restricts + prefers)[0][:56]) if (restricts or prefers) else ""))
+
+    # L10 EVERY FAMILY IS NAMED IN THE SENTENCE THAT OPENS IT — scoped to the
+    # FREES rows, not to the instruction at large.
+    #
+    # THE FIRST VERSION SEARCHED EVERY FAMILY SENTENCE AND ITS MUTATION PASSED.
+    # Dropping "caption styles" from the neutrality sentence left captions
+    # covered by "Add captions for the whole video", so the leg went green while
+    # caption styles had quietly lost their explicit freedom — a check passing
+    # for a reason other than the one it claims, found only because the mutation
+    # was aimed at the property rather than at the wording. A count over the
+    # whole set lets one family lose its neutrality while the total stays put,
+    # and the family that loses it is the one nobody sees go.
+    covered = {f: any(re.search(pat, t, re.I) for k, t in rows if k == "FREES")
+               for f, pat in (("components", r"components?"),
+                              ("caption styles", r"caption styles?"),
+                              ("sounds", r"sounds?|sfx"))}
+    leg("L10 every_family_is_named_in_the_opening_sentence",
+        all(covered.values()) and bool(covered), "%s" % covered)
+
+    # L11 SIMPLE MEANS SHORT, AND THE LENGTH IS REPORTED RATHER THAN CAPPED.
+    # A hard ceiling would be a number pulled from nowhere; what matters is that
+    # the figure is visible, so a clause creeping back in is seen the next time
+    # anyone reads this output.
+    nwords = len(plain["instruction"].split())
+    leg("L11 brief_length_is_reported", nwords > 0, "%d words" % nwords)
 
     print("%d/%d legs ok" % (NLEGS - len(FAILS), NLEGS))
     if FAILS:

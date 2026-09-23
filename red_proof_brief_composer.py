@@ -37,24 +37,41 @@ SMOKE = os.path.join(HERE, "smoke_brief_composer.py")
 WATCHED = ["brief_composer.py", "smoke_brief_composer.py"]
 
 MUTATIONS = [
+    # THE MUTANT ZAC NAMED. It forbids nothing, passes any check looking for the
+    # word "only", and reads as helpful guidance in review — and a run under it
+    # never touches their library. A preference is the restriction that does not
+    # announce itself, which is why PREFERS is its own class rather than folded
+    # into NEUTRAL.
+    ("a_preference_creeps_in", "brief_composer.py",
+     '     "Place motion graphics where they fit."),',
+     '     "Place motion graphics where they fit — prefer the project\'s own graphics."),',
+     "L9 brief_is_neutral_about_what_may_be_used",
+     lambda s: '"Place motion graphics where they fit."),' in s),
+    # AND A FAMILY GOES QUIET. Dropping captions from the neutrality sentence
+    # leaves RESTRICTS and PREFERS both at zero, so only a per-family leg sees
+    # it — the family that loses its neutrality is the one nobody watches go.
+    ("a_family_drops_out_of_the_neutrality_sentence", "brief_composer.py",
+     '     "Components, caption styles and sound effects are open — choose freely "',
+     '     "Components and sound effects are open — choose freely "',
+     "L10 every_family_is_named_in_the_opening_sentence",
+     lambda s: "Components, caption styles and sound effects are open" in s),
     # THE SOUND POOL RESTRICTION, RESTORED — exactly the sentence that shipped
     # until Zac ruled it out. It is the mutation most likely to reappear by
     # accident, because "from the project's registered sounds" reads as
     # precision rather than as a narrowing of the menu.
     ("sound_pool_restriction_returns", "brief_composer.py",
-     '     "Place sound effects where the moment wants one — the project\'s sounds or "\n'
-     '     "your own library."),',
+     '     "Place sound effects where the moment wants one."),',
      '     "Place sound effects from the project\'s registered sounds."),',
-     "L9 sounds_not_restricted_to_the_project_pool",
-     lambda s: "the project's sounds or " in s),
+     "L9 brief_is_neutral_about_what_may_be_used",
+     lambda s: '"Place sound effects where the moment wants one."),' in s),
     # THE SECOND SPELLING, RESTORED. Two different sentences said the same
     # thing, so a proof that only restores one leaves the other untested — and
     # a needle aimed at either phrasing would have missed the other.
     ("only_clause_reabsorbs_sounds", "brief_composer.py",
-     '     "Use only the components and caption styles already registered in this "',
-     '     "Use only the components, sounds and caption styles registered in this "',
-     "L9 sounds_not_restricted_to_the_project_pool",
-     lambda s: "components and caption styles already registered" in s),
+     '     "Components, caption styles and sound effects are open — choose freely "',
+     '     "Use only the components and caption styles registered in this project. "',
+     "L9 brief_is_neutral_about_what_may_be_used",
+     lambda s: "are open — choose freely " in s),
     # THE ONLY-IS-A-BAN DEFECT, restored. Adding `only` to the negation set is
     # the single most plausible "improvement" anyone would make here.
     ("only_becomes_a_ban", "brief_composer.py",
