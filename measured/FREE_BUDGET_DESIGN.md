@@ -29,10 +29,44 @@ is to say so, not to clamp it to zero.
 **A FAILED READ MUST NEVER DEBIT ZERO.** `balance_after or 0` would turn an
 unreadable balance into a free run, and free runs are exactly what this budget
 exists to bound. A month of failed reads would report a budget perfectly intact
-while the money left. The estimate comes from `credit_prices.py`, which is
-already `ceil(rate × 10)` per model × resolution; an `UNMEASURED` run debits the
-estimate and is COUNTED SEPARATELY, so "we spent 400" and "we think we spent
-400 because the meter was down" never appear as the same number.
+while the money left.
+
+### 1a. The estimate cannot come from the price table, and my first draft said it could
+
+This section originally read "the estimate comes from `credit_prices.py`". That
+is wrong for the commonest case, and wrong in exactly the way the paragraph
+above forbids.
+
+**A DEFAULT FREE EDIT GENERATES NOTHING** — the brief tells their agent to
+generate only if the user asked — so what it actually spends on is AGENT
+MESSAGES and MOTION GRAPHICS. Checked against the table rather than assumed:
+
+    agent_messages   priceable = False   VARIABLE, no rate published
+    motion_graphics  priceable = False   VARIABLE, no rate published
+
+Both are unpriced. `credit_prices.py` has no row that a non-generative edit
+would match, so the estimate it returns for a normal free video is **zero** —
+`or 0` reintroduced one level up, arriving as a well-typed number from a
+function whose whole purpose is to refuse to invent one. The producer-side
+laundering defect, in the design written to prevent it.
+
+**THE FALLBACK IS THE TRAILING MEDIAN OF MEASURED RUNS**, not a price lookup:
+
+| case | estimate | state |
+|---|---|---|
+| ≥ N measured runs this window | their median spend | `UNMEASURED_EST` |
+| generative line items present | `max(median, price-table sum)` | `UNMEASURED_EST` |
+| no measured runs yet | **none — do not debit** | `UNMEASURED_UNPRICEABLE` |
+
+The third row is the one that matters. A run we cannot measure and cannot
+estimate is not a free run: it is COUNTED, PAGED, and left undebited with its
+state on the record, so the month's total is visibly incomplete rather than
+quietly wrong. A budget that silently absorbs unmeasurable runs at zero is the
+clean zero this repo has been caught by four times in one day.
+
+**And it means the meter must run before the ceiling can exist at all** — the
+median has to come from somewhere. Section 6's dark period is therefore not a
+cautious choice, it is the only order in which this can be built.
 
 ## 2. Reserve, then reconcile — never check-then-act
 
@@ -125,11 +159,16 @@ meter, and only the denominator separates them.
 | `free_budget_period_shared` | a second month boundary diverging from the grant's |
 | `free_budget_tier_exempt` | Pro/Max metered, or an unreadable row treated as free |
 | `free_budget_unset_is_not_zero` | a missing constant refusing every free video |
+| `free_budget_estimate_is_never_zero` | an unpriceable run debiting 0 instead of paging |
 | `free_budget_402_says_videos` | the copy drifting back to credits |
 
 ## 9. What this design does NOT decide
 
-- **The ceiling itself.** Owed by run two's measured per-edit cost.
+- **The ceiling itself.** Owed by run two's measured per-edit cost — and NOT
+  derivable from the price table even in principle, because the two things a
+  non-generative edit spends on are the two ChatCut does not publish rates for.
+  This is the finding that decides the build order: the number cannot be
+  argued into existence, only measured.
 - **What ChatCut does at 0 credits mid-generation.** Not published on any docs
   page I read. Our reservation makes a started edit funded on OUR side; it says
   nothing about theirs, and the two must not be conflated in a report.
