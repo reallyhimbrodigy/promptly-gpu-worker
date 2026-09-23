@@ -1,139 +1,179 @@
 {
- "_what": "The styleProfile equivalent for our seven LIVE caption styles, read from src/remotion/src/captions/<Style>/<Style>.tsx — the defaults in each exported component's own signature, which is what renders when ChatCut supplies nothing. Not transcribed from the types.ts doc comments: a stale comment is read as fact by the next person, including the person who wrote it.",
- "_canvas": {
-  "reference": "1080x1920",
-  "note": "fontSize values are px at this canvas; every style then applies its own shrink-to-fit"
+ "_schema_source": "edit_captions action=template with no templatePreset, 2026-09-22, catalog=all. The KEY NAMES BELOW ARE THEIRS, read from that response — not guessed. 26 presets came back, not 27; if a 27th exists it is outside the 'all' catalog and the count should be re-read rather than reconciled by hand.",
+ "_styleProfile_excludes": "Their own message: 'Style profiles exclude font size, position, and visual row capacity.' So our fontSize and position values are NOT styleProfile fields and must not be merged in as if they were — size goes through the track style as sizePx (stored as fontSizeRatio = sizePx / min(w,h)), position through layout/anchor. Our maxWordsPerLine is a THIRD profile: paginationProfile.wordsPerPage.",
+ "_merge_rule": "action=style MERGES, it does not replace. Each profile below names the built-in it should be applied OVER — template <preset> first, then style — chosen as the nearest of the 26 so the merge has the least to override. B1's first Gadzhi frame carried a purple box from an earlier probe, which is what a merge onto whatever was there last looks like.",
+ "_THE_HIGHLIGHT_FINDING": "THEIR HIGHLIGHT IS TEMPORAL; OURS IS LEXICAL. hasActiveHighlight + highlightUnit:'word' lights the word being SPOKEN, walking through the line with the playhead. Gadzhi, Lumen and Pulse light a word from a KEYWORD LIST — a fixed choice, the same word every frame. There is no keyword-list concept anywhere in styleProfile, so this is not a missing key that B1's diff will find: setting hasActiveHighlight true with our highlightColor produces a KARAOKE highlight, which is a different look from ours and will render plausibly enough that a still frame cannot tell them apart. That is why those three are held rather than sent — the mapping would look right and be wrong, which is the one failure a frame diff cannot catch.",
+ "_NOT_EXPRESSIBLE": {
+  "Prime": "line1Color/line2Color — styleProfile has ONE `color`, no per-line colour.",
+  "TwoTone": "topColor/accentColor — same gap: the second line's accent has no key.",
+  "_consequence": "Both render as a single-colour line unless B1's schema has a per-line key the catalog response does not show. Stated rather than mapped onto highlightColor, which would paint the wrong thing and look deliberate."
  },
- "_safe_area": {
-  "top": 270,
-  "bottom": 420,
-  "sides": 80,
-  "sidesSafe": 200,
-  "source": "shared/captionPosition.ts CAPTION_PADDING — TikTok safe area; bottom 420 clears the caption/progress/nav drawer and sidesSafe 200 clears the right action rail"
- },
- "_first_to_test": "Gadzhi",
- "_why_gadzhi_first": "It is our closest analogue to Story Yellow — one keyword lit in yellow on plain white — so a field-by-field comparison against that template is meaningful and any mismatch is about the SCHEMA rather than about a style with no counterpart. A style with no counterpart would make a schema failure and a design difference look the same.",
- "styles": {
-  "Gadzhi": {
-   "font": "Montserrat",
-   "weight": 700,
-   "fontSize": 90,
-   "case": "uppercase",
-   "letterSpacing": "0.02em",
-   "textColor": "#FFFFFF",
-   "highlightColor": "#F5C518",
-   "stroke": null,
-   "textShadow": "legibility anchor + 0 2px 8px rgba(0,0,0,0.5) + 0 4px 20px rgba(0,0,0,0.3)",
-   "position": "bottom",
-   "maxWordsPerLine": 2,
-   "wordGap": 14,
-   "boxWidth": "min(canvas*0.85, canvas-160)"
-  },
+ "SEND_NOW": {
   "CleanCut": {
-   "font": "Inter",
-   "weight": 800,
-   "fontSize": 100,
-   "case": "as written",
-   "letterSpacing": "-0.02em",
-   "textColor": "#FFFFFF",
-   "highlightColor": null,
-   "stroke": null,
-   "textShadow": "0 4px 22px rgba(0,0,0,0.6) + 0 2px 6px rgba(0,0,0,0.55) + 0 0 1px rgba(0,0,0,0.5)",
-   "position": "center"
-  },
-  "TwoTone": {
-   "font": "Montserrat",
-   "weight": 900,
-   "fontSize": 110,
-   "case": "uppercase",
-   "letterSpacing": "-0.02em",
-   "textColor": "#FFFFFF",
-   "highlightColor": "#FFC53D",
-   "stroke": {
-    "width": 6,
-    "color": "#101014"
+   "_line": "CleanCut — plain white words for narration, explainers and text that must not steal focus",
+   "baseline": "plain",
+   "_why": "Inter, #ffffff, highlight-off, no background, no stroke — only weight and shadow differ.",
+   "styleProfile": {
+    "fontFamily": "Inter",
+    "fontWeight": "800",
+    "color": "#FFFFFF",
+    "textTransform": "none",
+    "letterSpacing": -0.02,
+    "hasActiveHighlight": false,
+    "highlightUnit": "off",
+    "hasBackground": false,
+    "hasStroke": false,
+    "strokeWidth": 0,
+    "hasShadow": true,
+    "textShadow": "0 4px 22px rgba(0,0,0,0.6), 0 2px 6px rgba(0,0,0,0.55), 0 0 1px rgba(0,0,0,0.5)"
    },
-   "position": "center",
-   "note": "the only style with a real stroke"
-  },
-  "Lumen": {
-   "font": "Montserrat",
-   "weight": 600,
-   "fontSize": 70,
-   "case": "as written",
-   "letterSpacing": "0.01em",
-   "textColor": "#FFFFFF",
-   "highlightColor": "#D4A24C",
-   "stroke": null,
-   "position": "bottom",
-   "maxWordsPerLine": 4,
-   "wordGap": 14,
-   "note": "keyword switches to Playfair Display 400 at 1.3x; a shine word at 1.6x"
-  },
-  "Prime": {
-   "font": "Inter",
-   "weight": "600 line1 / 800 line2",
-   "fontSize": "52 line1 / 66 line2",
-   "case": "lowercase",
-   "letterSpacing": "0.01em",
-   "textColor": "#FFFFFF line1 / #3BA5FF line2",
-   "highlightColor": "#5ED4E8",
-   "stroke": null,
-   "position": "bottom",
-   "maxWordsPerLine": 3,
-   "lineGap": 12,
-   "textShadow": "0 2px 8px rgba(0,0,0,0.7) + 0 0 4px rgba(0,0,0,0.4)",
-   "note": "special words switch to Playfair Display"
-  },
-  "Pulse": {
-   "font": "DM Sans",
-   "weight": 700,
-   "fontSize": 80,
-   "case": "as written",
-   "letterSpacing": "-0.02em",
-   "textColor": "#FFFFFF",
-   "highlightColor": "#FF6B4A",
-   "stroke": null,
-   "position": "bottom",
-   "note": "keyword at 1.25x with a glow off the highlight colour; recoloured off blue deliberately because Prime owns blue"
+   "_outside_styleProfile": {
+    "sizePx": 100,
+    "position": "center"
+   }
   },
   "Cove": {
-   "font": "Montserrat",
-   "weight": 700,
-   "fontSize": 76,
-   "case": "as written",
-   "letterSpacing": null,
-   "textColor": "#FFFFFF",
-   "highlightColor": "#F0E8DD (unspoken-word tint)",
-   "stroke": null,
-   "position": "bottom",
-   "maxWordsPerLine": 4,
-   "lineGap": 14,
-   "wordGap": 14,
-   "boxPadding": {
-    "x": 14,
-    "y": 8
+   "_line": "Cove — words that appear one at a time as they are spoken for narration and demos",
+   "baseline": "plain",
+   "_why": "No background and no highlight in its DEFAULT state — the box and serif belong to boxedWords, which defaults to empty. plain is the least to override.",
+   "styleProfile": {
+    "fontFamily": "Montserrat",
+    "fontWeight": "700",
+    "color": "#FFFFFF",
+    "textTransform": "none",
+    "hasActiveHighlight": false,
+    "highlightUnit": "off",
+    "hasBackground": false,
+    "hasStroke": false,
+    "strokeWidth": 0,
+    "lineHeight": 1.15
    },
-   "note": "boxed words switch to Playfair Display 400 at 1.8x"
+   "_outside_styleProfile": {
+    "sizePx": 76,
+    "position": "bottom",
+    "wordsPerPage": 4
+   },
+   "_depends_on": "per-word reveal from token times — unspoken words are opacity 0"
+  },
+  "Prime": {
+   "_line": "Prime — two stacked lines in white and blue for setups, payoffs and question-answer beats",
+   "baseline": "plain",
+   "_why": "Inter, no background, no stroke, single display mode. Its two lines are ordinary wrapping at 3 words, NOT their stacked mode.",
+   "styleProfile": {
+    "fontFamily": "Inter",
+    "fontWeight": "800",
+    "color": "#FFFFFF",
+    "textTransform": "lowercase",
+    "letterSpacing": 0.01,
+    "lineHeight": 1.12,
+    "hasActiveHighlight": false,
+    "highlightUnit": "off",
+    "hasBackground": false,
+    "hasStroke": false,
+    "strokeWidth": 0,
+    "hasShadow": true,
+    "textShadow": "0 2px 8px rgba(0,0,0,0.7), 0 0 4px rgba(0,0,0,0.4)"
+   },
+   "_outside_styleProfile": {
+    "sizePx": "52 line1 / 66 line2",
+    "position": "bottom",
+    "wordsPerPage": 3
+   },
+   "_not_expressible": "line2 in #3BA5FF — one `color` only"
+  },
+  "TwoTone": {
+   "_line": "TwoTone — two thick outlined lines, the second in a warm accent, for loud punchy beats",
+   "baseline": "white-impact",
+   "_why": "White + a real stroke + shadow + highlight-off + no background, which is TwoTone's whole structure. ITS OUTLINE IS UNIFORM, not per-word — every word carries the same 6px stroke — so it is NOT highlight-bearing and does not wait on the diff.",
+   "styleProfile": {
+    "fontFamily": "Montserrat",
+    "fontWeight": "900",
+    "color": "#FFFFFF",
+    "textTransform": "uppercase",
+    "letterSpacing": -0.02,
+    "hasActiveHighlight": false,
+    "highlightUnit": "off",
+    "hasBackground": false,
+    "hasStroke": true,
+    "strokeWidth": 6,
+    "strokeColor": "#101014"
+   },
+   "_outside_styleProfile": {
+    "sizePx": 110,
+    "position": "center"
+   },
+   "_not_expressible": "line2 in #FFC53D — one `color` only"
   }
  },
- "_font_availability": {
-  "checked_with": "ChatCut search_fonts, 2026-09-22",
-  "result": "ALL FOUR of our caption families exist verbatim in their catalogue — no substitution is needed and none is stated.",
-  "Montserrat": "present (also Montserrat Alternates, Montserrat Underline)",
-  "Inter": "present (also Inter Tight)",
-  "DM Sans": "present",
-  "Playfair Display": "present (also Playfair, Playfair Display SC)",
-  "_our_stack_is_not_a_family_name": "CAPTION_FONTS wraps each family as `<Family>, <Noto fallback>` for non-Latin coverage. ChatCut wants the CANONICAL FAMILY NAME verbatim, so the profiles below give the primary family alone. The Noto tail is ours and does not travel."
- },
- "_key_spelling": "THE VALUES ARE MEASURED; THE KEY NAMES ARE NOT MINE TO CHOOSE. B1 holds the styleProfile schema from the 27 presets with Story Yellow as the template, so these are field SEMANTICS and values, mapped onto that schema by him. Inventing key names is exactly how browse_library was read three times with three guessed keys, each miss recorded as measured-and-empty.",
- "_one_line_names": {
-  "CleanCut": "CleanCut — plain white words for narration, explainers and text that must not steal focus",
-  "Cove": "Cove — words in a soft rounded box for busy shots, outdoor footage and low contrast",
-  "Gadzhi": "Gadzhi — one keyword lit in yellow on two-word lines for punchlines and key terms",
-  "Lumen": "Lumen — a bright band behind the line for hype, reveals and high-energy delivery",
-  "Prime": "Prime — two stacked lines in white and blue for setups, payoffs and question-answer beats",
-  "Pulse": "Pulse — the whole line fades in for calm delivery, storytelling and slow reveals",
-  "TwoTone": "TwoTone — every word outlined in a second colour for punchy, loud and meme-style beats"
+ "HELD_ON_THE_DIFF": {
+  "Gadzhi": {
+   "_line": "Gadzhi — one keyword lit in yellow on two-word lines for punchlines and key terms",
+   "baseline": "dogme",
+   "_why": "uppercase + highlight-word + shadow + no background + no stroke is Gadzhi's exact structure; Story Yellow adds a stroke and a highlight block it does not have.",
+   "styleProfile": {
+    "fontFamily": "Montserrat",
+    "fontWeight": "700",
+    "color": "#FFFFFF",
+    "textTransform": "uppercase",
+    "letterSpacing": 0.02,
+    "hasBackground": false,
+    "hasStroke": false,
+    "strokeWidth": 0,
+    "hasShadow": true,
+    "highlightColor": "#F5C518",
+    "highlightUnit": "word",
+    "hasActiveHighlight": true
+   },
+   "_outside_styleProfile": {
+    "sizePx": 90,
+    "position": "bottom",
+    "wordsPerPage": 2
+   },
+   "_held_because": "highlightUnit word lights the SPOKEN word; ours lights a chosen keyword"
+  },
+  "Lumen": {
+   "_line": "Lumen — a bright band behind the line for hype, reveals and high-energy delivery",
+   "baseline": "studio",
+   "_why": "background + highlight-word, no stroke, no shadow — the band behind the line is normalBackground.",
+   "styleProfile": {
+    "fontFamily": "Montserrat",
+    "fontWeight": "600",
+    "color": "#FFFFFF",
+    "letterSpacing": 0.01,
+    "hasBackground": true,
+    "hasStroke": false,
+    "highlightColor": "#D4A24C",
+    "highlightUnit": "word",
+    "hasActiveHighlight": true
+   },
+   "_outside_styleProfile": {
+    "sizePx": 70,
+    "position": "bottom",
+    "wordsPerPage": 4
+   },
+   "_held_because": "same keyword-vs-spoken gap; the keyword also changes FACE (Playfair 400) and SIZE (1.3x), neither of which styleProfile can vary per word"
+  },
+  "Pulse": {
+   "_line": "Pulse — the whole line fades in for calm delivery, storytelling and slow reveals",
+   "baseline": "story",
+   "_why": "Story Yellow is already DM Sans with highlight-word and a shadow — the same family as ours, so only the weight, the highlight colour and the 1px stroke need overriding.",
+   "styleProfile": {
+    "fontFamily": "DM Sans",
+    "fontWeight": "700",
+    "color": "#FFFFFF",
+    "letterSpacing": -0.02,
+    "hasBackground": false,
+    "hasStroke": false,
+    "strokeWidth": 0,
+    "highlightColor": "#FF6B4A",
+    "highlightUnit": "word",
+    "hasActiveHighlight": true
+   },
+   "_outside_styleProfile": {
+    "sizePx": 80,
+    "position": "bottom"
+   },
+   "_held_because": "same keyword-vs-spoken gap; the keyword is also 1.25x with a glow"
+  }
  }
 }
