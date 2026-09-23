@@ -50,37 +50,51 @@ DEFAULTS = [
     ("deadair",     "dead air and filler words",
      "Cut dead air and filler words."),
     ("captions",    "captions",
-     "Add captions for the whole video."),
-    ("graphics",    "motion graphics",
-     # "from the project's registered components" was a RESTRICTS sentence in
-     # the same shape as the sound one, and the trailing clause about default
-     # text was a reassurance nobody asked for. Neutrality and brevity point the
-     # same way here: the shortest true sentence restricts nothing.
-     "Place motion graphics where they fit."),
-    ("zooms",       "zooms",
-     "Zoom on moments of emphasis."),
-    ("sfx",         "sound effects",
-     # RULED BY ZAC 2026-09-22: their agent chooses FREELY between our thirteen
-     # and their own library. The old wording — "from the project's registered
-     # sounds" — was a pool restriction nobody had ruled, written in when the
-     # thirteen were the only sounds that existed. A sentence that narrows the
-     # menu is the opposite of the whole programme: the point of the 32 lines is
-     # that every sound is SEEN, not that no other sound may be used.
-     "Place sound effects where the moment wants one."),
-    ("transitions", "transitions",
-     "Put transitions on scene changes."),
+     "Caption the whole video."),
+    # FOUR FAMILIES IN ONE LINE. They were four bullets saying the same thing
+    # four times — place X where it fits — and four bullets read as four
+    # obligations to discharge rather than as four things available. Each family
+    # keeps its own suppression key, so "no sound effects please" still drops
+    # sfx alone; the SENTENCE is shared, the RULING is not.
+    # The sentence here is a TEMPLATE, filled from the families that survive
+    # classification — see PLACEABLE below.
+    ("graphics",    "motion graphics", None),
+    # Ruled individually, rendered inside the graphics bullet by
+    # placeable_sentence(). A None sentence means "this family is ruled but does
+    # not print a line of its own".
+    ("zooms",       "zooms", None),
+    ("sfx",         "sound effects", None),
+    ("transitions", "transitions", None),
     ("aspect",      "aspect ratio",
      "Keep the source aspect ratio."),
     ("open",        "what may be used",
-     # ONE SENTENCE FOR ALL FOUR FAMILIES, replacing the "use only the
-     # components and caption styles already registered" clause. Ruled by Zac
-     # 2026-09-22: neutrality extends past sounds — no favourite, no better
-     # option, as simple as possible for them. The freedom is STATED rather
-     # than left implicit, because an unstated freedom is indistinguishable
-     # from an oversight and their agent has no way to tell which it met.
-     "Components, caption styles and sound effects are open — choose freely "
-     "between the project's and your own."),
+     "The project's components, caption styles and sounds and your own are all "
+     "open — choose freely."),
 ]
+
+# THE FOUR PLACEABLE FAMILIES, IN ONE SENTENCE, EACH STILL RULED SEPARATELY.
+# They were four bullets saying the same thing four times — place X where it
+# fits — and four bullets read as four obligations to discharge rather than as
+# four things available. But collapsing them into one STRING would have taken
+# their suppression with them: "no sound effects please" must still drop sfx and
+# nothing else. So the sentence is BUILT from the survivors, and a user who
+# bans one gets a sentence naming the other three.
+#
+# This is the half of the collapse that is easy to lose, because the instruction
+# looks right either way — the bullet is present, it reads well, and the only
+# symptom of getting it wrong is a suppression that silently stops working.
+PLACEABLE = [("graphics", "motion graphics"), ("zooms", "zooms"),
+             ("sfx", "sound effects"), ("transitions", "transitions")]
+
+
+def placeable_sentence(states):
+    """-> the graphics bullet naming only the families not suppressed, or None."""
+    live = [label for key, label in PLACEABLE if states[key][0] != "SUPPRESSED"]
+    if not live:
+        return None
+    if len(live) == 1:
+        return "Add %s where they fit." % live[0]
+    return "Add %s and %s where they fit." % (", ".join(live[:-1]), live[-1])
 
 # Words that name each family in a user's own vocabulary. Deliberately WIDE for
 # DETECTION and narrow for ACTION: a hit here only makes the sentence a
@@ -143,31 +157,64 @@ def classify(user_brief):
     return out
 
 
+def user_slot(vibe, user_brief):
+    """-> the ONE quoted line that stands for what the user asked. Never empty.
+
+    ONE SLOT, NOT TWO. The old shape had a vibe line at the top and a brief
+    block at the bottom, so a request arrived as two fragments in two places
+    with the defaults between them, and the agent had to work out that they were
+    one request. Composing them here means the instruction has exactly one
+    place where the user speaks.
+
+    NEVER A PLACEHOLDER. The old shape wrote "(none given)" into the brief slot,
+    which reads as a user who asked for nothing — and a request that arrives
+    saying nothing is a request the agent is free to invent. A vibe-only
+    submission is not an empty brief; it is a short one.
+    """
+    v = str(vibe or "").strip().rstrip(".")
+    t = str(user_brief or "").strip()
+    if v and t:
+        return 'a %s edit: "%s"' % (v, t)
+    if t:
+        return '"%s"' % t
+    if v:
+        # THE VIBE IS THE QUOTE. It is the user's own choice, made in the app.
+        return "a %s edit" % v
+    # NEITHER, which the app should not send. The slot still says something
+    # TRUE rather than something empty: they submitted a video to be edited,
+    # and that is the whole of what is known. Anything more specific here
+    # would be words put in their mouth.
+    return "an edit of this video"
+
+
 def compose(vibe, user_brief):
     """-> dict. The instruction is ONE message; everything else is the record."""
     states = classify(user_brief)
-    lines = []
-    if vibe:
-        lines.append("Vibe: %s." % str(vibe).strip().rstrip("."))
-    lines.append("")
-    lines.append("Edit this video. Unless the brief below says otherwise:")
-    kept = []
+    kept = [k for k, _f, _s in DEFAULTS if states[k][0] != "SUPPRESSED"]
+
+    # THE USER FIRST, AND PRECEDENCE IN THE SAME BREATH. "Do exactly that"
+    # carries the precedence without a paragraph about precedence: the defaults
+    # are introduced as what to do WHERE THEY DID NOT SAY, so there is no case
+    # in which a default has to be weighed against the user's words.
+    lines = ['The user asked for: %s' % user_slot(vibe, user_brief), ""]
+    lines.append("Do exactly that. Where they didn't say, use these defaults:")
     for key, _family, sentence in DEFAULTS:
-        if states[key][0] == "SUPPRESSED":
+        if key == "graphics":
+            ps = placeable_sentence(states)
+            if ps:
+                lines.append("  - " + ps)
             continue
-        kept.append(key)
+        if sentence is None or states[key][0] == "SUPPRESSED":
+            continue
         lines.append("  - " + sentence)
     lines.append("")
-    lines.append("THE USER'S BRIEF, which wins wherever it disagrees with anything "
-                 "above:")
-    lines.append((user_brief or "").strip() or "(none given)")
-    lines.append("")
     # Not "do not ask questions". The opposite.
-    lines.append("If something in the brief is unclear or you need a decision "
-                 "only the user can make, ask — the question is relayed to them.")
+    lines.append("If anything is unclear or needs a decision only the user can "
+                 "make, ask — your question reaches them.")
     return {
         "composer_version": COMPOSER_VERSION,
         "instruction": "\n".join(lines),
+        "user_slot": user_slot(vibe, user_brief),
         "suppressed": sorted(k for k, (s, _) in states.items() if s == "SUPPRESSED"),
         "ambiguous_kept": sorted(k for k, (s, _) in states.items() if s == "AMBIGUOUS_KEPT"),
         "kept": kept,

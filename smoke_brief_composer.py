@@ -38,8 +38,15 @@ def main():
     # L1 POPULATION FLOOR. Eight defaults, and every one reaches the instruction
     # when nothing is suppressed. A composer that silently dropped half of them
     # would pass every other leg here.
+    # A DEFAULT WITH NO SENTENCE OF ITS OWN STILL HAS TO ARRIVE. zooms, sfx and
+    # transitions are ruled individually and RENDERED INSIDE the shared
+    # placeable bullet, so checking only for a printed sentence would let all
+    # three vanish from that bullet while the floor of eight stayed green —
+    # a floor on a sum hiding which contributor went. For those, the FAMILY
+    # LABEL is what must reach the instruction.
     plain = bc.compose("energetic", "Make it punchy.")
-    missing = [k for k, _f, s in bc.DEFAULTS if s not in plain["instruction"]]
+    missing = [k for k, _f, s in bc.DEFAULTS
+               if (s or dict(bc.PLACEABLE).get(k, k)) not in plain["instruction"]]
     leg("L1 every_default_reaches_the_instruction",
         len(bc.DEFAULTS) >= 8 and not missing and not plain["suppressed"],
         "%d defaults, missing=%s, suppressed=%s"
@@ -105,18 +112,74 @@ def main():
 
     # L7 THE USER'S WORDS ARE CARRIED VERBATIM AND WIN. Precedence is stated in
     # the instruction, which is what covers every constraint no matcher catches.
+    # The precedence SENTENCE changed with the shape and the leg moved with it.
+    # It used to be a separate paragraph at the bottom — "which wins wherever it
+    # disagrees with anything above" — introducing a brief that sat AFTER eight
+    # defaults. Now the user's words are first and "Do exactly that. Where they
+    # didn't say, use these defaults" carries the precedence in the same breath,
+    # so there is no case where a default must be weighed against the user.
+    # Asserting the old wording here would have been a check defending a
+    # DECISION that had been correctly reversed.
     txt = "Only trim and combine the strongest original soundbites."
     v = bc.compose("", txt)
+    verbatim = txt in v["instruction"]
+    prec = ("Do exactly that." in v["instruction"]
+            and "Where they didn't say" in v["instruction"])
+    order = (prec
+             and v["instruction"].index(txt)
+             < v["instruction"].index("Do exactly that."))
     leg("L7 brief_verbatim_and_precedence_stated",
-        txt in v["instruction"] and "wins wherever it disagrees" in v["instruction"],
-        "verbatim=%s precedence=%s"
-        % (txt in v["instruction"], "wins wherever it disagrees" in v["instruction"]))
+        verbatim and prec and order,
+        "verbatim=%s precedence=%s user_comes_first=%s" % (verbatim, prec, order))
 
     # L8 A SUPPRESSION IS ALWAYS REPORTED WITH ITS EVIDENCE. A default dropped
     # with nothing said is a silent edit to the user's brief.
     leg("L8 suppression_carries_its_evidence",
         bool(ban["suppressed"]) and all(ban["evidence"].get(k) for k in ban["suppressed"]),
         "evidence=%s" % {k: ban["evidence"].get(k) for k in ban["suppressed"]})
+
+    # L12 THE USER SLOT IS NEVER EMPTY AND NEVER A PLACEHOLDER.
+    #
+    # The old shape wrote "(none given)" into the brief block whenever the app
+    # sent only a vibe. That is not a neutral marker: it tells their agent the
+    # user asked for NOTHING, and a request that arrives saying nothing is a
+    # request the agent is free to invent — the same control as Probe A, one
+    # level up. A vibe-only submission is not an empty brief; it is a short one,
+    # and the vibe is the user's own choice made in the app.
+    #
+    # DRIVEN OVER EVERY INPUT COMBINATION, not just the one the app usually
+    # sends. Three of the four cases produced "(none given)" or an empty slot
+    # under the old shape, and the one that did not is the one anyone would
+    # test by hand.
+    PLACEHOLDERS = ("(none given)", "(none)", "n/a", "none given", "not specified",
+                    "unspecified", "no brief", "null", "undefined", "tbd")
+    cases = [("punchy", "Cut it tight and add captions."), ("punchy", ""),
+             ("", "Cut it tight and add captions."), ("", "")]
+    bad = []
+    for v, t in cases:
+        r = bc.compose(v, t)
+        slot = (r.get("user_slot") or "").strip()
+        head = r["instruction"].splitlines()[0]
+        low = (slot + " " + head).lower()
+        if not slot or any(ph in low for ph in PLACEHOLDERS):
+            bad.append((v, t, head))
+    leg("L12 user_slot_is_never_empty_or_a_placeholder", not bad,
+        "%d/%d input combinations produce a placeholder%s"
+        % (len(bad), len(cases), ("  <<< " + bad[0][2][:52]) if bad else ""))
+
+    # L13 THE USER'S WORDS COME FIRST AND CARRY THEIR OWN PRECEDENCE.
+    # "Do exactly that. Where they didn't say, use these defaults" states the
+    # precedence in the same breath as the request, so there is no case in which
+    # a default has to be weighed against the user. The old shape put the brief
+    # LAST, after eight defaults, with a separate paragraph explaining that it
+    # won — precedence as a footnote to the thing it governs.
+    r = bc.compose("punchy", "Cut it tight.")
+    first = r["instruction"].splitlines()[0]
+    leg("L13 user_first_and_precedence_in_the_same_breath",
+        first.startswith("The user asked for:") and "Cut it tight." in first
+        and "Do exactly that" in r["instruction"]
+        and "Where they didn't say" in r["instruction"],
+        "first line: %s" % first[:66])
 
     # L9 THE BRIEF IS NEUTRAL ABOUT WHAT MAY BE USED. Ruled by Zac 2026-09-22,
     # first for sounds and then widened: components and caption styles too. "No

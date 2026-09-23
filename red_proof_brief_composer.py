@@ -37,41 +37,62 @@ SMOKE = os.path.join(HERE, "smoke_brief_composer.py")
 WATCHED = ["brief_composer.py", "smoke_brief_composer.py"]
 
 MUTATIONS = [
+    # ZAC'S NAMED MUTANT: the placeholder comes back. It is the shape the
+    # composer actually shipped with — a vibe-only submission wrote
+    # "(none given)" into the brief slot — and it reads as a user who asked for
+    # nothing, which is a request the agent is free to invent.
+    ("placeholder_returns_for_a_vibe_only_brief", "brief_composer.py",
+     '        return "a %s edit" % v',
+     '        return "(none given)"',
+     "L12 user_slot_is_never_empty_or_a_placeholder",
+     lambda s: 'return "a %s edit" % v' in s),
+    # AND THE EMPTY SLOT — the same defect with no word to grep for.
+    ("user_slot_goes_empty", "brief_composer.py",
+     '    return "an edit of this video"',
+     '    return ""',
+     "L12 user_slot_is_never_empty_or_a_placeholder",
+     lambda s: 'return "an edit of this video"' in s),
     # THE MUTANT ZAC NAMED. It forbids nothing, passes any check looking for the
     # word "only", and reads as helpful guidance in review — and a run under it
     # never touches their library. A preference is the restriction that does not
     # announce itself, which is why PREFERS is its own class rather than folded
     # into NEUTRAL.
+    # ZAC'S NAMED MUTANT, RE-AIMED AT THE SENTENCE THAT ACTUALLY RENDERS.
+    # My first version edited DEFAULTS' graphics row, whose sentence is None and
+    # which compose() ignores for that key — it always renders
+    # placeable_sentence() instead. Real bytes changed and no verdict could:
+    # the wrong-population vacuity, and it announced itself as rc=1 with
+    # phrase=False, going red on a leg that was not the one under test.
     ("a_preference_creeps_in", "brief_composer.py",
-     '     "Place motion graphics where they fit."),',
-     '     "Place motion graphics where they fit — prefer the project\'s own graphics."),',
+     '    return "Add %s and %s where they fit." % (", ".join(live[:-1]), live[-1])',
+     '    return "Add %s and %s where they fit — prefer the project\'s own." % (", ".join(live[:-1]), live[-1])',
      "L9 brief_is_neutral_about_what_may_be_used",
-     lambda s: '"Place motion graphics where they fit."),' in s),
+     lambda s: 'where they fit." % (", ".join(live[:-1])' in s),
     # AND A FAMILY GOES QUIET. Dropping captions from the neutrality sentence
     # leaves RESTRICTS and PREFERS both at zero, so only a per-family leg sees
     # it — the family that loses its neutrality is the one nobody watches go.
     ("a_family_drops_out_of_the_neutrality_sentence", "brief_composer.py",
-     '     "Components, caption styles and sound effects are open — choose freely "',
-     '     "Components and sound effects are open — choose freely "',
+     '     "The project\'s components, caption styles and sounds and your own are all "',
+     '     "The project\'s components and sounds and your own are all "',
      "L10 every_family_is_named_in_the_opening_sentence",
-     lambda s: "Components, caption styles and sound effects are open" in s),
+     lambda s: "components, caption styles and sounds and your own" in s),
     # THE SOUND POOL RESTRICTION, RESTORED — exactly the sentence that shipped
     # until Zac ruled it out. It is the mutation most likely to reappear by
     # accident, because "from the project's registered sounds" reads as
     # precision rather than as a narrowing of the menu.
     ("sound_pool_restriction_returns", "brief_composer.py",
-     '     "Place sound effects where the moment wants one."),',
-     '     "Place sound effects from the project\'s registered sounds."),',
+     '    ("sfx",         "sound effects", None),',
+     '    ("sfx",         "sound effects", "Use the project\'s registered sounds only."),',
      "L9 brief_is_neutral_about_what_may_be_used",
-     lambda s: '"Place sound effects where the moment wants one."),' in s),
+     lambda s: '("sfx",         "sound effects", None),' in s),
     # THE SECOND SPELLING, RESTORED. Two different sentences said the same
     # thing, so a proof that only restores one leaves the other untested — and
     # a needle aimed at either phrasing would have missed the other.
     ("only_clause_reabsorbs_sounds", "brief_composer.py",
-     '     "Components, caption styles and sound effects are open — choose freely "',
-     '     "Use only the components and caption styles registered in this project. "',
+     '     "The project\'s components, caption styles and sounds and your own are all "',
+     '     "Use only the project\'s components, caption styles and sounds. Nothing else "',
      "L9 brief_is_neutral_about_what_may_be_used",
-     lambda s: "are open — choose freely " in s),
+     lambda s: "and your own are all " in s),
     # THE ONLY-IS-A-BAN DEFECT, restored. Adding `only` to the negation set is
     # the single most plausible "improvement" anyone would make here.
     ("only_becomes_a_ban", "brief_composer.py",
@@ -101,25 +122,30 @@ MUTATIONS = [
      "L4c negation_does_not_reach_across_a_sentence",
      lambda s: '{0,24}?' in s),
     # A DEFAULT VANISHES from the list — the population floor is what notices.
+    # RE-AIMED. zooms no longer prints a sentence of its own — it renders inside
+    # the shared placeable bullet — so the mutation drops it from PLACEABLE.
+    # Orphaned by my own refactor and caught by the anchor guard, which is
+    # exactly the case that guard exists for.
     ("default_vanishes", "brief_composer.py",
-     '    ("zooms",       "zooms",\n     "Zoom on moments of emphasis."),\n', "",
+     'PLACEABLE = [("graphics", "motion graphics"), ("zooms", "zooms"),',
+     'PLACEABLE = [("graphics", "motion graphics"),',
      "L1 every_default_reaches_the_instruction",
-     lambda s: '"Zoom on moments of emphasis."' in s),
+     lambda s: '("zooms", "zooms")' in s),
     # IT STARTS TELLING THEIR AGENT NOT TO ASK.
     ("forbids_questions", "brief_composer.py",
-     'lines.append("If something in the brief is unclear or you need a decision "\n'
-     '                 "only the user can make, ask — the question is relayed to them.")',
+     'lines.append("If anything is unclear or needs a decision only the user can "\n'
+     '                 "make, ask — your question reaches them.")',
      'lines.append("Do not ask questions; make the call yourself.")',
      "L6 never_forbids_questions",
-     lambda s: 'the question is relayed to them' in s),
+     lambda s: 'ask — your question reaches them.' in s),
     # PRECEDENCE STOPS BEING STATED, so the defaults and the user's words sit
     # side by side with nothing saying which wins — the robust half removed,
     # leaving only the matcher I do not trust on its own.
     ("precedence_dropped", "brief_composer.py",
-     '    lines.append("THE USER\'S BRIEF, which wins wherever it disagrees with anything "\n                 "above:")',
-     '    lines.append("THE USER\'S BRIEF:")',
+     '    lines.append("Do exactly that. Where they didn\'t say, use these defaults:")',
+     '    lines.append("Use these defaults:")',
      "L7 brief_verbatim_and_precedence_stated",
-     lambda s: 'wins wherever it disagrees' in s),
+     lambda s: "Do exactly that. Where they didn't say" in s),
     # A SUPPRESSION GOES SILENT: the default is dropped and nothing records why.
     ("suppression_goes_silent", "brief_composer.py",
      '        "evidence": {k: e for k, (s, e) in states.items() if e},',
