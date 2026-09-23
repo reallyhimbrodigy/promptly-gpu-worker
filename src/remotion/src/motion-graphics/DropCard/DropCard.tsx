@@ -243,7 +243,6 @@ export const DropCard: React.FC<DropCardProps> = ({
               opacity: railOpacity,
               transform: `scaleX(${railScale.toFixed(3)})`,
               transformOrigin: "left center",
-              zIndex: 0,
             }}
           />
         ) : null}
@@ -288,7 +287,7 @@ export const DropCard: React.FC<DropCardProps> = ({
               key={j}
               style={{
                 position: "relative",
-                zIndex: 1,
+
                 width: ITEM_W,
                 display: "flex",
                 flexDirection: "column",

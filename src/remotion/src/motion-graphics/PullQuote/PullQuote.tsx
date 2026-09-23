@@ -247,7 +247,6 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
                 transform: `translateY(${quoteRise}px) scale(${quoteScale})`,
                 transformOrigin: "left top",
                 textShadow,
-                zIndex: 0,
               }}
             >
               {"“"}
@@ -401,7 +400,7 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
                           backgroundColor: resolvedBarColor,
                           transform: `scaleX(${barScaleX})`,
                           transformOrigin: "left center",
-                          zIndex: 0,
+
                           borderRadius: 4,
                           // §4: the bar is a physical label slapped over the
                           // word — its own small tilt + a hard offset shadow
@@ -414,7 +413,7 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
                     <span
                       style={{
                         position: "relative",
-                        zIndex: 1,
+
                         opacity: barTextOpacity,
                       }}
                     >

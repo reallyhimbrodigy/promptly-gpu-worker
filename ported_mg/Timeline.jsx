@@ -495,7 +495,6 @@ var Timeline = ({
       transform: `scaleY(${railDraw.toFixed(3)})`,
       transformOrigin: "top center",
       boxShadow: "inset 0 1px 2px rgba(0,0,0,0.35), 0 2px 8px rgba(0,0,0,0.28)",
-      zIndex: 0
     }}
   />
 
@@ -513,7 +512,7 @@ var Timeline = ({
       backgroundColor: accentColor,
       backgroundImage: `linear-gradient(90deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.10) 42%, rgba(0,0,0,0.12) 100%)`,
       boxShadow: `0 0 16px ${accentColor}aa, 0 1px 4px rgba(0,0,0,0.3)`,
-      zIndex: 1,
+
       willChange: "height"
     }}
   />
@@ -527,7 +526,7 @@ var Timeline = ({
       left: railX,
       top: 0,
       opacity: headOpacity,
-      zIndex: 2,
+
       pointerEvents: "none"
     }}
   >
@@ -652,7 +651,6 @@ var Timeline = ({
         height: 138,
         transform: `translate(${cardX.toFixed(2)}px, -50%)`,
         opacity: cardOpacity,
-        zIndex: 3
       }}
     >
                 {
@@ -832,7 +830,7 @@ var Timeline = ({
         transform: `scale(${nodeScale.toFixed(4)})`,
         transformOrigin: "center",
         opacity: nodeOpacity,
-        zIndex: 4,
+
         willChange: "transform"
       }}
     >

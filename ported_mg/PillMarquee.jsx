@@ -403,7 +403,6 @@ var PillMarquee = ({
       alignItems: "stretch",
       gap: rowGap,
       transform: `translateY(${offsetY}px)`,
-      zIndex: 1
     }}
   >
         {Array.from({ length: rows }).map((_, r) => {

@@ -328,7 +328,15 @@ const MessageHeader: React.FC<iMessageHeaderProps> = ({
             fill={faintChrome}
             style={{ marginTop: 1 }}
           >
-            <path d="M2 2L10 8L2 14" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                        {/* EXPLICIT COLOUR, NOT currentColor. ChatCut rasterizes every
+                <svg> as an image cached by its markup plus the INHERITED
+                colour, so a colour that changes per frame forces a fresh
+                decode of every SVG on every frame — their note measured a
+                grid of a few hundred taking an export from 10 fps to a
+                standstill. This chevron inherits `faintChrome`, which is
+                exactly what the parent <svg> already sets as `fill`, so
+                naming it changes no pixel and removes the cache key. */}
+            <path d="M2 2L10 8L2 14" stroke={faintChrome} strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </div>
       </div>

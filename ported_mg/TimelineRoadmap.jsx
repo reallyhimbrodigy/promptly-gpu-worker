@@ -539,7 +539,6 @@ var TimelineRoadmap = ({
       left: 0,
       top: 0,
       overflow: "visible",
-      zIndex: 0
     }}
   >
             <defs>
@@ -637,7 +636,7 @@ var TimelineRoadmap = ({
       left: 0,
       top: 0,
       opacity: headOpacity,
-      zIndex: 2,
+
       pointerEvents: "none"
     }}
   >
@@ -668,6 +667,132 @@ var TimelineRoadmap = ({
   />
             </div> : null}
 
+          {
+    /* DOM ORDER IS THE PAINT ORDER. ChatCut ignores zIndex entirely —
+       "the preview would show it and the exported video would not" — so
+       the labels are declared BEFORE the nodes and the nodes paint on
+       top, which is what zIndex 4 over 3 used to say. Measured, not
+       assumed: with zIndex and without differed on frames 14, 22, 32, 48
+       and 64, so this body was ALREADY EXPORTING WRONG. */
+  }
+          {
+    /* Labels — light editorial text + accent connector tick + sublabel pill */
+  }
+          {rendered.map((step, i) => {
+    const act = reach(i);
+    const onRight = labelOnRight(i);
+    const nodeX = nodeXFor(i);
+    const labelOpacity = interpolate2(localFrame, [act + 5, act + 18], [0, 1], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+      easing: easeOutCubic
+    });
+    const slide = interpolate2(localFrame, [act + 5, act + 22], [26, 0], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+      easing: easeOutCubic
+    });
+    const tickGrow = interpolate2(localFrame, [act + 2, act + 16], [0, 1], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+      easing: easeOutCubic
+    });
+    const pillPop = interpolate2(localFrame, [act + 12, act + 24], [0, 1], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+      easing: easeOutBack
+    });
+    const dir = onRight ? 1 : -1;
+    const nodeFrac = segCount > 0 ? i / segCount : 0;
+    const gone = clamp01((sweep - nodeFrac * 0.8) / 0.18);
+    const fa = pts[Math.max(0, i - 1)];
+    const fb = pts[Math.min(N - 1, i + 1)];
+    const flv = Math.hypot(fb.x - fa.x, fb.y - fa.y) || 1;
+    const exitDX = (fb.x - fa.x) / flv * 80 * gone;
+    const exitDY = (fb.y - fa.y) / flv * 80 * gone;
+    const anchorStyle = onRight ? { left: nodeX + R } : { right: width - (nodeX - R) };
+    const labelMetrics = mgTextMetrics(step.label);
+    const labelFont = mgTextFont(step.label, "inter");
+    const sublabelMetrics = mgTextMetrics(step.sublabel ?? "");
+    const sublabelFont = mgTextFont(step.sublabel ?? "", "inter");
+    return <div
+      key={`label-${i}`}
+      style={{
+        position: "absolute",
+        top: yFor(i),
+        ...anchorStyle,
+        transform: `translateY(-50%) translateX(${(dir * slide).toFixed(2)}px) translate(${exitDX.toFixed(2)}px, ${exitDY.toFixed(2)}px)`,
+        opacity: labelOpacity * (1 - gone),
+
+        display: "flex",
+        flexDirection: onRight ? "row" : "row-reverse",
+        alignItems: "center",
+        gap: LABEL_OFFSET - TICK + 14
+      }}
+    >
+                {
+      /* Connector tick */
+    }
+                <div
+      style={{
+        flex: "0 0 auto",
+        width: TICK,
+        height: 4,
+        borderRadius: 2,
+        background: accentColor,
+        boxShadow: `0 0 10px ${accentColor}aa`,
+        transform: `scaleX(${tickGrow.toFixed(3)})`,
+        transformOrigin: onRight ? "left center" : "right center"
+      }}
+    />
+
+                <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: onRight ? "flex-start" : "flex-end",
+        gap: 10
+      }}
+    >
+                  <div
+      style={{
+        fontFamily: labelFont,
+        fontSize: 58,
+        fontWeight: 800,
+        color: labelColor,
+        letterSpacing: "-0.015em",
+        lineHeight: Math.max(1.02, labelMetrics.lineHeight),
+        textTransform: labelMetrics.uppercaseSafe ? "uppercase" : "none",
+        whiteSpace: "nowrap",
+        textAlign: onRight ? "left" : "right",
+        textShadow
+      }}
+    >
+                    {step.label}
+                  </div>
+                  {step.sublabel ? <div
+      style={{
+        transform: `scale(${pillPop.toFixed(3)})`,
+        transformOrigin: onRight ? "left center" : "right center",
+        padding: "6px 18px",
+        borderRadius: 999,
+        background: accentColor,
+        fontFamily: sublabelFont,
+        fontSize: 28,
+        fontWeight: 700,
+        color: pillInk,
+        letterSpacing: "0.03em",
+        lineHeight: Math.max(1.1, sublabelMetrics.lineHeight),
+        textTransform: sublabelMetrics.uppercaseSafe ? "uppercase" : "none",
+        whiteSpace: "nowrap",
+        boxShadow: `0 4px 14px ${accentColor}66`
+      }}
+    >
+                      {step.sublabel}
+                    </div> : null}
+                </div>
+              </div>;
+  })}
           {
     /* Nodes — flat glowing waypoints (no glass) */
   }
@@ -728,7 +853,7 @@ var TimelineRoadmap = ({
         transform: `translate(${exitDX.toFixed(2)}px, ${exitDY.toFixed(2)}px) scale(${(nodeScale * exitScaleN).toFixed(4)})`,
         transformOrigin: "center",
         opacity: nodeOpacity * (1 - gone),
-        zIndex: 4,
+
         willChange: "transform"
       }}
     >
@@ -805,124 +930,6 @@ var TimelineRoadmap = ({
               </div>;
   })}
 
-          {
-    /* Labels — light editorial text + accent connector tick + sublabel pill */
-  }
-          {rendered.map((step, i) => {
-    const act = reach(i);
-    const onRight = labelOnRight(i);
-    const nodeX = nodeXFor(i);
-    const labelOpacity = interpolate2(localFrame, [act + 5, act + 18], [0, 1], {
-      extrapolateLeft: "clamp",
-      extrapolateRight: "clamp",
-      easing: easeOutCubic
-    });
-    const slide = interpolate2(localFrame, [act + 5, act + 22], [26, 0], {
-      extrapolateLeft: "clamp",
-      extrapolateRight: "clamp",
-      easing: easeOutCubic
-    });
-    const tickGrow = interpolate2(localFrame, [act + 2, act + 16], [0, 1], {
-      extrapolateLeft: "clamp",
-      extrapolateRight: "clamp",
-      easing: easeOutCubic
-    });
-    const pillPop = interpolate2(localFrame, [act + 12, act + 24], [0, 1], {
-      extrapolateLeft: "clamp",
-      extrapolateRight: "clamp",
-      easing: easeOutBack
-    });
-    const dir = onRight ? 1 : -1;
-    const nodeFrac = segCount > 0 ? i / segCount : 0;
-    const gone = clamp01((sweep - nodeFrac * 0.8) / 0.18);
-    const fa = pts[Math.max(0, i - 1)];
-    const fb = pts[Math.min(N - 1, i + 1)];
-    const flv = Math.hypot(fb.x - fa.x, fb.y - fa.y) || 1;
-    const exitDX = (fb.x - fa.x) / flv * 80 * gone;
-    const exitDY = (fb.y - fa.y) / flv * 80 * gone;
-    const anchorStyle = onRight ? { left: nodeX + R } : { right: width - (nodeX - R) };
-    const labelMetrics = mgTextMetrics(step.label);
-    const labelFont = mgTextFont(step.label, "inter");
-    const sublabelMetrics = mgTextMetrics(step.sublabel ?? "");
-    const sublabelFont = mgTextFont(step.sublabel ?? "", "inter");
-    return <div
-      key={`label-${i}`}
-      style={{
-        position: "absolute",
-        top: yFor(i),
-        ...anchorStyle,
-        transform: `translateY(-50%) translateX(${(dir * slide).toFixed(2)}px) translate(${exitDX.toFixed(2)}px, ${exitDY.toFixed(2)}px)`,
-        opacity: labelOpacity * (1 - gone),
-        zIndex: 3,
-        display: "flex",
-        flexDirection: onRight ? "row" : "row-reverse",
-        alignItems: "center",
-        gap: LABEL_OFFSET - TICK + 14
-      }}
-    >
-                {
-      /* Connector tick */
-    }
-                <div
-      style={{
-        flex: "0 0 auto",
-        width: TICK,
-        height: 4,
-        borderRadius: 2,
-        background: accentColor,
-        boxShadow: `0 0 10px ${accentColor}aa`,
-        transform: `scaleX(${tickGrow.toFixed(3)})`,
-        transformOrigin: onRight ? "left center" : "right center"
-      }}
-    />
-
-                <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: onRight ? "flex-start" : "flex-end",
-        gap: 10
-      }}
-    >
-                  <div
-      style={{
-        fontFamily: labelFont,
-        fontSize: 58,
-        fontWeight: 800,
-        color: labelColor,
-        letterSpacing: "-0.015em",
-        lineHeight: Math.max(1.02, labelMetrics.lineHeight),
-        textTransform: labelMetrics.uppercaseSafe ? "uppercase" : "none",
-        whiteSpace: "nowrap",
-        textAlign: onRight ? "left" : "right",
-        textShadow
-      }}
-    >
-                    {step.label}
-                  </div>
-                  {step.sublabel ? <div
-      style={{
-        transform: `scale(${pillPop.toFixed(3)})`,
-        transformOrigin: onRight ? "left center" : "right center",
-        padding: "6px 18px",
-        borderRadius: 999,
-        background: accentColor,
-        fontFamily: sublabelFont,
-        fontSize: 28,
-        fontWeight: 700,
-        color: pillInk,
-        letterSpacing: "0.03em",
-        lineHeight: Math.max(1.1, sublabelMetrics.lineHeight),
-        textTransform: sublabelMetrics.uppercaseSafe ? "uppercase" : "none",
-        whiteSpace: "nowrap",
-        boxShadow: `0 4px 14px ${accentColor}66`
-      }}
-    >
-                      {step.sublabel}
-                    </div> : null}
-                </div>
-              </div>;
-  })}
         </div>
       </div>
     </AbsoluteFill>;

@@ -302,7 +302,7 @@ export const Notification: React.FC<NotificationProps> = ({
               key={i}
               style={{
                 position: "relative",
-                zIndex: items.length - i,
+
                 transform: `translateY(${translateYPct}%)`,
                 opacity,
               }}

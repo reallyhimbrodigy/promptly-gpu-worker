@@ -434,7 +434,7 @@ var StickyNotes = ({
         height: noteSize,
         marginLeft: xOff - noteSize / 2,
         marginTop: yOff - noteSize / 2,
-        zIndex: i,
+
         perspective: 800
       }}
     >

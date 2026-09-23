@@ -539,7 +539,6 @@ var EditorialQuote = ({
         opacity: quoteOpacity * (1 - quoteExit) * 0.45,
         transform: `translateY(${(-finalFontSize * 0.3 * quoteExit).toFixed(2)}px) scale(${(quoteScale * (1 - 0.35 * quoteExit)).toFixed(3)})`,
         transformOrigin: "left top",
-        zIndex: 0
       }}
     >
                 {"\u201C"}
@@ -585,7 +584,7 @@ var EditorialQuote = ({
         letterSpacing: "-0.01em",
         whiteSpace: "nowrap",
         position: "relative",
-        zIndex: 1,
+
         opacity: op,
         transform: `translateX(${tx.toFixed(2)}px)`,
         clipPath: reveal,
@@ -615,7 +614,7 @@ var EditorialQuote = ({
     style={{
       marginTop: 14,
       position: "relative",
-      zIndex: 1,
+
       display: "flex",
       flexDirection: "column",
       opacity: authorOpacity * (1 - authorExitV),

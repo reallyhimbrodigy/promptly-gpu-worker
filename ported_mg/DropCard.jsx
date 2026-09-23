@@ -446,7 +446,6 @@ var DropCard = ({
       opacity: railOpacity,
       transform: `scaleX(${railScale.toFixed(3)})`,
       transformOrigin: "left center",
-      zIndex: 0
     }}
   /> : null}
 
@@ -487,7 +486,7 @@ var DropCard = ({
       key={j}
       style={{
         position: "relative",
-        zIndex: 1,
+
         width: ITEM_W,
         display: "flex",
         flexDirection: "column",
