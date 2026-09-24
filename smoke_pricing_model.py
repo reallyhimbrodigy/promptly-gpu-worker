@@ -194,6 +194,27 @@ def main():
         "%.2f -> %.2f on identical source, delta %+.2f credits"
         % (_d[0], _d[1], -_d[2]) if _d else "no matched pair")
 
+    # L17 A RE-EDIT IS FREE TO THE USER AND NOT FREE TO US, and the cap is
+    # what authorises the difference. The user-facing policy says 0 credits;
+    # we pay ChatCut 0.28-0.76 every time. A model that reported the re-edit
+    # as costless would price the cap at zero and be wrong by up to 7.6
+    # credits per video.
+    _rlo, _rhi = P.reedit_range()
+    leg("L17 a_reedit_costs_us_even_when_it_costs_the_user_nothing",
+        _rlo > 0 and _rhi > _rlo and len(P.MEASURED_REEDITS) >= 2,
+        "%.2f..%.2f ChatCut credits per re-edit over %d measured"
+        % (_rlo, _rhi, len(P.MEASURED_REEDITS)))
+
+    # L18 AND THE CAP MOVES COST PER VIDEO MORE THAN THE EDIT DOES. At cap=10
+    # the ceiling is 3.7-3.9x the edit alone, which is the arithmetic the cap
+    # ruling turns on.
+    _c0 = P.cost_per_video(0)
+    _c10 = P.cost_per_video(10)
+    leg("L18 the_cap_dominates_cost_per_video",
+        _c10[1] / _c0[1] > 3.0 and _c0 == P.measured_credit_range(),
+        "cap 0 -> %.2f..%.2f, cap 10 -> %.2f..%.2f (%.1fx)"
+        % (_c0[0], _c0[1], _c10[0], _c10[1], _c10[1] / _c0[1]))
+
     print("%d/%d legs ok" % (NLEGS - len(FAILS), NLEGS))
     if FAILS:
         print("FAILED: %s" % ", ".join(FAILS))

@@ -280,6 +280,62 @@ MEASURED_EDITS = (
 # from a feeling that we now know more.
 
 
+# ── RE-EDITS COST CHATCUT CREDITS AND THE USER PAYS ZERO ──────────────────
+#
+# Measured by B1, 2026-09-24, on the ChatCut re-edit path:
+#
+#     0.76 credits   "make the captions bigger"          39.6s
+#     0.28 credits   "remove the second graphic"         38.4s
+#
+# Both preserved the edit. The second removed the graphic AND its paired
+# sound — 6/6 down to 5/5 — and kept all 24 caption cards.
+#
+# THIS IS THE NUMBER THE CAP DECISION TURNS ON, and it is not the one the
+# policy is written in. `reedit_free_cap` charges the USER 0 credits up to ten
+# per video. It does not make the re-edit free: WE pay ChatCut 0.28-0.76 every
+# time, and a cap of ten authorises up to ten of them.
+#
+#     first edit          1.04 - 1.66
+#     10 re-edits         2.80 - 7.60
+#     ---------------------------------
+#     per video           3.84 - 9.26     against 1.04 - 1.66 for the edit alone
+#
+# So the CAP, not the edit, dominates cost per video at the top of its range —
+# a video with ten re-edits costs between 2.3x and 5.6x one without. That is
+# the arithmetic to set the number against, and it is why the cap is config
+# rather than a constant.
+#
+# AND THE CHEAPER RE-EDIT IS THE ONE THAT DID MORE. "Remove the second
+# graphic" restructured the timeline for 0.28; "make the captions bigger"
+# changed one property for 0.76. Same direction as the 3b finding: cost tracks
+# REQUEST SHAPE, not what was produced.
+MEASURED_REEDITS = (
+    # (chatcut_credits, wall_seconds, request)
+    (0.76, 39.6, "make the captions bigger"),
+    (0.28, 38.4, "remove the second graphic"),
+)
+
+
+def reedit_range():
+    """-> (low, high) ChatCut credits per re-edit, measured only."""
+    cs = [c for c, _w, _r in MEASURED_REEDITS]
+    return (min(cs), max(cs))
+
+
+def cost_per_video(cap, first_edit=None):
+    """-> (low, high) ChatCut credits for one video at a given free-re-edit cap.
+
+    THE CAP IS AN AUTHORISATION, NOT A FORECAST. This is what the cap PERMITS,
+    not what an average user spends — nobody has measured how many re-edits a
+    real user takes. Reporting it as an expectation would be a judgement
+    wearing a measurement's clothes; it is a CEILING and it is labelled one.
+    """
+    lo_e, hi_e = measured_credit_range() if first_edit is None else first_edit
+    lo_r, hi_r = reedit_range()
+    n = max(0, int(cap or 0))
+    return (lo_e + n * lo_r, hi_e + n * hi_r)
+
+
 def request_shape_delta():
     """-> (low, high, delta) over rows sharing duration AND orientation.
 
