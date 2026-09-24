@@ -75,6 +75,58 @@ def main():
     # L0 BOTH TREES EXIST FOR EVERY COMPONENT UNDER TEST. A missing file makes
     # every leg below vacuous, and a vacuous leg here reads as "the trees
     # agree" — which is the failure this whole file is about.
+    # ── PARAMETER DEFAULTS MUST AGREE ACROSS THE TREES ──────────────────
+    # The pattern lists above ask "does this tree contain X". They cannot see
+    # a value that is PRESENT IN BOTH AND DIFFERENT, which is how two real
+    # divergences survived:
+    #
+    #   SectionDivider showScrim/showVignette   jsx false, tsx TRUE
+    #     -> our own renders put a full-frame scrim and vignette over the
+    #        picture on every SectionDivider that did not override them. The
+    #        .jsx even carries a comment predicting exactly this, written
+    #        while it was already true in the other tree.
+    #   PillCluster    width                    jsx 1000, tsx 1160
+    #     -> 1160 is WIDER THAN THE 1080 FRAME, so the cluster laid out past
+    #        the edge and the measured box was a clipped box read as content.
+    #
+    # Both were found by a knob-cut bisect run for an unrelated reason:
+    # dropping a prop let the tsx default take over and the render moved,
+    # which is only possible if the two defaults disagree. A check should not
+    # need an accident.
+    import glob as _glob, os as _os
+    def _param_defaults(path):
+        src = open(path, encoding="utf-8").read()
+        src = re.sub(r"/\*[\s\S]*?\*/", "", src)
+        src = re.sub(r"(^|[^:])//[^\n]*", lambda m: m.group(1), src)
+        i = src.find("startMs")
+        if i < 0:
+            return {}
+        j = src.find("} = props", i)
+        if j < 0:
+            j = src.find("}) =>", i)
+        block = src[max(0, src.rfind("({", 0, i)):j] if j > 0 else ""
+        return {m.group(1): m.group(2).strip()
+                for m in re.finditer(r"(?m)^\s*(\w+)\s*=\s*([^,\n]+?)\s*,?\s*$", block)}
+
+    _pairs, _dis = 0, []
+    for _jsx in sorted(_glob.glob(_os.path.join(HERE, "ported_mg", "*.jsx"))):
+        _n = _os.path.basename(_jsx)[:-4]
+        _hits = _glob.glob(_os.path.join(HERE, "src", "remotion", "src",
+                                         "motion-graphics", "*", _n + ".tsx"))
+        if not _hits:
+            continue
+        _pairs += 1
+        _a, _b = _param_defaults(_jsx), _param_defaults(_hits[0])
+        for _k in sorted(set(_a) & set(_b)):
+            if _a[_k] != _b[_k]:
+                _dis.append("%s.%s (jsx=%s tsx=%s)" % (_n, _k, _a[_k][:20], _b[_k][:20]))
+    # THE DENOMINATOR IS ASSERTED. A glob that stops matching compares zero
+    # pairs and passes, which is the cheapest false green available.
+    leg("parameter_defaults_agree_across_trees",
+        _pairs >= 20 and not _dis,
+        "%d component pair(s), %d disagreement(s)%s"
+        % (_pairs, len(_dis), ("  <<< " + ", ".join(_dis[:4])) if _dis else ""))
+
     names = sorted({n for n, _d, _p in FORBIDDEN + REQUIRED})
     missing = [n for n in names if both(n) is None]
     leg("L0 both_trees_present_for_every_component", names and not missing,

@@ -27,28 +27,50 @@ go — no agent has ever set one, and they exist because a human was tuning.
 """
 
 CUT_KNOBS = {
-    # ── STAMP AND SECTIONDIVIDER ARE HELD, AND THE RENDER IS WHY ─────────
-    # Both came back DIFFERENT from the before/after pair. The claim that a
-    # cut "hardcodes the current default" is FALSE for them, and the harness
-    # caught it — which is the entire reason the ruling says render first.
+    # ── STAMP AND SECTIONDIVIDER: HELD, DIAGNOSED, THEN RESTORED ─────────
+    # Both came back DIFFERENT from the first before/after pair and both were
+    # held. A bisect — drop one knob at a time, then all at once — found two
+    # DIFFERENT causes, and neither was "the cut is unsafe":
     #
-    #   SectionDivider  eyebrowColor and numberColor have NO PARAMETER DEFAULT
-    #                   in the body. The registry declares them
-    #                   'rgba(255,255,255,0.78)' and '#C8551F'; cutting them
-    #                   renders `undefined`. That is "the registered default
-    #                   IS the value" exactly as this repo already recorded it
-    #                   — 135 defaults wrong, 0 of 14 components drew — and
-    #                   cutting would have shipped it silently.
+    #   STAMP  every knob dropped alone was SAME, and dropping ALL SIX was
+    #          also SAME. The first DIFFERENT verdict does not reproduce: it
+    #          was comparing against a registry snapshot that had moved for
+    #          other reasons, not a real change. I held a component on a
+    #          harness artefact, and only the bisect separated the two.
     #
-    #   Stamp           none of its six sit in the main destructure at all, so
-    #                   where each default actually comes from is UNKNOWN and
-    #                   I will not cut against an unknown.
+    #   SECTIONDIVIDER  showScrim and showVignette were the movers, and NOT
+    #          eyebrowColor/numberColor as I first diagnosed from reading the
+    #          destructure. The real cause was a TWO-TREE DIVERGENCE: the jsx
+    #          said false, the tsx said TRUE, so dropping the prop let the
+    #          tsx default take over. Our own renders had been putting a
+    #          full-frame scrim and vignette over the picture. Fixed in the
+    #          tsx and pinned by a new two-trees leg; the cut is then clean.
     #
-    # THE FIX IS TO HARDCODE THE REGISTERED VALUE IN THE BODY FIRST, then cut,
-    # then re-render. That is a body change with its own proof, not a line in
-    # this table, so both are held rather than half-done.
-    # "Stamp": HELD — defaults not located in the body
-    # "SectionDivider": HELD — two props have no body default
+    # THE LESSON IS THE ORDER. Reading the source gave me a confident wrong
+    # cause twice; the bisect gave the right one in one run each time.
+    # `style` IS NOT CUTTABLE AND THE RENDER IS THE ONLY THING THAT SAID SO.
+    # Stamp reads `const d = STYLE_DEFAULTS[props.style ?? "seal"]` and then
+    # derives THREE other defaults from it — size, fontSize and mark. Cut
+    # `style` from __mapped and the deriver can no longer resolve `d`, so
+    # those three COLLAPSE:
+    #
+    #     size      900   -> 0
+    #     fontSize   64   -> 0
+    #     mark      star  -> none
+    #
+    # A registered size of 0 renders nothing. That is the failure a cut is
+    # supposed to be incapable of, arriving through a prop that was not even
+    # in the cut list.
+    #
+    # AND MY BISECT SAID IT WAS FINE, because it deleted props from the props
+    # OBJECT at render time and never re-derived the registry. Dropping a prop
+    # is not the same operation as CUTTING it: only the second changes what
+    # the deriver can resolve for everything else. The bisect answered a
+    # question I had not asked, and it answered it correctly.
+    "Stamp": ["distress", "doubleRing", "entryScale", "fontKey", "textShadow"],
+    "SectionDivider": ["eyebrowColor", "fontKey", "numberColor", "scrimColor",
+                       "showScrim", "showVignette", "vignetteStrength",
+                       "textShadow"],
     # 18 -> 6. Everything about HOW the keyword is lit is craft; THAT it is lit
     # is the component.
     "PullQuote": ["barColor", "blurIn", "fontKey", "highlightTextColor",

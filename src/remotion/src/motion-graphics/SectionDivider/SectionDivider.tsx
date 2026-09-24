@@ -54,9 +54,20 @@ export const SectionDivider: React.FC<SectionDividerProps> = ({
   numberColor,
   titleFontSize = 150,
   showRule = true,
-  showScrim = true,
+  // false, WAS true, AND THE TWO TREES HAD DIVERGED ON IT. ported_mg was
+  // fixed to false to match what B1's lane registers; THIS tree was not, so
+  // our own Remotion renders have been putting a FULL-FRAME SCRIM AND
+  // VIGNETTE over the picture on every SectionDivider that did not override
+  // them. The .jsx comment predicted exactly this — "A CLEAN REGENERATION
+  // WOULD PUT A FULL-FRAME SCRIM BACK OVER THE PICTURE" — and it was already
+  // true in the other tree while the warning sat here unread.
+  //
+  // Found by a knob-cut bisect run for an unrelated reason: dropping
+  // showScrim from the probe's props let THIS default take over and the
+  // render moved, which is only possible if the two defaults disagree.
+  showScrim = false,
   scrimColor = "rgba(0,0,0,0.55)",
-  showVignette = true,
+  showVignette = false,
   vignetteStrength = 0.6,
   textShadow = DEFAULT_TEXT_SHADOW,
   anchor,

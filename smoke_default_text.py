@@ -32,7 +32,8 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import bake_registry as bk                                     # noqa: E402
+import bake_registry as bk
+import knob_spec                                     # noqa: E402
 import flatten_spec                                            # noqa: E402
 
 ART = os.path.join(HERE, "chatcut_registry_baked.json")
@@ -246,6 +247,49 @@ def main():
         and not bk._is_css_value("THIS IS THE PART THAT MATTERS")
         and not bk._is_css_value("ALEX RIVERA"),
         "CSS recognised, sentences not")
+
+    # L12 A KNOB CUT MOVES NOTHING BUT THE KNOBS IT CUTS.
+    #
+    # THE CASE THIS EXISTS FOR: cutting Stamp's `style` collapsed size 900->0,
+    # fontSize 64->0 and mark star->none, because the body derives all three
+    # from STYLE_DEFAULTS[props.style] and the deriver could no longer resolve
+    # it. A registered size of 0 renders NOTHING — the failure a cut is
+    # supposed to be incapable of, arriving through props that were never in
+    # the cut list.
+    #
+    # THE CONTROL HAS TO BE A CUT-FREE BAKE, and my first attempt got that
+    # wrong: comparing against the props as they stood BEFORE the cut refused
+    # six components, because reconcile() legitimately adjusts defaults for
+    # reasons that have nothing to do with cutting. Two bakes differing in
+    # exactly one variable is the only comparison that isolates it.
+    import copy as _copy
+    _saved = _copy.deepcopy(knob_spec.CUT_KNOBS)
+    try:
+        _with = bk.build(verbose=False)["components"]
+        knob_spec.CUT_KNOBS.clear()
+        _without = bk.build(verbose=False)["components"]
+    finally:
+        knob_spec.CUT_KNOBS.clear()
+        knob_spec.CUT_KNOBS.update(_saved)
+
+    _collateral = []
+    for _n, _cuts in _saved.items():
+        if _n not in _with or _n not in _without:
+            _collateral.append("%s: MISSING FROM A BAKE" % _n)
+            continue
+        _a = {q["key"]: q.get("defaultValue") for q in _without[_n]["properties"]}
+        _b = {q["key"]: q.get("defaultValue") for q in _with[_n]["properties"]}
+        _gone = sorted(set(_a) - set(_b))
+        if _gone != sorted(_cuts):
+            _collateral.append("%s: removed %s, expected %s" % (_n, _gone, sorted(_cuts)))
+        for _k in sorted(set(_a) & set(_b)):
+            if _a[_k] != _b[_k]:
+                _collateral.append("%s.%s %r->%r" % (_n, _k, _a[_k], _b[_k]))
+    leg("L12 a_cut_moves_nothing_but_the_knobs_it_cuts",
+        _saved and not _collateral,
+        "%d component(s) cut, %d collateral change(s)%s"
+        % (len(_saved), len(_collateral),
+           ("  <<< " + "; ".join(_collateral[:3])) if _collateral else ""))
 
     print("%d/%d legs ok" % (NLEGS - len(FAILS), NLEGS))
     if FAILS:

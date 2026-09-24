@@ -60,7 +60,14 @@ export const PillCluster: React.FC<PillClusterProps> = ({
   // Corpus law 1 (pass #7b): panel measured letterforms at ~2.5% frame height
   // vs the corpus's 5-6% — the cluster read as UI, not a graphic beat.
   // Outermost pills may crop at the frame edges (edge-crop is corpus-legal).
-  width = 1160,
+  // 1000, WAS 1160, AND THE TWO TREES HAD DIVERGED. ported_mg was corrected
+  // to 1000 — "1000 fits 1080 with 40px of margin either side, so the
+  // declared width is a number the component can actually draw" — and the
+  // registry ships 1000. This tree kept 1160, which is WIDER THAN THE 1080
+  // FRAME, so our own renders were laying the cluster out past the edge and
+  // the measured box was a clipped box read as a content box. The .jsx
+  // comment says both of us read it that way once.
+  width = 1000,
   fontSize = 78,
   textColor = "#FFFFFF",
   textShadow = DEFAULT_TEXT_SHADOW,
