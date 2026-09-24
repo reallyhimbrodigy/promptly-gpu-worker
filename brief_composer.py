@@ -40,6 +40,7 @@ brief.
 No "do not ask questions". A question is not a failure mode; it is the agent
 doing the thing we cannot do from here, and the answer relays to the user.
 """
+import hashlib
 import re
 
 COMPOSER_VERSION = "1.0.0"
@@ -189,6 +190,44 @@ TIER_LINES = {
 ACCOUNT_CLAIMS = ("plan limit", "unlimited", "plan", "account", "export",
                   "subscription", "tier", "upgrade", "billing", "quota",
                   "no limit", "limitless")
+
+
+# ── THE PIN, AS A FUNCTION, BECAUSE A SHA IN A SENTENCE IS A SENTENCE ──────
+#
+# Twice in one exchange a sha failed to reproduce across two trees. The first
+# was a hash of the whole composed instruction — it carried the USER'S WORDS,
+# so it pinned one composition of one input while being presented as the
+# brief's identity. The second was this pin described in PROSE: "OPEN_LINE plus
+# both TIER_LINES, sorted". B1 tried EIGHT constructions of that sentence and
+# none matched, because the sentence left out that each tier line is rendered
+# as `key=value` rather than value alone.
+#
+# A recipe in a comment is a second implementation that nobody tests. So the
+# construction lives HERE, once, and both sides CALL it — the same argument as
+# one definition of the price row and one definition of the state path. There
+# is no spelling to get wrong because there is no spelling.
+#
+# AND THE MATERIAL IS OBTAINABLE, NOT DESCRIBED. brief_pin_material() returns
+# the exact bytes that are hashed, so a mismatch is debuggable by DIFFING TWO
+# STRINGS rather than by guessing at a ninth construction of a sentence.
+
+def brief_pin_material():
+    """-> the exact text the pin is taken over: every part that is OURS.
+
+    Deliberately EXCLUDES the user slot. That is the whole lesson of the first
+    failed pin: a value that varies per run cannot identify the brief, and
+    every other input then looks like drift.
+    """
+    return OPEN_LINE + "\n" + "\n".join(
+        "%s=%s" % (k, v) for k, v in sorted(TIER_LINES.items()))
+
+
+def brief_pin():
+    """-> sha256 of brief_pin_material(), first 16 hex chars.
+
+    Moves if and only if the wording moves.
+    """
+    return hashlib.sha256(brief_pin_material().encode("utf-8")).hexdigest()[:16]
 
 
 def tier_line(tier):

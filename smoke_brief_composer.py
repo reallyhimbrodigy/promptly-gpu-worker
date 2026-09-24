@@ -157,24 +157,33 @@ def main():
     n = len(text.split())
     leg("L17 brief_length_is_reported", n > 0, "%d words" % n)
 
-    # L18 THE BRIEF HAS A PIN, AND IT IS OVER THE PARTS THAT ARE OURS.
+    # L18 THE BRIEF HAS A PIN, AND THE PIN IS A FUNCTION.
     #
-    # I posted a sha for the new pointer line and B1 could not reproduce it,
-    # correctly refused to run a funded arm on it, and was right: I had hashed
-    # the WHOLE composed instruction, which contains the USER'S WORDS. It
-    # pinned one composition of one input and nothing else — a per-run value
-    # presented as an identity for the brief.
+    # Two shas failed to reproduce across two trees in one exchange. The first
+    # hashed the whole composed instruction, so it carried the USER'S WORDS
+    # and pinned one composition of one input. The second was this pin
+    # described in PROSE — B1 tried EIGHT constructions of the sentence and
+    # none matched, because the sentence omitted that each tier line is
+    # rendered as `key=value`.
     #
-    # This hashes OPEN_LINE plus both tier lines: every part that is ours,
-    # nothing that varies per run. It moves if and only if the wording moves,
-    # which is the only thing a pin is for. A wording change must come here and
-    # be deliberate, rather than being discovered as a sha mismatch mid-run.
-    _parts = bc.OPEN_LINE + "\n" + "\n".join(
-        "%s=%s" % kv for kv in sorted(bc.TIER_LINES.items()))
-    _pin = hashlib.sha256(_parts.encode("utf-8")).hexdigest()[:16]
+    # So the leg CALLS brief_pin() rather than rebuilding it. A check that
+    # reconstructs the thing it checks is a second implementation that agrees
+    # with the first only until someone edits one of them — which is how the
+    # prose recipe failed, one level up.
+    _pin = bc.brief_pin()
     leg("L18 brief_wording_is_pinned_without_the_user_slot",
-        _pin == "83d8019f2cb57a45",
-        "%s (expected 83d8019f2cb57a45 — if this moved, the wording moved)" % _pin)
+        _pin == "83d8019f2cb57a45" and "asked for" not in bc.brief_pin_material(),
+        "%s (expected 83d8019f2cb57a45; material excludes the user slot)" % _pin)
+
+    # L19 AND THE MATERIAL IS OBTAINABLE, WHICH IS WHAT MAKES A MISMATCH
+    # DEBUGGABLE. Two trees comparing digests can only say "different"; two
+    # trees comparing brief_pin_material() can diff two strings and see WHERE.
+    leg("L19 the_pinned_material_is_readable_not_described",
+        callable(getattr(bc, "brief_pin_material", None))
+        and bc.OPEN_LINE in bc.brief_pin_material()
+        and all(v in bc.brief_pin_material() for v in bc.TIER_LINES.values()),
+        "%d chars, open line + %d tier line(s)"
+        % (len(bc.brief_pin_material()), len(bc.TIER_LINES)))
 
     print("%d/%d legs ok" % (NLEGS - len(FAILS), NLEGS))
     if FAILS:
