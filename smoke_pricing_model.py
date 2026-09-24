@@ -168,13 +168,31 @@ def main():
         _conf is True and _sl is not None,
         "slope %.4f/s intercept %.3f CONFOUNDED=%s" % (_sl, _ic, _conf))
 
-    # L15 AND THE RANGE IS WHAT THEY ACTUALLY SUPPORT. A floor and a ceiling
-    # need no model; a slope needs one, and we do not have it yet.
+    # L15 THE RANGE BRACKETS EVERY POINT — a property, not a count.
+    #
+    # THIS LEG PINNED `len(MEASURED_EDITS) == 2` AND FIRED THE MOMENT A THIRD
+    # POINT ARRIVED. It was defending a DECISION (there are two points) rather
+    # than a property (the range covers them all), and the decision was always
+    # going to change — the two-point note in pricing_model.py literally asks
+    # for a third. A check that encodes a decision goes red on the success it
+    # was written to wait for.
     _lo, _hi = P.measured_credit_range()
-    leg("L15 measured_range_brackets_both_points",
-        _lo == 1.66 and _hi == 2.64 and len(P.MEASURED_EDITS) == 2,
+    _all = [row[0] for row in P.MEASURED_EDITS]
+    leg("L15 measured_range_brackets_every_point",
+        len(P.MEASURED_EDITS) >= 2 and _lo == min(_all) and _hi == max(_all),
         "%.2f..%.2f ChatCut credits over %d measured edit(s)"
         % (_lo, _hi, len(P.MEASURED_EDITS)))
+
+    # L16 THE ONE ISOLATED COMPARISON IS REPORTED AS ISOLATED.
+    # Rows sharing duration AND orientation differ only in the request, which
+    # is the single-variable pair the two-point note asked for. It must be
+    # assembled from rows that genuinely match, never by relaxing the
+    # criterion until two rows qualify — that is the confound again.
+    _d = P.request_shape_delta()
+    leg("L16 request_shape_is_isolated_on_a_matched_pair",
+        _d is not None and abs(_d[2] - 0.62) < 0.005,
+        "%.2f -> %.2f on identical source, delta %+.2f credits"
+        % (_d[0], _d[1], -_d[2]) if _d else "no matched pair")
 
     print("%d/%d legs ok" % (NLEGS - len(FAILS), NLEGS))
     if FAILS:

@@ -250,10 +250,52 @@ def break_even_conversion(tier, c, usd_per_credit, cut):
 # or a vertical one at ~56s; either one turns two confounded points into an
 # answer.
 MEASURED_EDITS = (
-    # (chatcut_credits, source_seconds, orientation, run)
-    (1.66, 20.4, "vertical", "funded run 1"),
-    (2.64, 55.9, "landscape", "funded run 1"),
+    # (chatcut_credits, source_seconds, orientation, run, request)
+    (1.66, 20.4, "vertical", "funded run 1",
+     "cut the dead air and make it punchy, and put captions on it"),
+    (2.64, 55.9, "landscape", "funded run 1",
+     "cut the dead air and make it punchy, and put captions on it"),
+    (1.04, 20.4, "vertical", "run 3b",
+     "make it hype with pop-up graphics and sound effects"),
 )
+
+# ── 3b IS THE THIRD POINT AND IT ISOLATES ONE VARIABLE ────────────────────
+#
+# Rows 1 and 3 share DURATION (20.4s) and ORIENTATION (vertical) and differ
+# only in the REQUEST. That is the separating run the two-point note asked
+# for, arriving from a direction nobody planned:
+#
+#     1.66 credits   "cut the dead air and make it punchy, and put captions on it"
+#     1.04 credits   "make it hype with pop-up graphics and sound effects"
+#
+# -0.62 credits, -37%, attributable to REQUEST SHAPE alone. And the sign is
+# the surprise: the graphics-heavy request that placed 6 graphics, 6 sounds
+# and 24 caption cards cost LESS than the one that placed none of them. Cost
+# is not tracking what was produced.
+#
+# WHAT IT DOES NOT SETTLE. Rows 1 and 2 still vary duration AND orientation
+# together, so the per-second slope remains confounded — one isolated pair
+# does not un-confound a different pair. CONFOUNDED stays True, and it is
+# computed from the two rows implied_per_second() actually reads rather than
+# from a feeling that we now know more.
+
+
+def request_shape_delta():
+    """-> (low, high, delta) over rows sharing duration AND orientation.
+
+    The one comparison in this table where a single variable moves. Returns
+    None when no such pair exists, rather than reaching for the nearest two
+    rows — a pair assembled by relaxing the criterion is the confound again.
+    """
+    by_source = {}
+    for c, s_, o, _run, req in MEASURED_EDITS:
+        by_source.setdefault((s_, o), []).append((c, req))
+    for _k, rows in sorted(by_source.items()):
+        if len(rows) >= 2:
+            lo = min(rows)[0]
+            hi = max(rows)[0]
+            return (lo, hi, hi - lo)
+    return None
 
 
 def measured_credit_range():
@@ -262,7 +304,7 @@ def measured_credit_range():
     NOT a model and deliberately not one. The range is what two points support;
     a slope is what they only appear to support.
     """
-    cs = [c for c, _s, _o, _r in MEASURED_EDITS]
+    cs = [row[0] for row in MEASURED_EDITS]
     return (min(cs), max(cs))
 
 
@@ -275,7 +317,8 @@ def implied_per_second():
     """
     if len(MEASURED_EDITS) < 2:
         return (None, None, True)
-    (c1, s1, o1, _), (c2, s2, o2, _) = MEASURED_EDITS[0], MEASURED_EDITS[1]
+    (c1, s1, o1, _r1, _q1), (c2, s2, o2, _r2, _q2) = (MEASURED_EDITS[0],
+                                                     MEASURED_EDITS[1])
     if s2 == s1:
         return (None, None, True)
     slope = (c2 - c1) / (s2 - s1)

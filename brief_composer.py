@@ -271,8 +271,21 @@ def user_slot(user_words):
 # open, so it opened the wrong one and correctly reported an absence. That is
 # the same failure as a capability the agent cannot NAME — a capability it
 # cannot FIND is equally indistinguishable from one that is not there.
+# RUN 3c NAMES THE CALL, approved by Zac 2026-09-24 as 3c's single variable.
+#
+# The previous line said the caption styles were "in your caption presets" —
+# a description of WHERE, and it was READ: run 3a's transcript says "Now let
+# me get the caption presets and apply them", and the agent then named a
+# BUILT-IN. Five runs, five built-ins, never preset_list.
+#
+# AND THE ASYMMETRY IS THE EVIDENCE. The same sentence names graphics, sounds
+# and caption styles. In 3b the agent found and used the first two perfectly —
+# 6 of 6 graphics ours, 5 of 5 components, 6 sounds — and still took 24
+# caption cards from a built-in. Graphics and sounds live in browse_assets;
+# the presets live in edit_captions' preset_list. The discriminator is the
+# SURFACE, not the wording, so the wording now names the surface.
 OPEN_LINE = ("Our project's graphics and sounds are in its assets, and our "
-             "caption styles are in your caption presets, here for you "
+             "caption styles are in edit_captions' preset_list, here for you "
              "alongside your own.")
 
 

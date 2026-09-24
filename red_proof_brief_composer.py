@@ -51,10 +51,10 @@ MUTATIONS = [
     # one carrying the pointer that was WRONG in production: the agent browsed
     # templates and never found the presets.
     ("a_family_drops_out_of_the_offer",
-     "\"caption styles are in your caption presets, here for you \"",
+     "\"caption styles are in edit_captions' preset_list, here for you \"",
      "\"here for you \"",
      "L10 every_family_is_named_in_the_open_line",
-     lambda s: "caption styles are in your caption presets" in s),
+     lambda s: "caption styles are in edit_captions' preset_list" in s),
     # THE PLACEHOLDER RETURNS for an empty brief.
     ("placeholder_returns_for_an_empty_brief",
      '    return "an edit of this video"',

@@ -172,8 +172,8 @@ def main():
     # prose recipe failed, one level up.
     _pin = bc.brief_pin()
     leg("L18 brief_wording_is_pinned_without_the_user_slot",
-        _pin == "83d8019f2cb57a45" and "asked for" not in bc.brief_pin_material(),
-        "%s (expected 83d8019f2cb57a45; material excludes the user slot)" % _pin)
+        _pin == "ce34adcf7df20a40" and "asked for" not in bc.brief_pin_material(),
+        "%s (expected ce34adcf7df20a40; material excludes the user slot)" % _pin)
 
     # L19 AND THE MATERIAL IS OBTAINABLE, WHICH IS WHAT MAKES A MISMATCH
     # DEBUGGABLE. Two trees comparing digests can only say "different"; two
