@@ -29,6 +29,7 @@ refuse to produce a green that is not earned, and carry its own denominator so
 it cannot silently shrink to a subset that always passes.
 """
 import os
+import shutil
 import subprocess
 import sys
 
@@ -105,7 +106,52 @@ def verdict(results):
     return 0, "%d/%d green" % (n, n)
 
 
+# ── THE EIGHTH WAY A MUTATION STOPS MUTATING: A STALE .pyc ────────────────
+#
+# Found by Builder 1, 2026-09-24, and invisible to every guard either of us
+# had. The anchor matches, the edit applies, the mutant is on disk — and the
+# CHILD PROCESS IMPORTS A CACHED BYTECODE FILE OF THE ORIGINAL. CPython
+# validates a cache on (mtime_seconds, size), so a mutation written in the
+# same second as the restore, landing near the original's length, defeats
+# both fields at once.
+#
+# IT WEARS THE WRONG COSTUME, WHICH IS WHAT MAKES IT EXPENSIVE. The symptom is
+# `rc=1 phrase=False` — our own signature for "a red that is not about the
+# property" — so the reflex is to re-aim a mutation that was never mis-aimed.
+#
+# `PYTHONDONTWRITEBYTECODE` IS THE WRONG GUARD AND SIX OF MY PROOFS CARRY IT.
+# It stops the child WRITING a cache; it does not stop it READING one that is
+# already there. Both halves are needed, and the clear has to come first.
+#
+# DONE HERE RATHER THAN IN 41 FILES. Forty-one red proofs mutate a .py module
+# and they do not share a shape — six have an _env(), seventeen pass an env at
+# all. Retrofitting each one is forty-one chances to get it wrong and no way
+# to tell that it stayed right. Every one of them runs through THIS loop, so
+# the cache is cleared once before any of them start and no child writes a new
+# one. B1's advice was to stop triaging and put it in unconditionally; his
+# resolver had already been wrong twice trying to separate the exposed
+# population, and mine would be too.
+def _clear_bytecode_caches():
+    """Remove every __pycache__ under HERE. Returns how many were removed."""
+    removed = 0
+    for root, dirs, _files in os.walk(HERE):
+        # do not descend into a worktree's own node_modules or .git
+        dirs[:] = [d for d in dirs if d not in (".git", "node_modules")]
+        if os.path.basename(root) == "__pycache__":
+            try:
+                shutil.rmtree(root)
+                removed += 1
+            except OSError:
+                pass
+    return removed
+
+
 def main():
+    _n_caches = _clear_bytecode_caches()
+    # PRINTED, because a guard nobody can see is a guard nobody maintains —
+    # and because "0 removed" on a clean tree is a different fact from the
+    # walk finding nothing.
+    print("  bytecode caches cleared: %d" % _n_caches)
     names = gates()
     gone = missing(names)
     if gone:
@@ -117,8 +163,13 @@ def main():
     for n in names:
         # Bare, no pipe. The status of a pipeline is the status of its LAST
         # command, and that has cost this repo four wrong readings.
+        # AND NO CHILD WRITES A NEW ONE. The clear above removes what exists;
+        # this stops the next proof in the loop from leaving a cache that the
+        # one after it could read.
+        _env = dict(os.environ)
+        _env["PYTHONDONTWRITEBYTECODE"] = "1"
         p = subprocess.run([sys.executable, os.path.join(HERE, n + ".py")],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, env=_env)
         results[n] = p.returncode
         print("  %-40s exit=%d" % (n, p.returncode))
         if p.returncode != 0:

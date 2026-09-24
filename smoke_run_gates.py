@@ -100,6 +100,27 @@ def main():
     leg("L5 missing_detects_an_absent_file",
         rg.missing([probe]) == [probe] and rg.missing(names[:1]) == [],
         "absent=%s present=%s" % (rg.missing([probe]), rg.missing(names[:1])))
+    # L_pyc THE BYTECODE CACHE IS CLEARED AND NO CHILD WRITES ONE.
+    #
+    # The eighth way a mutation stops mutating (B1, 2026-09-24): the anchor
+    # matches, the edit applies, the mutant is on disk, and the child imports
+    # a CACHED .pyc of the original. CPython validates on (mtime_seconds,
+    # size), so a same-second write near the original's length defeats both.
+    # It surfaces as `rc=1 phrase=False` — our signature for a red that is not
+    # about the property — so it reads as a mis-aimed mutation.
+    #
+    # BOTH HALVES ARE ASSERTED because either alone is insufficient:
+    # PYTHONDONTWRITEBYTECODE stops WRITING and not READING, which is why six
+    # proofs carrying it were never protected by it.
+    _src = open(os.path.join(HERE, "run_gates.py"), encoding="utf-8").read()
+    leg("L%d bytecode_cache_is_cleared_and_not_rewritten" % (NLEGS + 1),
+        "_clear_bytecode_caches()" in _src
+        and "__pycache__" in _src
+        and 'PYTHONDONTWRITEBYTECODE' in _src
+        and "env=_env" in _src,
+        "clear=%s no-write=%s"
+        % ("_clear_bytecode_caches()" in _src, "env=_env" in _src))
+
 
     print("%d/%d legs ok" % (NLEGS - len(FAILS), NLEGS))
     if FAILS:
