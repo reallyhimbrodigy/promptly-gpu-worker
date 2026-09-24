@@ -1,0 +1,107 @@
+[
+ {
+  "type": "Stamp",
+  "verdict": "DIFFERENT",
+  "cut": [
+   "distress",
+   "doubleRing",
+   "entryScale",
+   "fontKey",
+   "style",
+   "textShadow"
+  ],
+  "controlOk": true,
+  "diff": [
+   5,
+   12,
+   22,
+   36,
+   54
+  ]
+ },
+ {
+  "type": "PullQuote",
+  "verdict": "IDENTICAL",
+  "cut": [
+   "barColor",
+   "blurIn",
+   "fontKey",
+   "highlightTextColor",
+   "keywordColor",
+   "keywordScale",
+   "maxWordsPerLine",
+   "quoteMarkColor",
+   "showQuoteMark",
+   "textShadow",
+   "wordReveal",
+   "wordStagger"
+  ],
+  "controlOk": true,
+  "diff": []
+ },
+ {
+  "type": "PillMarquee",
+  "verdict": "IDENTICAL",
+  "cut": [
+   "colorMode",
+   "edgeFade",
+   "firstDirection",
+   "fontKey",
+   "gap",
+   "glass",
+   "paddingX",
+   "paddingY",
+   "rowGap",
+   "uppercase"
+  ],
+  "controlOk": true,
+  "diff": []
+ },
+ {
+  "type": "SectionDivider",
+  "verdict": "DIFFERENT",
+  "cut": [
+   "eyebrowColor",
+   "fontKey",
+   "numberColor",
+   "scrimColor",
+   "showScrim",
+   "showVignette",
+   "textShadow",
+   "vignetteStrength"
+  ],
+  "controlOk": true,
+  "diff": [
+   5,
+   12,
+   22,
+   36,
+   54
+  ]
+ },
+ {
+  "type": "DropCard",
+  "verdict": "IDENTICAL",
+  "cut": [
+   "mutedColor",
+   "railColor",
+   "spokenColor",
+   "titleLead"
+  ],
+  "controlOk": true,
+  "diff": []
+ },
+ {
+  "type": "ChatThread",
+  "verdict": "IDENTICAL",
+  "cut": [
+   "borderRadius",
+   "minHeight",
+   "showHomeIndicator",
+   "showStatusBar",
+   "statusBarTime"
+  ],
+  "controlOk": true,
+  "diff": []
+ }
+]

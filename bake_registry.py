@@ -38,7 +38,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import derive_prop_types                                       # noqa: E402
 import build_chatcut_registry as B                             # noqa: E402
-import flatten_spec                                            # noqa: E402
+import flatten_spec
+import knob_spec                                            # noqa: E402
 
 PORTED = os.path.join(HERE, "ported_mg")
 FIXTURES = os.path.join(HERE, "catalogue_props.json")
@@ -283,6 +284,25 @@ def build(verbose=True):
             baked = ["%s=FLATTENED(%s)" % (
                 "+".join(o["key"] for o in (_sp if isinstance(_sp, list) else [_sp])),
                 flat)] + baked
+        # ── CUT KNOBS (ruled 2026-09-24: <=6 per component) ───────────
+        # Removing the __mapped read is the whole cut: the component then
+        # receives undefined and ITS OWN parameter default applies, and the
+        # property is dropped because nothing reads it. The value does not
+        # change — that is asserted by render pair, not assumed.
+        _cut = knob_spec.CUT_KNOBS.get(n) or []
+        _cut_done = []
+        for _k in _cut:
+            _needle = "    %s: props.%s,\n" % (_k, _k)
+            if _needle in code:
+                code = code.replace(_needle, "")
+                _cut_done.append(_k)
+        if _cut and len(_cut_done) != len(_cut):
+            # WRONG POPULATION, SAID OUT LOUD. A key named for cutting that is
+            # not read in __mapped cannot be cut there, and a silent skip would
+            # leave the knob standing while the report said it was gone.
+            _missed = [k for k in _cut if k not in _cut_done]
+            print("  %-18s CUT MISSED: %s" % (n, ", ".join(_missed)))
+
         _dt = default_text_offenders(n, props)
         if _dt:
             refused[n] = {"reason": "DEFAULT_TEXT",

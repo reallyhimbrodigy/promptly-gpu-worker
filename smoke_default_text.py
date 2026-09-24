@@ -115,7 +115,15 @@ def main():
                     and isinstance(p.get("defaultValue"), str)
                     and p["defaultValue"].strip()):
                 chrome += 1
-    leg("L5 refusal_does_not_touch_chrome_defaults", chrome >= 14 and not off,
+    # THE PROPERTY IS "CHROME IS LEFT ALONE", NOT "THERE ARE FOURTEEN OF
+    # THEM". This pinned chrome >= 14 and went red when the <=6-knob ruling
+    # cut two chrome text defaults — PullQuote's textShadow and ChatThread's
+    # statusBarTime. The count was always going to fall as knobs are cut, so
+    # the leg was defending a DECISION and firing on the ruling working.
+    # Second time today a count-pin has done this; the floor is now only that
+    # the population is non-empty, because a leg over zero chrome defaults
+    # would assert nothing at all.
+    leg("L5 refusal_does_not_touch_chrome_defaults", chrome > 0 and not off,
         "%d non-slot text default(s) left alone" % chrome)
 
     # L6 THE REFUSAL FIRES. L1 is an assertion about today's artifact and
