@@ -62,8 +62,12 @@ MUTATIONS = [
     # StickyNotes' "5%", StepDivider's "STEP" — all light up, the check
     # arrives as a wave of red on working components, and it is reverted the
     # same day for being right about nothing.
+    # RE-AIMED 2026-09-24 when the live five gained the stricter rule. The
+    # scoping line moved from `if p["key"] in keys` to a conjunction carrying
+    # the strict branch, and the anchor guard caught it as anchor 0x rather
+    # than editing nothing quietly.
     ("scoping_widens_to_all_text", BAKE,
-     '        if p["key"] in keys',
+     '        if (p["key"] in keys or (strict and not _is_css_value(p.get("defaultValue"))))',
      '        if True',
      "L1 no_flattened_slot_carries_a_default",
      None),

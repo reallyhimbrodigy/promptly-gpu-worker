@@ -217,6 +217,36 @@ def main():
         "%d picture slot(s), %d with a default; registry types = %s"
         % (len(media), len(bad_media), types))
 
+    # L10 THE LIVE FIVE CARRY THE STRICTER RULE: every text key empty, not
+    # only the flatten-created slots. They come from the frame-composition
+    # lineage, which never went through the flattening work, and they carry
+    # SAMPLE COPY as registered defaults — "THIS IS THE PART THAT MATTERS",
+    # "ALEX RIVERA", "NOBODY TELLS YOU". A registered default IS the value on
+    # every placement that does not override it.
+    #
+    # DRIVEN, NOT ASSERTED ON TODAY'S ARTIFACT. Stamp is currently clean, so a
+    # leg that only read it would pass with the rule switched off entirely —
+    # the zero-offenders-and-a-blind-check problem this file already carries.
+    _probe = [{"key": "text", "type": "text",
+               "defaultValue": "THIS IS THE PART THAT MATTERS"},
+              {"key": "textShadow", "type": "text",
+               "defaultValue": "0 1px 2px rgba(0,0,0,0.35)"}]
+    _live = bk.default_text_offenders("Stamp", _probe)
+    _other = bk.default_text_offenders("BarRace", _probe)
+    leg("L10 the_live_five_refuse_every_text_default",
+        len(_live) == 1 and _live[0].startswith("text=") and _other == [],
+        "live five -> %s | non-live -> %s" % (_live, _other or "unchanged"))
+
+    # L11 AND CSS IS NOT COPY. textShadow is type `text` and holds
+    # "0 1px 2px rgba(...)"; emptying it removes a drop shadow rather than a
+    # sentence. Named as an exception rather than carved out silently.
+    leg("L11 a_css_valued_text_default_is_not_sample_copy",
+        bk._is_css_value("0 1px 2px rgba(0,0,0,0.35)")
+        and bk._is_css_value("none") and bk._is_css_value("5%")
+        and not bk._is_css_value("THIS IS THE PART THAT MATTERS")
+        and not bk._is_css_value("ALEX RIVERA"),
+        "CSS recognised, sentences not")
+
     print("%d/%d legs ok" % (NLEGS - len(FAILS), NLEGS))
     if FAILS:
         print("FAILED: %s" % ", ".join(FAILS))

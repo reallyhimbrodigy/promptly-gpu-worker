@@ -200,12 +200,57 @@ def flattened_keys(name):
 # StepDivider's "STEP" — and a blanket rule would arrive as a wave of red on
 # working components and be reverted the same day for being right about
 # nothing. Geometry is not copy, and a slot the user fills is not chrome.
+# THE LIVE FIVE CARRY A STRICTER RULE (Zac, 2026-09-24): EVERY text key must
+# default to empty, not only the ones flattening created.
+#
+# WHY THEM SPECIFICALLY. They come from the frame-composition lineage, which
+# never went through the flattening work, and they carry SAMPLE COPY as
+# registered defaults. Read back from ChatCut's own inspect_asset on
+# 2026-09-21 and recorded in measured/REGISTERED_DEFAULTS.json:
+#
+#     PlainText     text                "THIS IS THE PART THAT MATTERS"
+#     CaptionMatch  text                "AND THAT CHANGES EVERYTHING"
+#     LowerThird    name                "ALEX RIVERA"
+#     QuoteCard     quote               "You don't need more time. You need
+#                                        fewer excuses."
+#     TornPaper     topText/bottomText  "NOBODY TELLS YOU"
+#     StickyNotes   notes               "Key takeaway|#FFE066|-3"
+#     EmojiCard     still               ""            <- already clean
+#
+# A registered default IS the value on every placement that does not override
+# it, so any prop their AI leaves alone ships that sentence on a customer's
+# video. That is baked copy exactly as this lane eliminated it, surviving in
+# the other lineage because the two registries were never one.
+#
+# CAVEAT ON THAT RECORD, AND IT MATTERS: it was read off project 6c0ca574,
+# which Zac ARCHIVED. MENU v1 is 3bfc23c2. So it describes what was registered
+# on 2026-09-21, not necessarily what is live now — the same
+# our-artifact-is-not-their-state distinction that has caught me twice. B1
+# should confirm against MENU v1 before it is treated as current.
+LIVE_FIVE = ("EmojiCard", "PlainText", "QuoteCard", "TornPaper", "Stamp")
+
+
+def _is_css_value(v):
+    """A text-typed default holding CSS rather than words.
+
+    `textShadow` is type `text` and holds "0 1px 2px rgba(0,0,0,0.35)".
+    Emptying it removes a drop shadow; it is not sample copy and nobody reads
+    it. Named here rather than carved out silently, because Zac's ruling says
+    "no exceptions for nice sample text" and this is an exception to the
+    LETTER of that while being the point of it — flagged to him rather than
+    decided quietly.
+    """
+    return bool(re.search(r'rgba?\(|\d+px|^none$|^\d+%$', str(v or ''), re.I))
+
+
 def default_text_offenders(name, props):
     keys = flattened_keys(name)
+    # On the live five the population is EVERY text key, not only the slots.
+    strict = name in LIVE_FIVE
     return sorted(
         "%s=%r" % (p["key"], p["defaultValue"])
         for p in props
-        if p["key"] in keys
+        if (p["key"] in keys or (strict and not _is_css_value(p.get("defaultValue"))))
         # TYPE text, NOT "the value happens to be a string". The first draft
         # asked only whether the default was a non-empty str, and a COLOUR
         # default is a non-empty str — so it refused EndCard and PillMarquee
