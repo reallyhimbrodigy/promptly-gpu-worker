@@ -38,21 +38,23 @@ MUTATIONS = [
      "L1 exactly_three_parts",
      lambda s: "your question reaches them" not in s),
     # THE OPEN LINE STARTS RESTRICTING. "only" turns an offer into a limit and
-    # reads as precision.
+    # reads as precision. RE-AIMED 2026-09-24 when the line gained the
+    # where-to-find-them pointer; the anchor guard caught it as anchor 0x.
     ("the_open_line_restricts",
-     'OPEN_LINE = ("Our project\'s graphics, caption styles and sounds are here for "\n'
-     '             "you alongside your own.")',
-     'OPEN_LINE = ("Use only our project\'s graphics, caption styles and sounds.")',
+     "OPEN_LINE = (\"Our project's graphics and sounds are in its assets, and our \"",
+     "OPEN_LINE = (\"Use only our project's graphics and sounds, and only our \"",
      "L9 brief_is_neutral_about_what_may_be_used",
      lambda s: "alongside your own" in s),
-    # A FAMILY DROPS OUT OF THE OFFER. RESTRICTS and PREFERS both stay zero,
-    # so only a per-family leg sees it — and the family that goes is the one
-    # nobody watches.
+    # A FAMILY DROPS OUT OF THE OFFER. RESTRICTS and PREFERS both stay zero, so
+    # only a per-family leg sees it — and the family that goes is the one
+    # nobody watches. Re-aimed onto the caption-styles clause, which is now the
+    # one carrying the pointer that was WRONG in production: the agent browsed
+    # templates and never found the presets.
     ("a_family_drops_out_of_the_offer",
-     '''OPEN_LINE = ("Our project's graphics, caption styles and sounds are here for "''',
-     '''OPEN_LINE = ("Our project's graphics and sounds are here for "''',
+     "\"caption styles are in your caption presets, here for you \"",
+     "\"here for you \"",
      "L10 every_family_is_named_in_the_open_line",
-     lambda s: "caption styles and sounds are here" in s),
+     lambda s: "caption styles are in your caption presets" in s),
     # THE PLACEHOLDER RETURNS for an empty brief.
     ("placeholder_returns_for_an_empty_brief",
      '    return "an edit of this video"',

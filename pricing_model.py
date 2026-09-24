@@ -223,6 +223,65 @@ def break_even_conversion(tier, c, usd_per_credit, cut):
     return subs / ACTIVE_POPULATION
 
 
+# ── THE FIRST MEASURED POINTS, FUNDED RUN 1 (2026-09-24) ──────────────────
+#
+# Real ChatCut credits consumed by one finished edit, read as the delta of two
+# credit reads across the run. These are the first non-hypothetical numbers in
+# this file.
+#
+#     credits   source      orientation
+#       1.66     20.4 s     vertical
+#       2.64     55.9 s     landscape
+#
+# TWO POINTS, AND THEY DIFFER IN TWO VARIABLES. The longer edit is also the
+# landscape one, so the 0.98-credit gap cannot be attributed to duration: an
+# orientation difference would produce the same table. Fitting a line through
+# them gives 1.10 + 0.0276/s with ZERO residual — because two points always
+# do — and a zero residual here is arithmetic, not agreement.
+#
+# This repo has the rule already: never infer a universal shape from one
+# sampled instance. Two instances that vary together are the same trap wearing
+# a second data point, and it is worse than one because it looks like a trend.
+#
+# SO THE FIT IS REPORTED AND NOT USED. What the two points DO establish, with
+# no model at all, is a floor and a ceiling for a typical edit — roughly 1.7 to
+# 2.6 credits — and that is enough to price against until a third point that
+# varies ONE variable arrives. The separating run is a landscape source at ~20s
+# or a vertical one at ~56s; either one turns two confounded points into an
+# answer.
+MEASURED_EDITS = (
+    # (chatcut_credits, source_seconds, orientation, run)
+    (1.66, 20.4, "vertical", "funded run 1"),
+    (2.64, 55.9, "landscape", "funded run 1"),
+)
+
+
+def measured_credit_range():
+    """-> (low, high) ChatCut credits per finished edit, from measurement only.
+
+    NOT a model and deliberately not one. The range is what two points support;
+    a slope is what they only appear to support.
+    """
+    cs = [c for c, _s, _o, _r in MEASURED_EDITS]
+    return (min(cs), max(cs))
+
+
+def implied_per_second():
+    """-> (slope, intercept, CONFOUNDED) from the two points, for reporting.
+
+    The third element is the point of the function: it is True whenever the
+    points do not isolate duration, and a caller that ignores it is quoting a
+    duration rate that may be an orientation rate.
+    """
+    if len(MEASURED_EDITS) < 2:
+        return (None, None, True)
+    (c1, s1, o1, _), (c2, s2, o2, _) = MEASURED_EDITS[0], MEASURED_EDITS[1]
+    if s2 == s1:
+        return (None, None, True)
+    slope = (c2 - c1) / (s2 - s1)
+    return (slope, c1 - slope * s1, o1 != o2)
+
+
 def our_credits_per_video(chatcut_credits_per_edit):
     """The x10 rule applied to the real number."""
     return math.ceil(chatcut_credits_per_edit * OUR_PER_THEIRS)

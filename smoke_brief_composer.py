@@ -77,10 +77,17 @@ def main():
         if not s2 or not re.search(FAMILY, s2, re.I):
             continue
         low = s2.lower()
-        if "alongside your own" in low or "here for you" in low:
-            rows.append(("FREES", s2))
-        elif re.search(RESTRICTS, low):
+        # RESTRICTS IS CHECKED FIRST, AND THE ORDER WAS THE HOLE. FREES used
+        # to win, so a sentence that said "use ONLY our graphics ... here for
+        # you alongside your own" was classified as an offer: the friendly
+        # tail masked the limit, and the leg passed the exact defect it
+        # exists to catch. Found by a red-proof mutation that applied
+        # cleanly and changed no verdict — the mutation was fine and the
+        # CHECK was wrong, which is the harder of the two to notice.
+        if re.search(RESTRICTS, low):
             rows.append(("RESTRICTS", s2))
+        elif "alongside your own" in low or "here for you" in low:
+            rows.append(("FREES", s2))
         elif re.search(PREFERS, low):
             rows.append(("PREFERS", s2))
         else:

@@ -157,6 +157,25 @@ def main():
         huge is None and fine is not None and 0 < fine < 1,
         "unaffordable -> %r, affordable -> %.1f%%" % (huge, fine * 100))
 
+    # L14 THE MEASURED POINTS SAY THEY ARE CONFOUNDED, AND KEEP SAYING IT.
+    # Funded run 1 gave two points differing in BOTH duration and orientation,
+    # so the 0.98-credit gap cannot be attributed to either. A two-point fit
+    # has ZERO residual by arithmetic, which reads exactly like agreement — so
+    # the flag is the load-bearing part, and a third point added without
+    # varying only ONE variable must not silently clear it.
+    _sl, _ic, _conf = P.implied_per_second()
+    leg("L14 the_two_measured_points_are_flagged_confounded",
+        _conf is True and _sl is not None,
+        "slope %.4f/s intercept %.3f CONFOUNDED=%s" % (_sl, _ic, _conf))
+
+    # L15 AND THE RANGE IS WHAT THEY ACTUALLY SUPPORT. A floor and a ceiling
+    # need no model; a slope needs one, and we do not have it yet.
+    _lo, _hi = P.measured_credit_range()
+    leg("L15 measured_range_brackets_both_points",
+        _lo == 1.66 and _hi == 2.64 and len(P.MEASURED_EDITS) == 2,
+        "%.2f..%.2f ChatCut credits over %d measured edit(s)"
+        % (_lo, _hi, len(P.MEASURED_EDITS)))
+
     print("%d/%d legs ok" % (NLEGS - len(FAILS), NLEGS))
     if FAILS:
         print("FAILED: %s" % ", ".join(FAILS))

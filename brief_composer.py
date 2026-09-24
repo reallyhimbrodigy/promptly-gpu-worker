@@ -221,8 +221,20 @@ def user_slot(user_words):
 # THE ONE SENTENCE ABOUT WHAT MAY BE USED. Ruled 2026-09-23: the project's
 # assets are OFFERED, not imposed and not restricted — "alongside your own" is
 # the whole neutrality ruling in three words.
-OPEN_LINE = ("Our project's graphics, caption styles and sounds are here for "
-             "you alongside your own.")
+# POINTS AT WHERE THINGS ACTUALLY ARE, AS OF 2026-09-24. The previous line
+# said the project's graphics, caption styles and sounds were "here" — true,
+# and useless, because the three do not live in one place. The agent browsed
+# TEMPLATES for the caption styles and found nothing: they are in
+# edit_captions' preset_list, not in the asset library.
+#
+# A POINTER THAT IS MERELY TRUE IS NOT A POINTER. "They are here" describes a
+# project the agent is already in and tells it nothing about which surface to
+# open, so it opened the wrong one and correctly reported an absence. That is
+# the same failure as a capability the agent cannot NAME — a capability it
+# cannot FIND is equally indistinguishable from one that is not there.
+OPEN_LINE = ("Our project's graphics and sounds are in its assets, and our "
+             "caption styles are in your caption presets, here for you "
+             "alongside your own.")
 
 
 def compose(user_words, tier=None):
