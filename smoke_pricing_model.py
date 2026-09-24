@@ -215,6 +215,30 @@ def main():
         "cap 0 -> %.2f..%.2f, cap 10 -> %.2f..%.2f (%.1fx)"
         % (_c0[0], _c0[1], _c10[0], _c10[1], _c10[1] / _c0[1]))
 
+    # L19 THE CEILING AND THE EXPECTATION ARE DIFFERENT NUMBERS AND BOTH ARE
+    # KEPT. cost_per_video(10) answers what a cap AUTHORISES (3.9x); the
+    # observed rate answers what it COSTS today (+0.3-2.3%). Collapsing them
+    # would either price the cap at nothing or refuse it as unaffordable, and
+    # both readings are available from one of the numbers alone.
+    _olo, _ohi = P.observed_reedit_cost_per_video()
+    _elo, _ehi = P.measured_credit_range()
+    _clo, _chi = P.cost_per_video(10)
+    leg("L19 observed_cost_is_not_the_ceiling",
+        _ohi < 0.1 and _chi / _ehi > 3.0 and P.OBSERVED_REEDITS["at_or_over_cap_10"] == 0,
+        "observed %.3f..%.3f/video vs ceiling %.2f..%.2f at cap 10"
+        % (_olo, _ohi, _clo, _chi))
+
+    # L20 THE DISTRIBUTION IS COUNTED PER ROOT, and the record says so. Per
+    # PARENT the same window reads 88 videos / p90 2 / max 4; per ROOT it is
+    # 69 / 3 / 6. The per-parent count understates the tail, which is exactly
+    # the population a cap is about.
+    leg("L20 the_reedit_distribution_is_counted_per_root_video",
+        "root" in P.OBSERVED_REEDITS.get("counted_per", "")
+        and P.OBSERVED_REEDITS["p90"] == 3 and P.OBSERVED_REEDITS["max"] == 6,
+        "%s | p90=%d max=%d"
+        % (P.OBSERVED_REEDITS["counted_per"], P.OBSERVED_REEDITS["p90"],
+           P.OBSERVED_REEDITS["max"]))
+
     print("%d/%d legs ok" % (NLEGS - len(FAILS), NLEGS))
     if FAILS:
         print("FAILED: %s" % ", ".join(FAILS))

@@ -316,6 +316,64 @@ MEASURED_REEDITS = (
 )
 
 
+# ── AND WHAT USERS ACTUALLY DO, WHICH IS NOT THE CEILING ──────────────────
+#
+# Measured 2026-09-24 over 30 days, COUNTED PER ROOT VIDEO rather than per
+# parent — and the distinction changed the numbers, which is why it is worth
+# the recursive walk. parent_job_id chains re-edit to re-edit (depth 4 in
+# production), so counting per parent splits one video's history across
+# several rows:
+#
+#                       per PARENT      per ROOT
+#     videos re-edited        88            69
+#     rate                  2.7%          2.1%
+#     p90                      2             3
+#     max                      4             6
+#
+# The per-parent count UNDERSTATES the tail — it hides the videos that were
+# re-edited repeatedly, which are exactly the ones a cap is about.
+#
+#     3,307 first edits, 104 re-edits, 69 videos re-edited (2.1%)
+#     when re-edited: mean 1.51, p50 1, p90 3, p99 6, max 6
+#     videos at or over a cap of 10: ZERO
+#
+# SO THE CEILING AND THE EXPECTATION ARE TWO DIFFERENT NUMBERS AND BOTH BELONG
+# IN THE FILE. cost_per_video() answers "what does a cap of N authorise" and
+# reads 3.9x at ten. This answers "what does it cost today" and reads +1-2%:
+# 104 re-edits across 3,307 videos is 0.031 re-edits per video, or 0.009-0.024
+# credits against 1.04-1.66 for the edit.
+#
+# A cap of ten is therefore safe on today's behaviour AND expensive if
+# behaviour changes, and those are not in tension — they are the two things a
+# cap is for. Instant re-edits are expected to raise usage, so the
+# distribution is a WEEKLY read, not a settled fact: scripts/reedit_usage.sql
+# re-runs it.
+OBSERVED_REEDITS = {
+    "window_days": 30,
+    "as_of": "2026-09-24",
+    "counted_per": "root video (recursive walk of parent_job_id)",
+    "first_edits": 3307,
+    "reedits": 104,
+    "videos_reedited": 69,
+    "rate_of_videos": 0.0209,
+    "mean_when_reedited": 1.51,
+    "p50": 1, "p90": 3, "p99": 6, "max": 6,
+    "at_or_over_cap_10": 0,
+}
+
+
+def observed_reedit_cost_per_video():
+    """-> (low, high) ChatCut credits of re-edit cost per video TODAY.
+
+    The expectation, not the authorisation. Uses the measured rate rather than
+    the cap, which is the whole distinction: cost_per_video(10) is 3.9x and
+    this is +1-2%.
+    """
+    per_video = OBSERVED_REEDITS["reedits"] / float(OBSERVED_REEDITS["first_edits"])
+    lo, hi = reedit_range()
+    return (per_video * lo, per_video * hi)
+
+
 def reedit_range():
     """-> (low, high) ChatCut credits per re-edit, measured only."""
     cs = [c for c, _w, _r in MEASURED_REEDITS]
