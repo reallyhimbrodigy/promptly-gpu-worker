@@ -13,6 +13,7 @@ are removed rather than loosened, because a leg kept alive over content that
 no longer exists is a leg asserting nothing while still printing ok.
 """
 import os
+import hashlib
 import re
 import sys
 
@@ -155,6 +156,25 @@ def main():
     # L17 SIMPLE MEANS SHORT, AND THE LENGTH IS REPORTED RATHER THAN CAPPED.
     n = len(text.split())
     leg("L17 brief_length_is_reported", n > 0, "%d words" % n)
+
+    # L18 THE BRIEF HAS A PIN, AND IT IS OVER THE PARTS THAT ARE OURS.
+    #
+    # I posted a sha for the new pointer line and B1 could not reproduce it,
+    # correctly refused to run a funded arm on it, and was right: I had hashed
+    # the WHOLE composed instruction, which contains the USER'S WORDS. It
+    # pinned one composition of one input and nothing else — a per-run value
+    # presented as an identity for the brief.
+    #
+    # This hashes OPEN_LINE plus both tier lines: every part that is ours,
+    # nothing that varies per run. It moves if and only if the wording moves,
+    # which is the only thing a pin is for. A wording change must come here and
+    # be deliberate, rather than being discovered as a sha mismatch mid-run.
+    _parts = bc.OPEN_LINE + "\n" + "\n".join(
+        "%s=%s" % kv for kv in sorted(bc.TIER_LINES.items()))
+    _pin = hashlib.sha256(_parts.encode("utf-8")).hexdigest()[:16]
+    leg("L18 brief_wording_is_pinned_without_the_user_slot",
+        _pin == "83d8019f2cb57a45",
+        "%s (expected 83d8019f2cb57a45 — if this moved, the wording moved)" % _pin)
 
     print("%d/%d legs ok" % (NLEGS - len(FAILS), NLEGS))
     if FAILS:
